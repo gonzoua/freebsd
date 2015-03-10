@@ -389,7 +389,8 @@ am335x_prcm_probe(device_t dev)
 	if (!ofw_bus_status_okay(dev))
 		return (ENXIO);
 
-	if (ofw_bus_is_compatible(dev, "am335x,prcm")) {
+	if (ofw_bus_is_compatible(dev, "am335x,prcm") ||
+	    ofw_bus_is_compatible(dev, "ti,am3-prcm")) {
 		device_set_desc(dev, "AM335x Power and Clock Management");
 		return(BUS_PROBE_DEFAULT);
 	}
@@ -417,10 +418,15 @@ am335x_prcm_attach(device_t dev)
 	am335x_prcm_sc = sc;
 	ti_cpu_reset = am335x_prcm_reset;
 
-	am335x_clk_get_sysclk_freq(NULL, &sysclk);
-	am335x_clk_get_arm_fclk_freq(NULL, &fclk);
-	device_printf(dev, "Clocks: System %u.%01u MHz, CPU %u MHz\n",
-		sysclk/1000000, (sysclk % 1000000)/100000, fclk/1000000);
+	if (am335x_clk_get_sysclk_freq(NULL, &sysclk) != 0)
+		sysclk = 0;
+	if (am335x_clk_get_arm_fclk_freq(NULL, &fclk) != 0)
+		fclk = 0;
+	if (sysclk && fclk)
+		device_printf(dev, "Clocks: System %u.%01u MHz, CPU %u MHz\n",
+		    sysclk/1000000, (sysclk % 1000000)/100000, fclk/1000000);
+	else
+		device_printf(dev, "can't read frequencies yet (SCM device not ready?)\n");
 
 	return (0);
 }
