@@ -422,7 +422,8 @@ ti_scm_probe(device_t dev)
 	if (!ofw_bus_status_okay(dev))
 		return (ENXIO);
 
-	if (!ofw_bus_is_compatible(dev, "ti,scm"))
+	if (!ofw_bus_is_compatible(dev, "ti,scm") &&
+	    !ofw_bus_is_compatible(dev, "ti,am33xx-controlmodule"))
 		return (ENXIO);
 
 	device_set_desc(dev, "TI Control Module");
