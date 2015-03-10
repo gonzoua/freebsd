@@ -74,7 +74,8 @@ fdt_aintc_decode_ic(phandle_t node, pcell_t *intr, int *interrupt, int *trig,
     int *pol)
 {
 
-	if (!fdt_is_compatible(node, "ti,aintc"))
+	if (!fdt_is_compatible(node, "ti,aintc") &&
+	    !fdt_is_compatible(node, "ti,am33xx-intc"))
 		return (ENXIO);
 
 	*interrupt = fdt32_to_cpu(intr[0]);
