@@ -549,9 +549,11 @@ cpsw_attach(device_t dev)
 	struct cpsw_softc *sc = device_get_softc(dev);
 	struct mii_softc *miisc;
 	struct ifnet *ifp;
-	void *phy_sc;
-	int error, phy, nsegs;
+	int phy, nsegs, error;
 	uint32_t reg;
+	pcell_t phy_id[3];
+	phandle_t child;
+	int len;
 
 	CPSW_DEBUGF((""));
 
@@ -559,11 +561,28 @@ cpsw_attach(device_t dev)
 	sc->dev = dev;
 	sc->node = ofw_bus_get_node(dev);
 
-	/* Get phy address from fdt */
-	if (fdt_get_phyaddr(sc->node, sc->dev, &phy, &phy_sc) != 0) {
+	/* TODO: handle multiple slaves */
+	phy = -1;
+
+	/* Find any slave with phy_id */
+	for (child = OF_child(sc->node); child != 0; child = OF_peer(child)) {
+		len = OF_getproplen(child, "phy_id");
+		if (len <= 0)
+			continue;
+
+		/* Get phy address from fdt */
+		if (OF_getencprop(child, "phy_id", phy_id, len) <= 0)
+			continue;
+
+		phy = fdt32_to_cpu(phy_id[1]);
+		break;
+	}
+
+	if (phy == -1) {
 		device_printf(dev, "failed to get PHY address from FDT\n");
 		return (ENXIO);
 	}
+
 	/* Initialize mutexes */
 	mtx_init(&sc->tx.lock, device_get_nameunit(dev),
 	    "cpsw TX lock", MTX_DEF);
