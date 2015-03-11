@@ -445,7 +445,7 @@ ti_scm_configure_pins(device_t dev, phandle_t cfgxref)
 		}
 
 		/* write the register value (16-bit writes) */
-		ti_scm_write_2(sc, 0x800 + cfg->reg, cfg->conf);
+		ti_scm_write_2(sc, cfg->reg, cfg->conf);
 	}
 
 	free(cfgtuples, M_OFWPROP);
@@ -460,12 +460,11 @@ ti_scm_configure_pins(device_t dev, phandle_t cfgxref)
 static int
 ti_scm_probe(device_t dev)
 {
-
 	if (!ofw_bus_status_okay(dev))
 		return (ENXIO);
 
 	if (!ofw_bus_is_compatible(dev, "ti,scm") &&
-	    !ofw_bus_is_compatible(dev, "ti,am33xx-controlmodule"))
+	    !ofw_bus_is_compatible(dev, "pinctrl-single"))
 		return (ENXIO);
 
 	device_set_desc(dev, "TI Control Module");
@@ -505,10 +504,8 @@ ti_scm_attach(device_t dev)
 
 	ti_scm_padconf_init_from_fdt(sc);
 
-	printf("--=========\n");
 	fdt_pinctrl_register(dev, "pinctrl-single,pins");
 	fdt_pinctrl_configure_tree(dev);
-	printf("--=========\n");
 
 	return (0);
 }
@@ -551,4 +548,4 @@ static driver_t ti_scm_driver = {
 
 static devclass_t ti_scm_devclass;
 
-DRIVER_MODULE(ti_scm, simplebus, ti_scm_driver, ti_scm_devclass, 0, 0);
+DRIVER_MODULE(ti_scm, ofwbus, ti_scm_driver, ti_scm_devclass, 0, 0);
