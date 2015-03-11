@@ -133,8 +133,7 @@ pinctrl_configure_children(device_t pinctrl, phandle_t parent)
 			    nconfigs, name);
 		}
 		for (i = 0; i < nconfigs; i++) {
-			if (OF_device_from_xref(configs[i]) == pinctrl)
-				FDT_PINCTRL_CONFIGURE(pinctrl, configs[i]);
+			FDT_PINCTRL_CONFIGURE(pinctrl, configs[i]);
 		}
 		free(configs, M_OFWPROP);
 	}
