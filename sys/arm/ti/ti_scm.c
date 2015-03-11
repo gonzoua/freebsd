@@ -64,11 +64,17 @@ __FBSDID("$FreeBSD$");
 #include <machine/resource.h>
 
 #include <dev/fdt/fdt_common.h>
+#include <dev/fdt/fdt_pinctrl.h>
 #include <dev/ofw/openfirm.h>
 #include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/ofw_bus_subr.h>
 
 #include "ti_scm.h"
+
+struct pincfg {
+	uint32_t reg;
+	uint32_t conf;
+};
 
 static struct resource_spec ti_scm_res_spec[] = {
 	{ SYS_RES_MEMORY,	0,	RF_ACTIVE },	/* Control memory window */
@@ -411,6 +417,42 @@ ti_scm_padconf_init_from_fdt(struct ti_scm_softc *sc)
 	return (0);
 }
 
+static int
+ti_scm_configure_pins(device_t dev, phandle_t cfgxref)
+{
+	struct pincfg *cfgtuples, *cfg;
+	phandle_t cfgnode;
+	int i, ntuples;
+	static struct ti_scm_softc *sc;
+
+	sc = device_get_softc(dev);
+	cfgnode = OF_node_from_xref(cfgxref);
+	ntuples = OF_getencprop_alloc(cfgnode, "pinctrl-single,pins", sizeof(*cfgtuples),
+	    (void **)&cfgtuples);
+
+	if (ntuples < 0)
+		return (ENOENT);
+
+	if (ntuples == 0)
+		return (0); /* Empty property is not an error. */
+
+	for (i = 0, cfg = cfgtuples; i < ntuples; i++, cfg++) {
+		if (bootverbose) {
+			char name[32]; 
+			OF_getprop(cfgnode, "name", &name, sizeof(name));
+			printf("%16s: muxreg 0x%04x muxval 0x%02x\n",
+			    name, cfg->reg, cfg->conf);
+		}
+
+		/* write the register value (16-bit writes) */
+		ti_scm_write_2(sc, 0x800 + cfg->reg, cfg->conf);
+	}
+
+	free(cfgtuples, M_OFWPROP);
+
+	return (0);
+}
+
 /*
  * Device part of OMAP SCM driver
  */
@@ -463,6 +505,11 @@ ti_scm_attach(device_t dev)
 
 	ti_scm_padconf_init_from_fdt(sc);
 
+	printf("--=========\n");
+	fdt_pinctrl_register(dev, "pinctrl-single,pins");
+	fdt_pinctrl_configure_tree(dev);
+	printf("--=========\n");
+
 	return (0);
 }
 
@@ -490,6 +537,9 @@ ti_scm_reg_write_4(uint32_t reg, uint32_t val)
 static device_method_t ti_scm_methods[] = {
 	DEVMETHOD(device_probe,		ti_scm_probe),
 	DEVMETHOD(device_attach,	ti_scm_attach),
+
+        /* fdt_pinctrl interface */
+	DEVMETHOD(fdt_pinctrl_configure, ti_scm_configure_pins),
 	{ 0, 0 }
 };
 
