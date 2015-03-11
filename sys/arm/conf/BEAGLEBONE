@@ -163,7 +163,9 @@ device		axe			# ASIX Electronics USB Ethernet
 device		usb_template    	# Control of the gadget
 device		usfs
 
+device		fdt_pinctrl
+
 # Flattened Device Tree
 options 	FDT			# Configure using FDT/DTB data
 options 	FDT_DTB_STATIC
-makeoptions	FDT_DTS_FILE=beaglebone.dts
+makeoptions	FDT_DTS_FILE=am335x-boneblack.dts
