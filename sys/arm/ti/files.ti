@@ -16,6 +16,7 @@ arm/ti/ti_cpuid.c				standard
 arm/ti/ti_machdep.c				standard
 arm/ti/ti_prcm.c				standard
 arm/ti/ti_scm.c					standard
+arm/ti/ti_pinmux.c				standard
 dev/mbox/mbox_if.m				optional	ti_mbox
 arm/ti/ti_mbox.c				optional	ti_mbox
 arm/ti/ti_pruss.c				optional	ti_pruss
