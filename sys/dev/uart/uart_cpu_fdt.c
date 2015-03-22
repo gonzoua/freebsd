@@ -84,7 +84,7 @@ uart_fdt_get_shift(phandle_t node, pcell_t *cell)
 	pcell_t shift;
 
 	if ((OF_getprop(node, "reg-shift", &shift, sizeof(shift))) <= 0)
-		shift = 0;
+		shift = 2;
 	*cell = fdt32_to_cpu(shift);
 	return (0);
 }
@@ -179,7 +179,7 @@ uart_cpu_getdev(int devtype, struct uart_devinfo *di)
 	class = (struct uart_class *)cd->ocd_data;
 
 	di->bas.chan = 0;
-	di->bas.regshft = (u_int)shift;
+	di->bas.regshft = 2; //(u_int)shift;
 	di->baudrate = br;
 	di->bas.rclk = (u_int)rclk;
 	di->ops = uart_getops(class);

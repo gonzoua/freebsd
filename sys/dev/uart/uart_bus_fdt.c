@@ -86,6 +86,7 @@ static struct ofw_compat_data compat_data[] = {
 	{"lpc,uart",		(uintptr_t)&uart_lpc_class},
 	{"qcom,msm-uartdm",	(uintptr_t)&uart_msm_class},
 	{"ti,ns16550",		(uintptr_t)&uart_ti8250_class},
+	{"ti,omap3-uart",	(uintptr_t)&uart_ti8250_class},
 	{"ns16550",		(uintptr_t)&uart_ns8250_class},
 	{NULL,			(uintptr_t)NULL},
 };

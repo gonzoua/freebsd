@@ -96,6 +96,11 @@ ti8250_bus_probe(struct uart_softc *sc)
 	if ((status = ti_prcm_clk_enable(clkid)) != 0)
 		return (status);
 
+	/* 
+	 * TI's FDT does not provide value for reg-shift, so use hardcoded one
+	 */
+	sc->sc_bas.regshft = 2;
+
 	/*
 	 * Set the hardware to disabled mode, do a full device reset, then set
 	 * it to uart mode.  Most devices will be reset-and-disabled already,
