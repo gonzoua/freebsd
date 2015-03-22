@@ -195,8 +195,7 @@ DRIVER_MODULE(miibus, cpsw, miibus_driver, miibus_devclass, 0, 0);
 MODULE_DEPEND(cpsw, ether, 1, 1, 1);
 MODULE_DEPEND(cpsw, miibus, 1, 1, 1);
 
-static struct resource_spec res_spec[] = {
-	{ SYS_RES_MEMORY, 0, RF_ACTIVE },
+static struct resource_spec irq_res_spec[] = {
 	{ SYS_RES_IRQ, 0, RF_ACTIVE | RF_SHAREABLE },
 	{ SYS_RES_IRQ, 1, RF_ACTIVE | RF_SHAREABLE },
 	{ SYS_RES_IRQ, 2, RF_ACTIVE | RF_SHAREABLE },
@@ -322,21 +321,21 @@ cpsw_debugf(const char *fmt, ...)
 /*
  * Read/Write macros
  */
-#define	cpsw_read_4(sc, reg)		bus_read_4(sc->res[0], reg)
-#define	cpsw_write_4(sc, reg, val)	bus_write_4(sc->res[0], reg, val)
+#define	cpsw_read_4(sc, reg)		bus_read_4(sc->mem_res, reg)
+#define	cpsw_write_4(sc, reg, val)	bus_write_4(sc->mem_res, reg, val)
 
 #define	cpsw_cpdma_bd_offset(i)	(CPSW_CPPI_RAM_OFFSET + ((i)*16))
 
 #define	cpsw_cpdma_bd_paddr(sc, slot)				\
-	BUS_SPACE_PHYSADDR(sc->res[0], slot->bd_offset)
+	BUS_SPACE_PHYSADDR(sc->mem_res, slot->bd_offset)
 #define	cpsw_cpdma_read_bd(sc, slot, val)				\
-	bus_read_region_4(sc->res[0], slot->bd_offset, (uint32_t *) val, 4)
+	bus_read_region_4(sc->mem_res, slot->bd_offset, (uint32_t *) val, 4)
 #define	cpsw_cpdma_write_bd(sc, slot, val)				\
-	bus_write_region_4(sc->res[0], slot->bd_offset, (uint32_t *) val, 4)
+	bus_write_region_4(sc->mem_res, slot->bd_offset, (uint32_t *) val, 4)
 #define	cpsw_cpdma_write_bd_next(sc, slot, next_slot)			\
 	cpsw_write_4(sc, slot->bd_offset, cpsw_cpdma_bd_paddr(sc, next_slot))
 #define	cpsw_cpdma_read_bd_flags(sc, slot)		\
-	bus_read_2(sc->res[0], slot->bd_offset + 14)
+	bus_read_2(sc->mem_res, slot->bd_offset + 14)
 #define	cpsw_write_hdp_slot(sc, queue, slot)				\
 	cpsw_write_4(sc, (queue)->hdp_offset, cpsw_cpdma_bd_paddr(sc, slot))
 #define	CP_OFFSET (CPSW_CPDMA_TX_CP(0) - CPSW_CPDMA_TX_HDP(0))
@@ -552,6 +551,7 @@ cpsw_attach(device_t dev)
 	int phy, nsegs, error;
 	uint32_t reg;
 	pcell_t phy_id[3];
+	u_long mem_base, mem_size;
 	phandle_t child;
 	int len;
 
@@ -575,11 +575,21 @@ cpsw_attach(device_t dev)
 			continue;
 
 		phy = fdt32_to_cpu(phy_id[1]);
+		/* TODO: get memory window for MDIO */
+
 		break;
 	}
 
 	if (phy == -1) {
 		device_printf(dev, "failed to get PHY address from FDT\n");
+		return (ENXIO);
+	}
+
+	mem_base = 0;
+	mem_size = 0;
+
+	if (fdt_regsize(sc->node, &mem_base, &mem_size) != 0) {
+		device_printf(sc->dev, "no regs property in cpsw node node\n");
 		return (ENXIO);
 	}
 
@@ -589,10 +599,20 @@ cpsw_attach(device_t dev)
 	mtx_init(&sc->rx.lock, device_get_nameunit(dev),
 	    "cpsw RX lock", MTX_DEF);
 
-	/* Allocate IO and IRQ resources */
-	error = bus_alloc_resources(dev, res_spec, sc->res);
+	/* Allocate IRQ resources */
+	error = bus_alloc_resources(dev, irq_res_spec, sc->irq_res);
 	if (error) {
-		device_printf(dev, "could not allocate resources\n");
+		device_printf(dev, "could not allocate IRQ resources\n");
+		cpsw_detach(dev);
+		return (ENXIO);
+	}
+
+	sc->mem_rid = 0;
+	sc->mem_res = bus_alloc_resource(dev, SYS_RES_MEMORY, 
+	    &sc->mem_rid, mem_base, mem_base + CPSW_MEMWINDOW_SIZE -1,
+	    CPSW_MEMWINDOW_SIZE, RF_ACTIVE);
+	if (sc->mem_res == NULL) {
+		device_printf(sc->dev, "failed to allocate memory resource\n");
 		cpsw_detach(dev);
 		return (ENXIO);
 	}
@@ -709,11 +729,11 @@ cpsw_attach(device_t dev)
 	cpsw_write_4(sc, MDIOUSERPHYSEL0, 1 << 6 | (miisc->mii_phy & 0x1F));
 	
 	/* Note: We don't use sc->res[3] (TX interrupt) */
-	if (cpsw_attach_interrupt(sc, sc->res[1],
+	if (cpsw_attach_interrupt(sc, sc->irq_res[0],
 		cpsw_intr_rx_thresh, "CPSW RX threshold interrupt") ||
-	    cpsw_attach_interrupt(sc, sc->res[2],
+	    cpsw_attach_interrupt(sc, sc->irq_res[1],
 		cpsw_intr_rx, "CPSW RX interrupt") ||
-	    cpsw_attach_interrupt(sc, sc->res[4],
+	    cpsw_attach_interrupt(sc, sc->irq_res[3],
 		cpsw_intr_misc, "CPSW misc interrupt")) {
 		cpsw_detach(dev);
 		return (ENXIO);
@@ -780,7 +800,8 @@ cpsw_detach(device_t dev)
 	KASSERT(error == 0, ("Unable to destroy DMA tag"));
 
 	/* Free IO memory handler */
-	bus_release_resources(dev, res_spec, sc->res);
+	bus_release_resource(dev, SYS_RES_MEMORY, sc->mem_rid, sc->mem_res);
+	bus_release_resources(dev, irq_res_spec, sc->irq_res);
 
 	if (sc->ifp != NULL)
 		if_free(sc->ifp);
