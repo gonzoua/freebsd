@@ -619,8 +619,8 @@ ti_gpio_bank_init(device_t dev)
 
 	/* Enable the interface and functional clocks for the module. */
 	/* XXXGONZO: bank offset and hwmod here? */
-	ti_prcm_clk_enable(GPIO0_CLK + ti_first_gpio_bank() + 
-	    device_get_unit(dev));
+	sc->sc_bank = ti_first_gpio_bank() + device_get_unit(dev);
+	ti_prcm_clk_enable(GPIO0_CLK + sc->sc_bank);
 
 	/*
 	 * Read the revision number of the module.  TI don't publish the

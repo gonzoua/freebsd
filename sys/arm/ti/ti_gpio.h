@@ -57,6 +57,7 @@ struct ti_gpio_softc {
 	enum intr_trigger	*sc_irq_trigger;
 	enum intr_polarity	*sc_irq_polarity;
 
+	int			sc_bank;
 	int			sc_maxpin;
 	struct mtx		sc_mtx;
 
