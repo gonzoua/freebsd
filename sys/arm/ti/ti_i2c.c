@@ -815,7 +815,7 @@ ti_i2c_probe(device_t dev)
 
 	if (!ofw_bus_status_okay(dev))
 		return (ENXIO);
-	if (!ofw_bus_is_compatible(dev, "ti,i2c"))
+	if (!ofw_bus_is_compatible(dev, "ti,omap4-i2c"))
 		return (ENXIO);
 	device_set_desc(dev, "TI I2C Controller");
 
@@ -837,11 +837,8 @@ ti_i2c_attach(device_t dev)
 
 	/* Get the i2c device id from FDT. */
 	node = ofw_bus_get_node(dev);
-	if ((OF_getencprop(node, "i2c-device-id", &sc->device_id,
-	    sizeof(sc->device_id))) <= 0) {
-		device_printf(dev, "missing i2c-device-id attribute in FDT\n");
-		return (ENXIO);
-	}
+	/* XXXGONZO: use hwmods here */
+	sc->device_id = device_get_unit(dev);
 
 	/* Get the memory resource for the register mapping. */
 	rid = 0;
