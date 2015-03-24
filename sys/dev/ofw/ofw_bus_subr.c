@@ -97,6 +97,13 @@ ofw_bus_gen_child_pnpinfo_str(device_t cbdev, device_t child, char *buf,
 	return (0);
 };
 
+const struct ofw_bus_devinfo *
+ofw_bus_gen_get_devinfo(device_t bus, device_t dev)
+{
+
+	return OFW_BUS_GET_DEVINFO(device_get_parent(bus), dev);
+}
+
 const char *
 ofw_bus_gen_get_compat(device_t bus, device_t dev)
 {
