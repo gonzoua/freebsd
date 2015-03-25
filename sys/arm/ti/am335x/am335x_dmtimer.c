@@ -624,7 +624,6 @@ am335x_dmtimer_attach(device_t dev)
 
 	if (enable) {
 		/* Enable clocks and power on the chosen devices. */
-		/* XXXGONZO: use hwmods here */
 		timer_id = ti_hwmods_get_unit(dev, "timer");
 		if (timer_id < 0) {
 			device_printf(dev, "failed to get device id using ti,hwmods\n");
