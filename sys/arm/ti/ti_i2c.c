@@ -66,6 +66,7 @@ __FBSDID("$FreeBSD$");
 #include <dev/ofw/ofw_bus_subr.h>
 
 #include <arm/ti/ti_cpuid.h>
+#include <arm/ti/ti_hwmods.h>
 #include <arm/ti/ti_prcm.h>
 #include <arm/ti/ti_i2c.h>
 
@@ -81,7 +82,7 @@ __FBSDID("$FreeBSD$");
 struct ti_i2c_softc
 {
 	device_t		sc_dev;
-	uint32_t		device_id;
+	int			device_id;
 	struct resource*	sc_irq_res;
 	struct resource*	sc_mem_res;
 	device_t		sc_iicbus;
@@ -837,8 +838,12 @@ ti_i2c_attach(device_t dev)
 
 	/* Get the i2c device id from FDT. */
 	node = ofw_bus_get_node(dev);
-	/* XXXGONZO: use hwmods here */
-	sc->device_id = device_get_unit(dev);
+	/* i2c ti,hwmods bindings is special: it start with index 1 */
+	sc->device_id = ti_hwmods_get_unit(dev, "i2c") - 1;
+	if (sc->device_id < 0) {
+		device_printf(dev, "failed to get device id using ti,hwmod\n");
+		return (ENXIO);
+	}
 
 	/* Get the memory resource for the register mapping. */
 	rid = 0;
