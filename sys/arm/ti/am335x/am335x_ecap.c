@@ -77,7 +77,6 @@ static device_detach_t am335x_ecap_detach;
         
 struct am335x_ecap_softc {
 	device_t		sc_dev;
-	int			sc_id;
 	struct mtx		sc_mtx;
 	struct resource		*sc_mem_res;
 	int			sc_mem_rid;
@@ -161,9 +160,6 @@ am335x_ecap_attach(device_t dev)
 
 	sc = device_get_softc(dev);
 	sc->sc_dev = dev;
-
-	/* XXXGONZO: usw hwmods */
-	sc->sc_id = device_get_unit(dev);
 
 	PWM_LOCK_INIT(sc);
 

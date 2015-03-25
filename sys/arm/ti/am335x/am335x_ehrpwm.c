@@ -141,7 +141,6 @@ struct am335x_ehrpwm_softc {
 	struct mtx		sc_mtx;
 	struct resource		*sc_mem_res;
 	int			sc_mem_rid;
-	int			sc_id;
 	/* sysctl for configuration */
 	int			sc_pwm_clkdiv;
 	int			sc_pwm_freq;
@@ -357,8 +356,6 @@ am335x_ehrpwm_attach(device_t dev)
 
 	sc = device_get_softc(dev);
 	sc->sc_dev = dev;
-	/* XXXGONZO: use hwmods */
-	sc->sc_id = device_get_unit(dev);
 
 	PWM_LOCK_INIT(sc);
 
