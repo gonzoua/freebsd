@@ -242,7 +242,7 @@ am335x_lcd_sysctl_backlight(SYSCTL_HANDLER_ARGS)
 		backlight = 100;
 
 	LCD_LOCK(sc);
-	error = am335x_pwm_config_ecas(PWM_UNIT, PWM_PERIOD,
+	error = am335x_pwm_config_ecap(PWM_UNIT, PWM_PERIOD,
 	    backlight*PWM_PERIOD/100);
 	if (error == 0)
 		sc->sc_backlight = backlight;
@@ -676,7 +676,7 @@ am335x_lcd_attach(device_t dev)
 	    am335x_lcd_sysctl_backlight, "I", "LCD backlight");
 	sc->sc_backlight = 0;
 	/* Check if eCAS interface is available at this point */
-	if (am335x_pwm_config_ecas(PWM_UNIT,
+	if (am335x_pwm_config_ecap(PWM_UNIT,
 	    PWM_PERIOD, PWM_PERIOD) == 0)
 		sc->sc_backlight = 100;
 
