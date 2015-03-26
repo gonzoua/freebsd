@@ -70,7 +70,7 @@ struct uart_class {
 	struct uart_ops *uc_ops;	/* Low-level console operations. */
 	u_int	uc_range;		/* Bus space address range. */
 	u_int	uc_rclk;		/* Default rclk for this device. */
-	u_int	uc_regshift;		/* Default regshift for this device. */
+	u_int	uc_regshft;		/* Default regshift for this device. */
 };
 
 struct uart_softc {

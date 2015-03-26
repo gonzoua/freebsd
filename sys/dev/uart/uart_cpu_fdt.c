@@ -180,7 +180,7 @@ uart_cpu_getdev(int devtype, struct uart_devinfo *di)
 	class = (struct uart_class *)cd->ocd_data;
 
 	if (uart_fdt_get_shift(node, &shift) < 0)
-		shift = class->uc_regshift;
+		shift = class->uc_regshft;
 
 	di->bas.chan = 0;
 	di->bas.regshft = (u_int)shift;

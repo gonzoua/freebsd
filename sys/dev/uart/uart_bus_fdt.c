@@ -153,7 +153,7 @@ uart_fdt_probe(device_t dev)
 	if ((err = uart_fdt_get_clock(node, &clock)) != 0)
 		return (err);
 	if (uart_fdt_get_shift(node, &shift) < 0)
-		shift = sc->sc_class->uc_regshift;
+		shift = sc->sc_class->uc_regshft;
 
 	return (uart_bus_probe(dev, (int)shift, (int)clock, 0, 0));
 }

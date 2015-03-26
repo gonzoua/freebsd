@@ -137,6 +137,6 @@ struct uart_class uart_ti8250_class = {
 	.uc_ops = &uart_ns8250_ops,
 	.uc_range = 0x88,
 	.uc_rclk = 48000000,
-	.uc_regshift = 2
+	.uc_regshft = 2
 };
 
