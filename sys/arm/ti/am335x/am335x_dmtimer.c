@@ -487,7 +487,7 @@ static int
 am335x_dmtimer_system_compatible(device_t dev)
 {
 	phandle_t node;
-	
+
 	node = ofw_bus_get_node(dev);
 	if (OF_hasprop(node, "ti,timer-alwon"))
 		return (0);

@@ -54,6 +54,5 @@ struct simplebus_devinfo {
 	struct resource_list	rl;
 };
 
-
 int simplebus_attach_children(device_t);
 #endif	/* _FDT_SIMPLEBUS_PRIVATE_H */

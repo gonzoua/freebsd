@@ -122,7 +122,7 @@ ti_pinmux_padconf_from_name(const char *ballname)
 			return(padconf);
 		padconf++;
 	}
-	
+
 	return (NULL);
 }
 
@@ -131,7 +131,7 @@ ti_pinmux_padconf_from_name(const char *ballname)
  *	@padconf: pointer to the pad structure
  *	@muxmode: the name of the mode to use for the pin, i.e. "uart1_rx"
  *	@state: the state to put the pad/pin in, i.e. PADCONF_PIN_???
- *	
+ *
  *
  *	LOCKING:
  *	Internally locks it's own context.
@@ -167,13 +167,13 @@ ti_pinmux_padconf_set_internal(struct ti_pinmux_softc *sc,
 
 	/* set the mux mode */
 	reg_val |= (uint16_t)(mode & ti_pinmux_dev.padconf_muxmode_mask);
-	
+
 	if (bootverbose)
-		device_printf(sc->sc_dev, "setting internal %x for %s\n", 
+		device_printf(sc->sc_dev, "setting internal %x for %s\n",
 		    reg_val, muxmode);
 	/* write the register value (16-bit writes) */
 	ti_pinmux_write_2(sc, padconf->reg_off, reg_val);
-	
+
 	return (0);
 }
 
@@ -182,7 +182,7 @@ ti_pinmux_padconf_set_internal(struct ti_pinmux_softc *sc,
  *	@padname: the name of the pad, i.e. "c12"
  *	@muxmode: the name of the mode to use for the pin, i.e. "uart1_rx"
  *	@state: the state to put the pad/pin in, i.e. PADCONF_PIN_???
- *	
+ *
  *
  *	LOCKING:
  *	Internally locks it's own context.
@@ -203,7 +203,7 @@ ti_pinmux_padconf_set(const char *padname, const char *muxmode, unsigned int sta
 	padconf = ti_pinmux_padconf_from_name(padname);
 	if (padconf == NULL)
 		return (EINVAL);
-	
+
 	return (ti_pinmux_padconf_set_internal(ti_pinmux_sc, padconf, muxmode, state));
 }
 
@@ -212,7 +212,7 @@ ti_pinmux_padconf_set(const char *padname, const char *muxmode, unsigned int sta
  *	@padname: the name of the pad, i.e. "c12"
  *	@muxmode: upon return will contain the name of the muxmode of the pin
  *	@state: upon return will contain the state of the pad/pin
- *	
+ *
  *
  *	LOCKING:
  *	Internally locks it's own context.
@@ -235,7 +235,7 @@ ti_pinmux_padconf_get(const char *padname, const char **muxmode,
 	padconf = ti_pinmux_padconf_from_name(padname);
 	if (padconf == NULL)
 		return (EINVAL);
-	
+
 	/* read the register value (16-bit reads) */
 	reg_val = ti_pinmux_read_2(ti_pinmux_sc, padconf->reg_off);
 
@@ -246,7 +246,7 @@ ti_pinmux_padconf_get(const char *padname, const char **muxmode,
 	/* save the mode */
 	if (muxmode)
 		*muxmode = padconf->muxmodes[(reg_val & ti_pinmux_dev.padconf_muxmode_mask)];
-	
+
 	return (0);
 }
 
@@ -255,7 +255,7 @@ ti_pinmux_padconf_get(const char *padname, const char **muxmode,
  *	@gpio: the GPIO pin number (0-195)
  *	@state: the state to put the pad/pin in, i.e. PADCONF_PIN_???
  *
- *	
+ *
  *
  *	LOCKING:
  *	Internally locks it's own context.
@@ -272,7 +272,7 @@ ti_pinmux_padconf_set_gpiomode(uint32_t gpio, unsigned int state)
 
 	if (!ti_pinmux_sc)
 		return (ENXIO);
-	
+
 	/* find the gpio pin in the padconf array */
 	padconf = ti_pinmux_dev.padconf;
 	while (padconf->ballname != NULL) {
@@ -300,7 +300,7 @@ ti_pinmux_padconf_set_gpiomode(uint32_t gpio, unsigned int state)
  *	@gpio: the GPIO pin number (0-195)
  *	@state: upon return will contain the state
  *
- *	
+ *
  *
  *	LOCKING:
  *	Internally locks it's own context.
@@ -317,7 +317,7 @@ ti_pinmux_padconf_get_gpiomode(uint32_t gpio, unsigned int *state)
 
 	if (!ti_pinmux_sc)
 		return (ENXIO);
-	
+
 	/* find the gpio pin in the padconf array */
 	padconf = ti_pinmux_dev.padconf;
 	while (padconf->ballname != NULL) {
@@ -330,15 +330,15 @@ ti_pinmux_padconf_get_gpiomode(uint32_t gpio, unsigned int *state)
 
 	/* read the current register settings */
 	reg_val = ti_pinmux_read_2(ti_pinmux_sc, padconf->reg_off);
-	
+
 	/* check to make sure the pins is configured as GPIO in the first state */
 	if ((reg_val & ti_pinmux_dev.padconf_muxmode_mask) != padconf->gpio_mode)
 		return (EINVAL);
-	
+
 	/* read and store the reset of the state, i.e. pull-up, pull-down, etc */
 	if (state)
 		*state = (reg_val & ti_pinmux_dev.padconf_sate_mask);
-	
+
 	return (0);
 }
 
@@ -346,7 +346,7 @@ ti_pinmux_padconf_get_gpiomode(uint32_t gpio, unsigned int *state)
  *	ti_pinmux_padconf_init_from_hints - processes the hints for padconf
  *	@sc: the driver soft context
  *
- *	
+ *
  *
  *	LOCKING:
  *	Internally locks it's own context.
@@ -438,7 +438,7 @@ ti_pinmux_configure_pins(device_t dev, phandle_t cfgxref)
 
 	for (i = 0, cfg = cfgtuples; i < ntuples; i++, cfg++) {
 		if (bootverbose) {
-			char name[32]; 
+			char name[32];
 			OF_getprop(cfgnode, "name", &name, sizeof(name));
 			printf("%16s: muxreg 0x%04x muxval 0x%02x\n",
 			    name, cfg->reg, cfg->conf);

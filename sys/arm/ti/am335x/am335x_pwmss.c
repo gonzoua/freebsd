@@ -63,7 +63,7 @@ __FBSDID("$FreeBSD$");
 static device_probe_t am335x_pwmss_probe;
 static device_attach_t am335x_pwmss_attach;
 static device_detach_t am335x_pwmss_detach;
-        
+
 struct am335x_pwmss_softc {
 	device_t		sc_dev;
 	int			sc_id;

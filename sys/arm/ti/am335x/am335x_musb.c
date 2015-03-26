@@ -155,7 +155,7 @@ musbotg_clocks_on(void *arg)
 {
 	struct musbotg_softc *sc;
 	uint32_t c, reg;
-	
+
 	sc = arg;
         reg = USB_CTRL[sc->sc_id];
 
@@ -171,7 +171,7 @@ musbotg_clocks_off(void *arg)
 {
 	struct musbotg_softc *sc;
 	uint32_t c, reg;
-	
+
 	sc = arg;
         reg = USB_CTRL[sc->sc_id];
 
@@ -229,7 +229,7 @@ musbotg_probe(device_t dev)
 		return (ENXIO);
 
 	device_set_desc(dev, "TI AM33xx integrated USB OTG controller");
-	
+
 	return (BUS_PROBE_DEFAULT);
 }
 
@@ -276,7 +276,7 @@ musbotg_attach(device_t dev)
 	/* get all DMA memory */
 	if (usb_bus_mem_alloc_all(&sc->sc_otg.sc_bus,
 	    USB_GET_DMA_TAG(dev), NULL)) {
-	    	device_printf(dev,
+		device_printf(dev,
 		    "Failed allocate bus mem for musb\n");
 		return (ENOMEM);
 	}
@@ -290,7 +290,7 @@ musbotg_attach(device_t dev)
 
 	sc->sc_otg.sc_bus.bdev = device_add_child(dev, "usbus", -1);
 	if (!(sc->sc_otg.sc_bus.bdev)) {
-	    	device_printf(dev, "No busdev for musb\n");
+		device_printf(dev, "No busdev for musb\n");
 		goto error;
 	}
 	device_set_ivars(sc->sc_otg.sc_bus.bdev,
@@ -302,7 +302,7 @@ musbotg_attach(device_t dev)
 	    &sc->sc_otg, &sc->sc_otg.sc_intr_hdl);
 	if (err) {
 		sc->sc_otg.sc_intr_hdl = NULL;
-	    	device_printf(dev,
+		device_printf(dev,
 		    "Failed to setup interrupt for musb\n");
 		goto error;
 	}
@@ -316,7 +316,7 @@ musbotg_attach(device_t dev)
 	/*
 	 * software-controlled function
 	 */
-		
+
 	if (sc->sc_otg.sc_mode == MUSB2_HOST_MODE) {
 		reg = USBCTRL_READ4(sc, USBCTRL_MODE);
 		reg |= USBCTRL_MODE_IDDIGMUX;

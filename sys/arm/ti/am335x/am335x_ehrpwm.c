@@ -133,7 +133,7 @@ __FBSDID("$FreeBSD$");
 static device_probe_t am335x_ehrpwm_probe;
 static device_attach_t am335x_ehrpwm_attach;
 static device_detach_t am335x_ehrpwm_detach;
-        
+
 static int am335x_ehrpwm_clkdiv[8] = { 1, 2, 4, 8, 16, 32, 64, 128 };
 
 struct am335x_ehrpwm_softc {
@@ -268,7 +268,7 @@ am335x_ehrpwm_sysctl_duty(SYSCTL_HANDLER_ARGS)
 	struct am335x_ehrpwm_softc *sc = (struct am335x_ehrpwm_softc*)arg1;
 	int error;
 	uint32_t duty;
-       
+
 	if (oidp == sc->sc_chanA_oid)
 		duty = sc->sc_pwm_dutyA;
 	else
@@ -303,7 +303,7 @@ am335x_ehrpwm_sysctl_period(SYSCTL_HANDLER_ARGS)
 	struct am335x_ehrpwm_softc *sc = (struct am335x_ehrpwm_softc*)arg1;
 	int error;
 	uint32_t period;
-       
+
 	period = sc->sc_pwm_period;
 	error = sysctl_handle_int(oidp, &period, 0, req);
 

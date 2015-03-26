@@ -74,7 +74,7 @@ __FBSDID("$FreeBSD$");
 static device_probe_t am335x_ecap_probe;
 static device_attach_t am335x_ecap_attach;
 static device_detach_t am335x_ecap_detach;
-        
+
 struct am335x_ecap_softc {
 	device_t		sc_dev;
 	struct mtx		sc_mtx;
@@ -99,7 +99,7 @@ static driver_t am335x_ecap_driver = {
 static devclass_t am335x_ecap_devclass;
 
 /*
- * API function to set period/duty cycles for ECAPx 
+ * API function to set period/duty cycles for ECAPx
  */
 int
 am335x_pwm_config_ecap(int unit, int period, int duty)
