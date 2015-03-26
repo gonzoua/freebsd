@@ -621,7 +621,7 @@ ti_gpio_bank_init(device_t dev)
 
 	/* Enable the interface and functional clocks for the module. */
 	hwmod = ti_hwmods_get_unit(dev, "gpio") - 1;
-	if (hwmod <= 0) {
+	if (hwmod < 0) {
 		device_printf(dev, "failed to get device id based on ti,hwmods\n");
 		return (EINVAL);
 	}
