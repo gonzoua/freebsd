@@ -142,6 +142,7 @@ static struct uart_class uart_ti8250_class = {
 };
 static struct ofw_compat_data compat_data[] = {
 	{"ti,ns16550",		(uintptr_t)&uart_ti8250_class},
+	{"ti,omap3-uart",	(uintptr_t)&uart_ti8250_class},
 	{NULL,			(uintptr_t)NULL},
 };
 UART_FDT_CLASS_AND_DEVICE(compat_data);
