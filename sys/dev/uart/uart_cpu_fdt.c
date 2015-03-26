@@ -183,7 +183,7 @@ uart_cpu_getdev(int devtype, struct uart_devinfo *di)
 		shift = class->uc_regshift;
 
 	di->bas.chan = 0;
-	di->bas.regshft = 2; //(u_int)shift;
+	di->bas.regshft = (u_int)shift;
 	di->baudrate = br;
 	di->bas.rclk = (u_int)rclk;
 	di->ops = uart_getops(class);
