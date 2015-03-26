@@ -123,7 +123,7 @@ uart_fdt_get_shift(phandle_t node, pcell_t *cell)
 	pcell_t shift;
 
 	if ((OF_getprop(node, "reg-shift", &shift, sizeof(shift))) <= 0)
-		shift = 0;
+		return (-1);
 	*cell = fdt32_to_cpu(shift);
 	return (0);
 }
@@ -152,7 +152,8 @@ uart_fdt_probe(device_t dev)
 
 	if ((err = uart_fdt_get_clock(node, &clock)) != 0)
 		return (err);
-	uart_fdt_get_shift(node, &shift);
+	if (uart_fdt_get_shift(node, &shift) < 0)
+		shift = sc->sc_class->uc_regshift;
 
 	return (uart_bus_probe(dev, (int)shift, (int)clock, 0, 0));
 }
