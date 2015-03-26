@@ -47,6 +47,7 @@ __FBSDID("$FreeBSD$");
 #include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/ofw_bus_subr.h>
 
+#include <arm/ti/ti_hwmods.h>
 #include <arm/ti/ti_prcm.h>
 #include <arm/ti/ti_scm.h>
 
@@ -125,8 +126,11 @@ am335x_pwmss_attach(device_t dev)
 	sc = device_get_softc(dev);
 	sc->sc_dev = dev;
 
-	/* XXXGONZO: usw hwmods */
-	sc->sc_id = device_get_unit(dev);
+	sc->sc_id = ti_hwmods_get_unit(dev, "pwmss");
+	if (sc->sc_id < 0) {
+		device_printf(dev, "failed to get device id based on ti,hwmods\n");
+		return (EINVAL);
+	}
 
 	ti_prcm_clk_enable(PWMSS0_CLK + sc->sc_id);
 	ti_scm_reg_read_4(SCM_PWMSS_CTRL, &reg);
