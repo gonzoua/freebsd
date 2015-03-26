@@ -83,10 +83,12 @@ uart_fdt_get_shift(phandle_t node, pcell_t *cell)
 {
 	pcell_t shift;
 
-	if ((OF_getprop(node, "reg-shift", &shift, sizeof(shift))) <= 0)
-		shift = 2;
-	*cell = fdt32_to_cpu(shift);
-	return (0);
+	if ((OF_getprop(node, "reg-shift", &shift, sizeof(shift))) > 0) {
+		*cell = fdt32_to_cpu(shift);
+		return (0);
+	}
+
+	return (-1);
 }
 
 int
@@ -159,7 +161,6 @@ uart_cpu_getdev(int devtype, struct uart_devinfo *di)
 	/*
 	 * Retrieve serial attributes.
 	 */
-	uart_fdt_get_shift(node, &shift);
 
 	if (OF_getprop(node, "current-speed", &br, sizeof(br)) <= 0)
 		br = 0;
@@ -177,6 +178,9 @@ uart_cpu_getdev(int devtype, struct uart_devinfo *di)
 	if (cd->ocd_str == NULL)
 		return (ENXIO);
 	class = (struct uart_class *)cd->ocd_data;
+
+	if (uart_fdt_get_shift(node, &shift) < 0)
+		shift = class->uc_regshift;
 
 	di->bas.chan = 0;
 	di->bas.regshft = 2; //(u_int)shift;
