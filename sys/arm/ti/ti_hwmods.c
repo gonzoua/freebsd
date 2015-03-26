@@ -77,7 +77,7 @@ ti_hwmods_get_unit(device_t dev, const char *hwname)
 		name += l;
 		len -= l;
 	}
-	
+
 	free(name, M_DEVBUF);
 	return (unit);
 }

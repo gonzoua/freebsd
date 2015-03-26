@@ -84,8 +84,7 @@ ti_aintc_probe(device_t dev)
 	if (!ofw_bus_status_okay(dev))
 		return (ENXIO);
 
-	if (!ofw_bus_is_compatible(dev, "ti,aintc") &&
-	    !ofw_bus_is_compatible(dev, "ti,am33xx-intc"))
+	if (!ofw_bus_is_compatible(dev, "ti,am33xx-intc"))
 		return (ENXIO);
 
 	device_set_desc(dev, "TI AINTC Interrupt Controller");
