@@ -44,7 +44,7 @@ __FBSDID("$FreeBSD$");
 
 #include <arm/ti/ti_cpuid.h>
 #include <arm/ti/ti_gpio.h>
-#include <arm/ti/ti_scm.h>
+#include <arm/ti/ti_pinmux.h>
 
 #include <arm/ti/omap4/omap4_scm_padconf.h>
 
@@ -88,7 +88,7 @@ omap4_gpio_set_flags(device_t dev, uint32_t gpio, uint32_t flags)
 		else
 			state = PADCONF_PIN_INPUT;
 	}
-	return ti_scm_padconf_set_gpiomode(gpio, state);
+	return ti_pinmux_padconf_set_gpiomode(gpio, state);
 }
 
 static int
@@ -97,7 +97,7 @@ omap4_gpio_get_flags(device_t dev, uint32_t gpio, uint32_t *flags)
 	unsigned int state;
 
 	/* Get the current pin state */
-	if (ti_scm_padconf_get_gpiomode(gpio, &state) != 0) {
+	if (ti_pinmux_padconf_get_gpiomode(gpio, &state) != 0) {
 		*flags = 0;
 		return (EINVAL);
 	} else {

@@ -41,7 +41,7 @@ __FBSDID("$FreeBSD$");
 
 #include <machine/bus.h>
 
-#include <arm/ti/ti_scm.h>
+#include <arm/ti/ti_pinmux.h>
 #include <arm/ti/omap4/omap4_scm_padconf.h>
 
 
@@ -77,7 +77,7 @@ __FBSDID("$FreeBSD$");
 		.muxmodes[7] = m7, \
 	}
 
-const static struct ti_scm_padstate ti_padstate_devmap[] = {
+const static struct ti_pinmux_padstate ti_padstate_devmap[] = {
 	{"output",		PADCONF_PIN_OUTPUT},
 	{"input",		PADCONF_PIN_INPUT},
 	{"input_pullup",	PADCONF_PIN_INPUT_PULLUP},
@@ -88,7 +88,7 @@ const static struct ti_scm_padstate ti_padstate_devmap[] = {
 /*
  * Table 18-10, p. 3470
  */
-const static struct ti_scm_padconf ti_padconf_devmap[] = {
+const static struct ti_pinmux_padconf ti_padconf_devmap[] = {
 	_PINDEF(0x0040,  "c12",   0, 0, "gpmc_ad0", "sdmmc2_dat0", NULL, NULL, NULL, NULL, NULL, NULL),
 	_PINDEF(0x0042,  "d12",   0, 0, "gpmc_ad1", "sdmmc2_dat1", NULL, NULL, NULL, NULL, NULL, NULL),
 	_PINDEF(0x0044,  "c13",   0, 0, "gpmc_ad2", "sdmmc2_dat2", NULL, NULL, NULL, NULL, NULL, NULL),
@@ -295,7 +295,7 @@ const static struct ti_scm_padconf ti_padconf_devmap[] = {
 	{  .ballname = NULL  },
 };
 
-const struct ti_scm_device ti_scm_dev = {
+const struct ti_pinmux_device ti_pinmux_dev = {
 	.padconf_muxmode_mask	= CONTROL_PADCONF_MUXMODE_MASK,
 	.padconf_sate_mask	= CONTROL_PADCONF_SATE_MASK,
 	.padstate		= ti_padstate_devmap,
