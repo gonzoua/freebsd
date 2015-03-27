@@ -169,4 +169,4 @@ static driver_t ti_scm_driver = {
 
 static devclass_t ti_scm_devclass;
 
-DRIVER_MODULE(ti_scm, ofwbus, ti_scm_driver, ti_scm_devclass, 0, 0);
+DRIVER_MODULE(ti_scm, simplebus, ti_scm_driver, ti_scm_devclass, 0, 0);
