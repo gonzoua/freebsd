@@ -609,6 +609,8 @@ am335x_dmtimer_attach(device_t dev)
 	sc->tmr_irq_res = bus_alloc_resource_any(dev, SYS_RES_IRQ,
 	    &sc->tmr_irq_rid, RF_ACTIVE);
 	if (err) {
+		bus_release_resource(dev, SYS_RES_MEMORY, sc->tmr_mem_rid,
+		    sc->tmr_mem_res);
 		device_printf(dev, "Error: could not allocate irq resources\n");
 		return (ENXIO);
 	}
@@ -626,6 +628,10 @@ am335x_dmtimer_attach(device_t dev)
 		/* Enable clocks and power on the chosen devices. */
 		timer_id = ti_hwmods_get_clock(dev);
 		if (timer_id == CLK_NONE) {
+			bus_release_resource(dev, SYS_RES_MEMORY, sc->tmr_mem_rid,
+			    sc->tmr_mem_res);
+			bus_release_resource(dev, SYS_RES_IRQ, sc->tmr_irq_rid,
+			    sc->tmr_irq_res);
 			device_printf(dev, "failed to get device id using ti,hwmods\n");
 			return (ENXIO);
 		}
@@ -634,6 +640,10 @@ am335x_dmtimer_attach(device_t dev)
 		err |= ti_prcm_clk_enable(timer_id);
 
 		if (err) {
+			bus_release_resource(dev, SYS_RES_MEMORY, sc->tmr_mem_rid,
+			    sc->tmr_mem_res);
+			bus_release_resource(dev, SYS_RES_IRQ, sc->tmr_irq_rid,
+			    sc->tmr_irq_res);
 			device_printf(dev, "Error: could not enable timer clock\n");
 			return (ENXIO);
 		}
