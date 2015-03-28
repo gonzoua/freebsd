@@ -106,17 +106,14 @@ ti_hwmods_get_clock(device_t dev)
 	struct hwmod *hw;
 
 	if ((node = ofw_bus_get_node(dev)) == 0)
-		return (-1);
+		return (CLK_NONE);
 
-	if ((len = OF_getproplen(node, "ti,hwmods")) <= 0)
-		return (-1);
-
-	name = malloc(len + 1, M_DEVBUF, M_NOWAIT);
-	buf = name;
-	if (OF_getprop(node, "ti,hwmods", (void*)name, len) <= 0) {
+	if ((len = OF_getprop_alloc(node, "ti,hwmods", 1, (void**)&name)) <= 0) {
 		free(name, M_DEVBUF);
-		return (-1);
+		return (CLK_NONE);
 	}
+
+	buf = name;
 
 	clk = CLK_NONE;
 	while ((len > 0) && (clk == CLK_NONE)) {
@@ -136,6 +133,6 @@ ti_hwmods_get_clock(device_t dev)
 	if (len > 0)
 		device_printf(dev, "WARNING: more then one ti,hwmod \n");
 
-	free(buf, M_DEVBUF);
+	free(buf, M_OFWPROP);
 	return (clk);
 }
