@@ -574,7 +574,7 @@ cpsw_attach(device_t dev)
 		if (OF_getencprop(child, "phy_id", phy_id, len) <= 0)
 			continue;
 
-		phy = fdt32_to_cpu(phy_id[1]);
+		phy = phy_id[1];
 		/* TODO: get memory window for MDIO */
 
 		break;
@@ -589,7 +589,7 @@ cpsw_attach(device_t dev)
 	mem_size = 0;
 
 	if (fdt_regsize(sc->node, &mem_base, &mem_size) != 0) {
-		device_printf(sc->dev, "no regs property in cpsw node node\n");
+		device_printf(sc->dev, "no regs property in cpsw node\n");
 		return (ENXIO);
 	}
 
