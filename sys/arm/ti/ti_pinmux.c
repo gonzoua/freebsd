@@ -31,19 +31,7 @@
  */
 
 /**
- *	SCM - System Control Module
- *
- *	Hopefully in the end this module will contain a bunch of utility functions
- *	for configuring and querying the general system control registers, but for
- *	now it only does pin(pad) multiplexing.
- *
- *	This is different from the GPIO module in that it is used to configure the
- *	pins between modules not just GPIO input/output.
- *
- *	This file contains the generic top level driver, however it relies on chip
- *	specific settings and therefore expects an array of ti_pinmux_padconf structs
- *	call ti_padconf_devmap to be located somewhere in the kernel.
- *
+ * Exposes pinmux module to pinctrl-compatible interface
  */
 #include <sys/cdefs.h>
 __FBSDID("$FreeBSD$");
@@ -342,81 +330,6 @@ ti_pinmux_padconf_get_gpiomode(uint32_t gpio, unsigned int *state)
 	return (0);
 }
 
-/**
- *	ti_pinmux_padconf_init_from_hints - processes the hints for padconf
- *	@sc: the driver soft context
- *
- *
- *
- *	LOCKING:
- *	Internally locks it's own context.
- *
- *	RETURNS:
- *	0 on success.
- *	EINVAL if pin requested is outside valid range or already in use.
- */
-static int
-ti_pinmux_padconf_init_from_fdt(struct ti_pinmux_softc *sc)
-{
-	const struct ti_pinmux_padconf *padconf;
-	const struct ti_pinmux_padstate *padstates;
-	int err;
-	phandle_t node;
-	int len;
-	char *fdt_pad_config;
-	int i;
-	char *padname, *muxname, *padstate;
-
-	node = ofw_bus_get_node(sc->sc_dev);
-	len = OF_getproplen(node, "scm-pad-config");
-        OF_getprop_alloc(node, "scm-pad-config", 1, (void **)&fdt_pad_config);
-
-	i = len;
-	while (i > 0) {
-		padname = fdt_pad_config;
-		fdt_pad_config += strlen(padname) + 1;
-		i -= strlen(padname) + 1;
-		if (i <= 0)
-			break;
-
-		muxname = fdt_pad_config;
-		fdt_pad_config += strlen(muxname) + 1;
-		i -= strlen(muxname) + 1;
-		if (i <= 0)
-			break;
-
-		padstate = fdt_pad_config;
-		fdt_pad_config += strlen(padstate) + 1;
-		i -= strlen(padstate) + 1;
-		if (i < 0)
-			break;
-
-		padconf = ti_pinmux_dev.padconf;
-
-		while (padconf->ballname != NULL) {
-			if (strcmp(padconf->ballname, padname) == 0) {
-				padstates = ti_pinmux_dev.padstate;
-				err = 1;
-				while (padstates->state != NULL) {
-					if (strcmp(padstates->state, padstate) == 0) {
-						err = ti_pinmux_padconf_set_internal(sc,
-						    padconf, muxname, padstates->reg);
-					}
-					padstates++;
-				}
-				if (err)
-					device_printf(sc->sc_dev,
-					    "err: failed to configure "
-					    "pin \"%s\" as \"%s\"\n",
-					    padconf->ballname,
-					    muxname);
-			}
-			padconf++;
-		}
-	}
-	return (0);
-}
-
 static int
 ti_pinmux_configure_pins(device_t dev, phandle_t cfgxref)
 {
@@ -466,16 +379,13 @@ ti_pinmux_probe(device_t dev)
 	if (!ofw_bus_is_compatible(dev, "pinctrl-single"))
 		return (ENXIO);
 
-	device_set_desc(dev, "TI Control Module");
+	device_set_desc(dev, "TI Pinmux Module");
 	return (BUS_PROBE_DEFAULT);
 }
 
 /**
- *	ti_pinmux_attach - attaches the timer to the simplebus
+ *	ti_pinmux_attach - attaches the pinmux to the simplebus
  *	@dev: new device
- *
- *	Reserves memory and interrupt resources, stores the softc structure
- *	globally and registers both the timecount and eventtimer objects.
  *
  *	RETURNS
  *	Zero on sucess or ENXIO if an error occuried.
@@ -495,13 +405,10 @@ ti_pinmux_attach(device_t dev)
 		return (ENXIO);
 	}
 
-	/* Global timer interface */
 	sc->sc_bst = rman_get_bustag(sc->sc_res[0]);
 	sc->sc_bsh = rman_get_bushandle(sc->sc_res[0]);
 
 	ti_pinmux_sc = sc;
-
-	ti_pinmux_padconf_init_from_fdt(sc);
 
 	fdt_pinctrl_register(dev, "pinctrl-single,pins");
 	fdt_pinctrl_configure_tree(dev);
