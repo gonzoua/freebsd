@@ -47,8 +47,8 @@ __FBSDID("$FreeBSD$");
 #include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/ofw_bus_subr.h>
 
-#include <arm/ti/ti_hwmods.h>
 #include <arm/ti/ti_prcm.h>
+#include <arm/ti/ti_hwmods.h>
 #include <arm/ti/ti_scm.h>
 
 #include "am335x_pwm.h"
@@ -66,7 +66,7 @@ static device_detach_t am335x_pwmss_detach;
 
 struct am335x_pwmss_softc {
 	device_t		sc_dev;
-	int			sc_id;
+	clk_ident_t		sc_clk;
 };
 
 static device_method_t am335x_pwmss_methods[] = {
@@ -121,20 +121,35 @@ static int
 am335x_pwmss_attach(device_t dev)
 {
 	struct am335x_pwmss_softc *sc;
-	uint32_t reg;
+	uint32_t reg, id;
 
 	sc = device_get_softc(dev);
 	sc->sc_dev = dev;
 
-	sc->sc_id = ti_hwmods_get_unit(dev, "pwmss");
-	if (sc->sc_id < 0) {
+	sc->sc_clk = ti_hwmods_get_clock(dev);
+	if (sc->sc_clk == CLK_NONE) {
 		device_printf(dev, "failed to get device id based on ti,hwmods\n");
 		return (EINVAL);
 	}
 
-	ti_prcm_clk_enable(PWMSS0_CLK + sc->sc_id);
+	ti_prcm_clk_enable(sc->sc_clk);
 	ti_scm_reg_read_4(SCM_PWMSS_CTRL, &reg);
-	reg |= (1 << sc->sc_id);
+	switch (sc->sc_clk) {
+		case PWMSS0_CLK:
+			id = 0;
+			break;
+		case PWMSS1_CLK:
+			id = 1;
+			break;
+
+		case PWMSS2_CLK:
+			id = 2;
+			break;
+		default:
+			device_printf(dev, "unknown pwmss clock id: %d\n", sc->sc_clk);
+			return (EINVAL);
+	}
+	reg |= (1 << id);
 	ti_scm_reg_write_4(SCM_PWMSS_CTRL, reg);
 
 	simplebus_attach_children(dev);

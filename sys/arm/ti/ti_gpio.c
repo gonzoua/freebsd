@@ -49,10 +49,10 @@ __FBSDID("$FreeBSD$");
 #include <machine/resource.h>
 
 #include <arm/ti/ti_cpuid.h>
-#include <arm/ti/ti_hwmods.h>
 #include <arm/ti/ti_gpio.h>
 #include <arm/ti/ti_scm.h>
 #include <arm/ti/ti_prcm.h>
+#include <arm/ti/ti_hwmods.h>
 
 #include <dev/fdt/fdt_common.h>
 #include <dev/gpio/gpiobusvar.h>
@@ -615,19 +615,19 @@ ti_gpio_bank_init(device_t dev)
 	int pin;
 	struct ti_gpio_softc *sc;
 	uint32_t flags, reg_oe, rev;
-	int hwmod;
+	clk_ident_t clk;
 
 	sc = device_get_softc(dev);
 
 	/* Enable the interface and functional clocks for the module. */
-	hwmod = ti_hwmods_get_unit(dev, "gpio") - 1;
-	if (hwmod < 0) {
+	clk = ti_hwmods_get_clock(dev);
+	if (clk == CLK_NONE) {
 		device_printf(dev, "failed to get device id based on ti,hwmods\n");
 		return (EINVAL);
 	}
 
-	sc->sc_bank = ti_first_gpio_bank() + hwmod;
-	ti_prcm_clk_enable(GPIO0_CLK + sc->sc_bank);
+	sc->sc_bank = clk - GPIO1_CLK + ti_first_gpio_bank();
+	ti_prcm_clk_enable(clk);
 
 	/*
 	 * Read the revision number of the module.  TI don't publish the

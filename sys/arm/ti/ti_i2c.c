@@ -66,8 +66,8 @@ __FBSDID("$FreeBSD$");
 #include <dev/ofw/ofw_bus_subr.h>
 
 #include <arm/ti/ti_cpuid.h>
-#include <arm/ti/ti_hwmods.h>
 #include <arm/ti/ti_prcm.h>
+#include <arm/ti/ti_hwmods.h>
 #include <arm/ti/ti_i2c.h>
 
 #include <dev/iicbus/iiconf.h>
@@ -82,7 +82,7 @@ __FBSDID("$FreeBSD$");
 struct ti_i2c_softc
 {
 	device_t		sc_dev;
-	int			device_id;
+	clk_ident_t		clk_id;
 	struct resource*	sc_irq_res;
 	struct resource*	sc_mem_res;
 	device_t		sc_iicbus;
@@ -694,7 +694,6 @@ ti_i2c_iicbus_reset(device_t dev, u_char speed, u_char addr, u_char *oldaddr)
 static int
 ti_i2c_activate(device_t dev)
 {
-	clk_ident_t clk;
 	int err;
 	struct ti_i2c_softc *sc;
 
@@ -704,8 +703,7 @@ ti_i2c_activate(device_t dev)
 	 * 1. Enable the functional and interface clocks (see Section
 	 * 23.1.5.1.1.1.1).
 	 */
-	clk = I2C0_CLK + sc->device_id;
-	err = ti_prcm_clk_enable(clk);
+	err = ti_prcm_clk_enable(sc->clk_id);
 	if (err)
 		return (err);
 
@@ -728,7 +726,6 @@ static void
 ti_i2c_deactivate(device_t dev)
 {
 	struct ti_i2c_softc *sc = device_get_softc(dev);
-	clk_ident_t clk;
 
 	/* Disable the controller - cancel all transactions. */
 	ti_i2c_write_2(sc, I2C_REG_IRQENABLE_CLR, 0xffff);
@@ -756,8 +753,7 @@ ti_i2c_deactivate(device_t dev)
 	}
 
 	/* Finally disable the functional and interface clocks. */
-	clk = I2C0_CLK + sc->device_id;
-	ti_prcm_clk_disable(clk);
+	ti_prcm_clk_disable(sc->clk_id);
 }
 
 static int
@@ -839,8 +835,8 @@ ti_i2c_attach(device_t dev)
 	/* Get the i2c device id from FDT. */
 	node = ofw_bus_get_node(dev);
 	/* i2c ti,hwmods bindings is special: it start with index 1 */
-	sc->device_id = ti_hwmods_get_unit(dev, "i2c") - 1;
-	if (sc->device_id < 0) {
+	sc->clk_id = ti_hwmods_get_clock(dev);
+	if (sc->clk_id == CLK_NONE) {
 		device_printf(dev, "failed to get device id using ti,hwmod\n");
 		return (ENXIO);
 	}

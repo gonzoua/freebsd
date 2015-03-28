@@ -28,6 +28,6 @@
 #ifndef _TI_HWMODS_H_
 #define _TI_HWMODS_H_
 
-int ti_hwmods_get_unit(device_t dev, const char *hwname);
+clk_ident_t ti_hwmods_get_clock(device_t dev);
 
 #endif /* _TI_HWMODS_H_ */

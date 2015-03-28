@@ -42,18 +42,68 @@ __FBSDID("$FreeBSD$");
 #include <machine/bus.h>
 #include <machine/fdt.h>
 
+#include <arm/ti/ti_prcm.h>
 #include <arm/ti/ti_hwmods.h>
 
-int
-ti_hwmods_get_unit(device_t dev, const char *hwname)
+struct hwmod {
+	const char	*name;
+	int		clock_id;
+};
+
+struct hwmod ti_hwmods[] = {
+	{"i2c1",	I2C1_CLK},
+	{"i2c2",	I2C2_CLK},
+	{"i2c3",	I2C3_CLK},
+	{"i2c4",	I2C4_CLK},
+	{"i2c5",	I2C5_CLK},
+
+	{"gpio1",	GPIO1_CLK},
+	{"gpio2",	GPIO2_CLK},
+	{"gpio3",	GPIO3_CLK},
+	{"gpio4",	GPIO4_CLK},
+	{"gpio5",	GPIO5_CLK},
+	{"gpio6",	GPIO6_CLK},
+	{"gpio7",	GPIO7_CLK},
+
+	{"mmc1",	MMC1_CLK},
+	{"mmc2",	MMC2_CLK},
+	{"mmc3",	MMC3_CLK},
+	{"mmc4",	MMC4_CLK},
+	{"mmc5",	MMC5_CLK},
+	{"mmc6",	MMC6_CLK},
+
+	{"pwmss0",	PWMSS0_CLK},
+	{"pwmss1",	PWMSS1_CLK},
+	{"pwmss2",	PWMSS2_CLK},
+
+	{"timer1",	TIMER1_CLK},
+	{"timer2",	TIMER2_CLK},
+	{"timer3",	TIMER3_CLK},
+	{"timer4",	TIMER4_CLK},
+	{"timer5",	TIMER5_CLK},
+	{"timer6",	TIMER6_CLK},
+	{"timer7",	TIMER7_CLK},
+
+	{"uart1",	UART1_CLK},
+	{"uart2",	UART2_CLK},
+	{"uart3",	UART3_CLK},
+	{"uart4",	UART4_CLK},
+	{"uart5",	UART5_CLK},
+	{"uart6",	UART6_CLK},
+	{"uart7",	UART7_CLK},
+
+	{NULL,		0}
+};
+
+clk_ident_t
+ti_hwmods_get_clock(device_t dev)
 {
 	phandle_t node;
-	int len, hwlen, l;
+	int len, l;
 	char *name;
-	int unit;
-
-	unit = -1;
-	hwlen = strlen(hwname);
+	char *buf;
+	int clk;
+	struct hwmod *hw;
 
 	if ((node = ofw_bus_get_node(dev)) == 0)
 		return (-1);
@@ -62,22 +112,30 @@ ti_hwmods_get_unit(device_t dev, const char *hwname)
 		return (-1);
 
 	name = malloc(len + 1, M_DEVBUF, M_NOWAIT);
+	buf = name;
 	if (OF_getprop(node, "ti,hwmods", (void*)name, len) <= 0) {
 		free(name, M_DEVBUF);
 		return (-1);
 	}
 
-	while (len > 0) {
-		if (strncmp(hwname, name, hwlen) == 0) {
-			unit = (int)strtol(name + hwlen, NULL, 10);
-			break;
+	clk = CLK_NONE;
+	while ((len > 0) && (clk == CLK_NONE)) {
+		for (hw = ti_hwmods; hw->name != NULL; ++hw) {
+			if (strcmp(hw->name, name) == 0) {
+				clk = hw->clock_id;
+				break;
+			}
 		}
+
 		/* Slide to the next sub-string. */
 		l = strlen(name) + 1;
 		name += l;
 		len -= l;
 	}
 
-	free(name, M_DEVBUF);
-	return (unit);
+	if (len > 0)
+		device_printf(dev, "WARNING: more then one ti,hwmod \n");
+
+	free(buf, M_DEVBUF);
+	return (clk);
 }

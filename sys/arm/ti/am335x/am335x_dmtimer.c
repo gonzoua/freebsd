@@ -54,8 +54,8 @@ __FBSDID("$FreeBSD$");
 #include <machine/bus.h>
 #include <machine/fdt.h>
 
-#include <arm/ti/ti_hwmods.h>
 #include <arm/ti/ti_prcm.h>
+#include <arm/ti/ti_hwmods.h>
 #include <arm/ti/ti_scm.h>
 
 #define	AM335X_NUM_TIMERS	8
@@ -578,7 +578,7 @@ am335x_dmtimer_attach(device_t dev)
 {
 	struct am335x_dmtimer_softc *sc;
 	int err;
-	int timer_id;
+	clk_ident_t timer_id;
 	int enable;
 
 	/*
@@ -624,14 +624,14 @@ am335x_dmtimer_attach(device_t dev)
 
 	if (enable) {
 		/* Enable clocks and power on the chosen devices. */
-		timer_id = ti_hwmods_get_unit(dev, "timer");
-		if (timer_id < 0) {
+		timer_id = ti_hwmods_get_clock(dev);
+		if (timer_id == CLK_NONE) {
 			device_printf(dev, "failed to get device id using ti,hwmods\n");
 			return (ENXIO);
 		}
 
-		err  = ti_prcm_clk_set_source(DMTIMER0_CLK + timer_id, SYSCLK_CLK);
-		err |= ti_prcm_clk_enable(DMTIMER0_CLK + timer_id);
+		err  = ti_prcm_clk_set_source(timer_id, SYSCLK_CLK);
+		err |= ti_prcm_clk_enable(timer_id);
 
 		if (err) {
 			device_printf(dev, "Error: could not enable timer clock\n");
