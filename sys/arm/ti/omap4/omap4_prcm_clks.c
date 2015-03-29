@@ -1441,9 +1441,7 @@ static int
 omap4_prcm_attach(device_t dev)
 {
 	struct omap4_prcm_softc *sc;
-#ifdef notyet
 	unsigned int freq;
-#endif
 	const struct ofw_compat_data *ocd;
 
 
@@ -1460,10 +1458,15 @@ omap4_prcm_attach(device_t dev)
 
 	ti_cpu_reset = omap4_prcm_reset;
 
-#ifdef notyet
-	omap4_clk_get_arm_fclk_freq(NULL, &freq);
-	arm_tmr_change_frequency(freq / 2);
-#endif
+	/*
+	 * In order to determine ARM frequency we need both RPM and CM1 
+	 * instances up and running. So wait until all CRM devices are
+	 * initialized. Should be replaced with proper clock framework
+	 */
+	if (device_get_unit(dev) == 2) {
+		omap4_clk_get_arm_fclk_freq(NULL, &freq);
+		arm_tmr_change_frequency(freq / 2);
+	}
 
 	return (0);
 }
