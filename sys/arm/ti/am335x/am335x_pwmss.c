@@ -74,23 +74,6 @@ static device_method_t am335x_pwmss_methods[] = {
 	DEVMETHOD(device_attach,	am335x_pwmss_attach),
 	DEVMETHOD(device_detach,	am335x_pwmss_detach),
 
-        /* Bus interface */
-	DEVMETHOD(bus_alloc_resource, bus_generic_alloc_resource),
-	DEVMETHOD(bus_release_resource,	bus_generic_release_resource),
-	DEVMETHOD(bus_activate_resource, bus_generic_activate_resource),
-	DEVMETHOD(bus_deactivate_resource,bus_generic_deactivate_resource),
-	DEVMETHOD(bus_setup_intr, bus_generic_setup_intr),
-	DEVMETHOD(bus_teardown_intr, bus_generic_teardown_intr),
-	DEVMETHOD(bus_get_resource_list, bus_generic_get_resource_list),
-
-	/* OFW bus interface */
-	DEVMETHOD(ofw_bus_get_devinfo,	ofw_bus_gen_get_devinfo),
-	DEVMETHOD(ofw_bus_get_compat,	ofw_bus_gen_get_compat),
-	DEVMETHOD(ofw_bus_get_model,	ofw_bus_gen_get_model),
-	DEVMETHOD(ofw_bus_get_name,	ofw_bus_gen_get_name),
-	DEVMETHOD(ofw_bus_get_node,	ofw_bus_gen_get_node),
-	DEVMETHOD(ofw_bus_get_type,	ofw_bus_gen_get_type),
-
 	DEVMETHOD_END
 };
 
@@ -122,6 +105,8 @@ am335x_pwmss_attach(device_t dev)
 {
 	struct am335x_pwmss_softc *sc;
 	uint32_t reg, id;
+	phandle_t node;
+	struct ofw_bus_devinfo obd;
 
 	sc = device_get_softc(dev);
 	sc->sc_dev = dev;
@@ -152,9 +137,28 @@ am335x_pwmss_attach(device_t dev)
 	reg |= (1 << id);
 	ti_scm_reg_write_4(SCM_PWMSS_CTRL, reg);
 
-	simplebus_attach_children(dev);
+	node = ofw_bus_get_node(dev);
 
-	return (0);
+	if (node == -1)
+		return (ENXIO);
+
+	simplebus_init(dev, node);
+
+	/*
+	 * Allow devices to identify.
+	 */
+	bus_generic_probe(dev);
+
+	/*
+	 * Now walk the OFW tree and attach top-level devices.
+	 */
+	for (node = OF_child(node); node > 0; node = OF_peer(node)) {
+		if (ofw_bus_gen_setup_devinfo(&obd, node) != 0)
+			continue;
+		simplebus_add_device(dev, node, 0, NULL, -1, NULL);
+	}
+
+	return (bus_generic_attach(dev));
 }
 
 static int

@@ -106,6 +106,7 @@ static device_attach_t usbss_attach;
 static device_detach_t usbss_detach;
 
 struct usbss_softc {
+	struct simplebus_softc	simplebus_sc;
 	struct resource		*sc_mem_res;
 	int			sc_mem_rid;
 };
@@ -131,6 +132,8 @@ usbss_attach(device_t dev)
 	struct usbss_softc *sc = device_get_softc(dev);
 	int i;
 	uint32_t rev;
+	phandle_t node;
+	struct ofw_bus_devinfo obd;
 
 	/* Request the memory resources */
 	sc->sc_mem_res = bus_alloc_resource_any(dev, SYS_RES_MEMORY,
@@ -165,9 +168,30 @@ usbss_attach(device_t dev)
 	device_printf(dev, "TI AM335X USBSS v%d.%d.%d\n",
 	    (rev >> 8) & 7, (rev >> 6) & 3, rev & 63);
 
-	simplebus_attach_children(dev);
+	node = ofw_bus_get_node(dev);
 
-	return (0);
+	if (node == -1) {
+		usbss_detach(dev);
+		return (ENXIO);
+	}
+
+	simplebus_init(dev, node);
+
+	/*
+	 * Allow devices to identify.
+	 */
+	bus_generic_probe(dev);
+
+	/*
+	 * Now walk the OFW tree and attach top-level devices.
+	 */
+	for (node = OF_child(node); node > 0; node = OF_peer(node)) {
+		if (ofw_bus_gen_setup_devinfo(&obd, node) != 0)
+			continue;
+		simplebus_add_device(dev, node, 0, NULL, -1, NULL);
+	}
+
+	return (bus_generic_attach(dev));
 }
 
 static int
@@ -195,33 +219,11 @@ static device_method_t usbss_methods[] = {
 	DEVMETHOD(device_resume, bus_generic_resume),
 	DEVMETHOD(device_shutdown, bus_generic_shutdown),
 
-        /* Bus interface */
-	DEVMETHOD(bus_alloc_resource, bus_generic_alloc_resource),
-	DEVMETHOD(bus_release_resource,	bus_generic_release_resource),
-	DEVMETHOD(bus_activate_resource, bus_generic_activate_resource),
-	DEVMETHOD(bus_deactivate_resource,bus_generic_deactivate_resource),
-	DEVMETHOD(bus_setup_intr, bus_generic_setup_intr),
-	DEVMETHOD(bus_teardown_intr, bus_generic_teardown_intr),
-	DEVMETHOD(bus_get_resource_list, bus_generic_get_resource_list),
-
-	/* OFW bus interface */
-	DEVMETHOD(ofw_bus_get_devinfo,	ofw_bus_gen_get_devinfo),
-	DEVMETHOD(ofw_bus_get_compat,	ofw_bus_gen_get_compat),
-	DEVMETHOD(ofw_bus_get_model,	ofw_bus_gen_get_model),
-	DEVMETHOD(ofw_bus_get_name,	ofw_bus_gen_get_name),
-	DEVMETHOD(ofw_bus_get_node,	ofw_bus_gen_get_node),
-	DEVMETHOD(ofw_bus_get_type,	ofw_bus_gen_get_type),
-
 	DEVMETHOD_END
 };
 
-static driver_t usbss_driver = {
-	.name = "usbss",
-	.methods = usbss_methods,
-	.size = sizeof(struct usbss_softc),
-};
-
+DEFINE_CLASS_1(usbss, usbss_driver, usbss_methods,
+    sizeof(struct usbss_softc), simplebus_driver);
 static devclass_t usbss_devclass;
-
 DRIVER_MODULE(usbss, simplebus, usbss_driver, usbss_devclass, 0, 0);
 MODULE_DEPEND(usbss, usb, 1, 1, 1);
