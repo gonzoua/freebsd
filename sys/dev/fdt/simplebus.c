@@ -235,6 +235,7 @@ struct simplebus_devinfo *
 simplebus_setup_dinfo(device_t dev, phandle_t node,
     struct simplebus_devinfo *di)
 {
+	struct simplebus_softc *sc;
 	struct simplebus_devinfo *ndi;
 
 	sc = device_get_softc(dev);
@@ -249,7 +250,7 @@ simplebus_setup_dinfo(device_t dev, phandle_t node,
 	}
 
 	resource_list_init(&ndi->rl);
-	ofw_bus_reg_to_rl(dev, node, acells, scells, &ndi->rl);
+	ofw_bus_reg_to_rl(dev, node, sc->acells, sc->scells, &ndi->rl);
 	ofw_bus_intr_to_rl(dev, node, &ndi->rl);
 
 	return (ndi);
@@ -419,40 +420,4 @@ simplebus_print_child(device_t bus, device_t child)
 		rv += printf(" disabled");
 	rv += bus_print_child_footer(bus, child);
 	return (rv);
-}
-
-int
-simplebus_attach_children(device_t dev)
-{
-	struct		simplebus_devinfo *di;
-	phandle_t	node;
-	device_t	cdev;
-	pcell_t		acells, scells;
-
-	node = ofw_bus_get_node(dev);
-
-	/*
-	 * Some important numbers
-	 */
-	acells = 2;
-	OF_getencprop(node, "#address-cells", &acells, sizeof(acells));
-	scells = 1;
-	OF_getencprop(node, "#size-cells", &scells, sizeof(scells));
-
-	for (node = OF_child(node); node > 0; node = OF_peer(node)) {
-		if ((di = simplebus_setup_dinfo(dev, node, acells, scells)) == NULL)
-			continue;
-		cdev = device_add_child(dev, NULL, -1);
-		if (cdev == NULL) {
-			device_printf(dev, "<%s>: device_add_child failed\n",
-			    di->obdinfo.obd_name);
-			resource_list_free(&di->rl);
-			ofw_bus_gen_destroy_devinfo(&di->obdinfo);
-			free(di, M_DEVBUF);
-			continue;
-		}
-		device_set_ivars(cdev, di);
-	}
-
-	return (bus_generic_attach(dev));
 }
