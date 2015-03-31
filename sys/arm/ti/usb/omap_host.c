@@ -104,6 +104,7 @@ __FBSDID("$FreeBSD$");
 #define OMAP_UHH_REV2  0x50700100      /* OMAP4 */
 
 struct omap_uhh_softc {
+	struct simplebus_softc simplebus_sc;
 	device_t            sc_dev;
 
 	/* UHH register set */
@@ -152,6 +153,8 @@ omap_uhh_init(struct omap_uhh_softc *isc)
 		 *  HSIC_MODE - Internal 480Mhz and 60Mhz clocks
 		 */
 		switch(isc->port_mode[0]) { 
+		case EHCI_HCD_OMAP_MODE_UNKNOWN:
+			break;
 		case EHCI_HCD_OMAP_MODE_PHY:
 			if (ti_prcm_clk_set_source(USBP1_PHY_CLK, EXT_CLK))
 				device_printf(isc->sc_dev,
@@ -171,21 +174,23 @@ omap_uhh_init(struct omap_uhh_softc *isc)
 				    "failed to set clock USBP1_PHY_CLK source for port 0\n");
 			break;
 		default:
-			device_printf(isc->sc_dev, "unknown port mode: %d\n", isc->port_mode[0]);
+			device_printf(isc->sc_dev, "unknown port mode %d for port 0\n", isc->port_mode[0]);
 		}
 		switch(isc->port_mode[1]) { 
+		case EHCI_HCD_OMAP_MODE_UNKNOWN:
+			break;
 		case EHCI_HCD_OMAP_MODE_PHY:
 			if (ti_prcm_clk_set_source(USBP2_PHY_CLK, EXT_CLK))
 				device_printf(isc->sc_dev,
 				    "failed to set clock source for port 0\n");
 			if (ti_prcm_clk_enable(USBP2_PHY_CLK))
 				device_printf(isc->sc_dev,
-				    "failed to set clock USBP2_PHY_CLK source for port 0\n");
+				    "failed to set clock USBP2_PHY_CLK source for port 1\n");
 			break;
 		case EHCI_HCD_OMAP_MODE_TLL:
 			if (ti_prcm_clk_enable(USBP2_UTMI_CLK))
 				device_printf(isc->sc_dev,
-				    "failed to set clock USBP2_UTMI_CLK source for port 0\n");
+				    "failed to set clock USBP2_UTMI_CLK source for port 1\n");
 			break;
 		case EHCI_HCD_OMAP_MODE_HSIC:
 			if (ti_prcm_clk_enable(USBP2_HSIC_CLK))
@@ -193,7 +198,7 @@ omap_uhh_init(struct omap_uhh_softc *isc)
 				    "failed to set clock USBP2_HSIC_CLK source for port 1\n");
 			break;
 		default:
-			device_printf(isc->sc_dev, "unknown port mode: %d\n", isc->port_mode[0]);
+			device_printf(isc->sc_dev, "unknown port mode %d for port 1\n", isc->port_mode[1]);
 		}
 	}
 
@@ -350,6 +355,8 @@ omap_uhh_attach(device_t dev)
 	int err;
 	int rid;
 	int i;
+	phandle_t node;
+	struct ofw_bus_devinfo obd;
 
 	/* save the device */
 	isc->sc_dev = dev;
@@ -377,8 +384,27 @@ omap_uhh_attach(device_t dev)
 		goto error;
 	}
 
-	simplebus_attach_children(dev);
-		
+	node = ofw_bus_get_node(dev);
+
+	if (node == -1)
+		goto error;
+
+	simplebus_init(dev, node);
+
+	/*
+	 * Allow devices to identify.
+	 */
+	bus_generic_probe(dev);
+
+	/*
+	 * Now walk the OFW tree and attach top-level devices.
+	 */
+	for (node = OF_child(node); node > 0; node = OF_peer(node)) {
+		if (ofw_bus_gen_setup_devinfo(&obd, node) != 0)
+			continue;
+		simplebus_add_device(dev, node, 0, NULL, -1, NULL);
+	}
+	return (bus_generic_attach(dev));
 	return (0);
 	
 error:
@@ -414,34 +440,10 @@ static device_method_t omap_uhh_methods[] = {
 	DEVMETHOD(device_resume, bus_generic_resume),
 	DEVMETHOD(device_shutdown, bus_generic_shutdown),
 	
-	/* Bus interface */
-	DEVMETHOD(bus_print_child, bus_generic_print_child),
-	DEVMETHOD(bus_alloc_resource, bus_generic_alloc_resource),
-	DEVMETHOD(bus_release_resource,	bus_generic_release_resource),
-	DEVMETHOD(bus_activate_resource, bus_generic_activate_resource),
-	DEVMETHOD(bus_deactivate_resource,bus_generic_deactivate_resource),
-	DEVMETHOD(bus_setup_intr, bus_generic_setup_intr),
-	DEVMETHOD(bus_teardown_intr, bus_generic_teardown_intr),
-	DEVMETHOD(bus_get_resource_list, bus_generic_get_resource_list),
-	DEVMETHOD(bus_get_dma_tag, bus_generic_get_dma_tag),
-
-	/* OFW bus interface */
-	DEVMETHOD(ofw_bus_get_devinfo,	ofw_bus_gen_get_devinfo),
-	DEVMETHOD(ofw_bus_get_compat,	ofw_bus_gen_get_compat),
-	DEVMETHOD(ofw_bus_get_model,	ofw_bus_gen_get_model),
-	DEVMETHOD(ofw_bus_get_name,	ofw_bus_gen_get_name),
-	DEVMETHOD(ofw_bus_get_node,	ofw_bus_gen_get_node),
-	DEVMETHOD(ofw_bus_get_type,	ofw_bus_gen_get_type),
-
 	DEVMETHOD_END
 };
 
-static driver_t omap_uhh_driver = {
-	"omap_uhh",
-	omap_uhh_methods,
-	sizeof(struct omap_uhh_softc),
-};
-
+DEFINE_CLASS_1(omap_uhh, omap_uhh_driver, omap_uhh_methods,
+    sizeof(struct omap_uhh_softc), simplebus_driver);
 static devclass_t omap_uhh_devclass;
-
 DRIVER_MODULE(omap_uhh, simplebus, omap_uhh_driver, omap_uhh_devclass, 0, 0);
