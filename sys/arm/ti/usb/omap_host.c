@@ -405,7 +405,6 @@ omap_uhh_attach(device_t dev)
 		simplebus_add_device(dev, node, 0, NULL, -1, NULL);
 	}
 	return (bus_generic_attach(dev));
-	return (0);
 	
 error:
 	omap_uhh_detach(dev);
