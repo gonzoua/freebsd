@@ -1665,8 +1665,12 @@ smsc_attach_post(struct usb_ether *ue)
 #endif
 		if ((err != 0) || (!ETHER_IS_VALID(sc->sc_ue.ue_eaddr))) {
 			read_random(sc->sc_ue.ue_eaddr, ETHER_ADDR_LEN);
-			sc->sc_ue.ue_eaddr[0] &= ~0x01;     /* unicast */
-			sc->sc_ue.ue_eaddr[0] |=  0x02;     /* locally administered */
+			sc->sc_ue.ue_eaddr[5] = 0xd0;
+			sc->sc_ue.ue_eaddr[4] = 0x05;
+			sc->sc_ue.ue_eaddr[3] = 0xf8;
+			sc->sc_ue.ue_eaddr[2] = 0x01;
+			sc->sc_ue.ue_eaddr[1] = 0x02;
+			sc->sc_ue.ue_eaddr[0] = 0x02;
 		}
 	}
 	
