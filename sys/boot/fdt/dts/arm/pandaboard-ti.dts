@@ -36,6 +36,13 @@
 };
 
 / {
+	ocp {
+		golbal-timer@48240600 {
+			compatible = "arm,cortex-a9-global-timer";
+			reg = <0x48240200 0x20>;
+			interrupts = <GIC_PPI 11 (GIC_CPU_MASK_RAW(3) | IRQ_TYPE_LEVEL_HIGH)>;
+		};
+	};
 	chosen {
 		stdin = "serial2";
 		stdout = "serial2";
