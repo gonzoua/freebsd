@@ -31,6 +31,10 @@
 
 #include "omap4-panda-es.dts"
 
+&mmc1 {
+	non-removable; /* XXX need real solution */
+};
+
 &mmc5 {
 	status = "disabled";
 };
