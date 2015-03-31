@@ -554,8 +554,6 @@ ti_gpio_intr(void *arg)
 	reg = 0; /* squelch bogus gcc warning */
 	reg = ti_gpio_intr_status(sc);
 	for (irq = 0; irq < sc->sc_maxpin; irq++) {
-
-		/* Read interrupt status only once for each bank. */
 		if ((reg & TI_GPIO_MASK(irq)) == 0)
 			continue;
 		event = sc->sc_events[irq];
@@ -568,45 +566,6 @@ ti_gpio_intr(void *arg)
 	}
 
 	return (FILTER_HANDLED);
-}
-
-static int
-ti_gpio_attach_intr(device_t dev)
-{
-	struct ti_gpio_softc *sc;
-
-	sc = device_get_softc(dev);
-	if (sc->sc_irq_res == NULL)
-		return (-1);
-
-	/*
-	 * Register our interrupt filter for each of the IRQ resources.
-	 */
-	if (bus_setup_intr(dev, sc->sc_irq_res,
-	    INTR_TYPE_MISC | INTR_MPSAFE, ti_gpio_intr, NULL, sc,
-	    &sc->sc_irq_hdl) != 0) {
-		device_printf(dev,
-		    "WARNING: unable to register interrupt filter\n");
-		return (-1);
-	}
-
-	return (0);
-}
-
-static void
-ti_gpio_detach_intr(device_t dev)
-{
-	struct ti_gpio_softc *sc;
-
-	/* Teardown our interrupt filters. */
-	sc = device_get_softc(dev);
-	if (sc->sc_irq_res == NULL)
-		return;
-
-	if (sc->sc_irq_hdl) {
-		bus_teardown_intr(dev, sc->sc_irq_res,
-		    sc->sc_irq_hdl);
-	}
 }
 
 static int
@@ -702,9 +661,14 @@ ti_gpio_attach(device_t dev)
 		return (ENXIO);
 	}
 
-	/* Setup the IRQ resources */
-	if (ti_gpio_attach_intr(dev) != 0) {
-		device_printf(dev, "Error: could not setup irq handlers\n");
+	/*
+	 * Register our interrupt filter for each of the IRQ resources.
+	 */
+	if (bus_setup_intr(dev, sc->sc_irq_res,
+	    INTR_TYPE_MISC | INTR_MPSAFE, ti_gpio_intr, NULL, sc,
+	    &sc->sc_irq_hdl) != 0) {
+		device_printf(dev,
+		    "WARNING: unable to register interrupt filter\n");
 		ti_gpio_detach(dev);
 		return (ENXIO);
 	}
@@ -786,7 +750,10 @@ ti_gpio_detach(device_t dev)
 	if (sc->sc_irq_trigger)
 		free(sc->sc_irq_trigger, M_DEVBUF);
 	/* Release the memory and IRQ resources. */
-	ti_gpio_detach_intr(dev);
+	if (sc->sc_irq_hdl) {
+		bus_teardown_intr(dev, sc->sc_irq_res,
+		    sc->sc_irq_hdl);
+	}
 	bus_release_resource(dev, SYS_RES_IRQ, sc->sc_irq_rid,
 	    sc->sc_irq_res);
 	bus_release_resource(dev, SYS_RES_MEMORY, sc->sc_mem_rid,
