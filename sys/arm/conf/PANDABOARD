@@ -81,11 +81,13 @@ options 	DDB			# Enable the kernel debugger
 #options 	DIAGNOSTIC
 
 # NFS root from boopt/dhcp
-#options 	BOOTP
-#options 	BOOTP_NFSROOT
-#options 	BOOTP_COMPAT
-#options 	BOOTP_NFSV3
-#options 	BOOTP_WIRED_TO=ue0
+options 	BOOTP
+options 	BOOTP_NFSROOT
+options 	BOOTP_COMPAT
+options 	BOOTP_NFSV3
+options 	BOOTP_WIRED_TO=ue0
+
+device		fdt_pinctrl
 
 # MMC/SD/SDIO Card slot support
 device		mmc			# mmc/sd bus
@@ -151,4 +153,4 @@ device		twl_clks
 # Flattened Device Tree
 options 	FDT			# Configure using FDT/DTB data
 options 	FDT_DTB_STATIC
-makeoptions	FDT_DTS_FILE=pandaboard.dts
+makeoptions	FDT_DTS_FILE=omap4-panda-es.dts
