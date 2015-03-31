@@ -34,3 +34,10 @@
 &mmc5 {
 	status = "disabled";
 };
+
+/ {
+	chosen {
+		stdin = "serial2";
+		stdout = "serial2";
+	};
+};
