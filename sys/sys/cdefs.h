@@ -212,7 +212,6 @@
 #define	__unused
 #define	__packed
 #define	__aligned(x)
-#define	__alloc_size(...)
 #define	__section(x)
 #define	__weak
 #else
@@ -236,11 +235,6 @@
 #define	__packed	__attribute__((__packed__))
 #define	__aligned(x)	__attribute__((__aligned__(x)))
 #define	__section(x)	__attribute__((__section__(x)))
-#endif
-#if __has_attribute(alloc_size) || __GNUC_PREREQ__(4, 3)
-#define	__alloc_size(...)	__attribute__((alloc_size(__VA_ARGS__)))
-#else
-#define	__alloc_size(...)
 #endif
 #if defined(__INTEL_COMPILER)
 #define	__dead2		__attribute__((__noreturn__))
@@ -365,9 +359,11 @@
 #endif
 
 #if __GNUC_PREREQ__(3, 3)
-#define	__nonnull(...)	__attribute__((__nonnull__(__VA_ARGS__)))
+#define	__nonnull(x)	__attribute__((__nonnull__(x)))
+#define	__nonnull_all	__attribute__((__nonnull__))
 #else
-#define	__nonnull(...)
+#define	__nonnull(x)
+#define	__nonnull_all
 #endif
 
 #if __GNUC_PREREQ__(3, 4)
@@ -382,6 +378,12 @@
 #define	__returns_twice	__attribute__((__returns_twice__))
 #else
 #define	__returns_twice
+#endif
+
+#if __has_attribute(alloc_size) || __GNUC_PREREQ__(4, 3)
+#define	__alloc_size(x)	__attribute__((__alloc_size__(x)))
+#else
+#define	__alloc_size(x)
 #endif
 
 /* XXX: should use `#if __STDC_VERSION__ < 199901'. */
