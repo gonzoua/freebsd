@@ -505,15 +505,18 @@ pl310_attach(device_t dev)
 		    (g_l2cache_size / 1024), g_l2cache_line_size, g_ways_assoc);
 		if (bootverbose)
 			pl310_print_config(sc);
-	} else if (sc->sc_irq_res != NULL) {
-		sc->sc_ich = malloc(sizeof(*sc->sc_ich), M_DEVBUF, M_WAITOK);
-		sc->sc_ich->ich_func = pl310_config_intr;
-		sc->sc_ich->ich_arg = sc;
-		if (config_intrhook_establish(sc->sc_ich) != 0) {
-			device_printf(dev,
-			    "config_intrhook_establish failed\n");
-			return(ENXIO);
+	} else {
+		if (sc->sc_irq_res != NULL) {
+			sc->sc_ich = malloc(sizeof(*sc->sc_ich), M_DEVBUF, M_WAITOK);
+			sc->sc_ich->ich_func = pl310_config_intr;
+			sc->sc_ich->ich_arg = sc;
+			if (config_intrhook_establish(sc->sc_ich) != 0) {
+				device_printf(dev,
+				    "config_intrhook_establish failed\n");
+				return(ENXIO);
+			}
 		}
+
 		device_printf(dev, "L2 Cache disabled\n");
 	}
 
