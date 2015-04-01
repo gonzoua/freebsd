@@ -836,7 +836,7 @@ ti_i2c_attach(device_t dev)
 	node = ofw_bus_get_node(dev);
 	/* i2c ti,hwmods bindings is special: it start with index 1 */
 	sc->clk_id = ti_hwmods_get_clock(dev);
-	if (sc->clk_id == CLK_NONE) {
+	if (sc->clk_id == INVALID_CLK_IDENT) {
 		device_printf(dev, "failed to get device id using ti,hwmod\n");
 		return (ENXIO);
 	}

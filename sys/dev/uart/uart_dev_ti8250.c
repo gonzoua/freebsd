@@ -76,7 +76,7 @@ ti8250_bus_probe(struct uart_softc *sc)
 
 	/* Enable clocks for this device.  We can't continue if that fails.  */
 	clkid = ti_hwmods_get_clock(sc->sc_dev);
-	if (clkid == CLK_NONE) {
+	if (clkid == INVALID_CLK_IDENT) {
 		device_printf(sc->sc_dev,
 		    "failed to get clock based on hwmods\n");
 		clkid = UART1_CLK + device_get_unit(sc->sc_dev);

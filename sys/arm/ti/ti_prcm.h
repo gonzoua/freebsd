@@ -46,7 +46,7 @@
 
 typedef enum {
 
-	CLK_NONE = 0,
+	INVALID_CLK_IDENT = 0,
 
 	/* System clocks, typically you can only call ti_prcm_clk_get_source_freq()
 	 * on these clocks as they are enabled by default.
@@ -158,9 +158,6 @@ typedef enum {
 
 	/* RTC module */
 	RTC_CLK = 1900,
-
-	INVALID_CLK_IDENT
-
 } clk_ident_t;
 
 /*

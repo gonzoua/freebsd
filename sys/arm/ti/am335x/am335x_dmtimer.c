@@ -627,7 +627,7 @@ am335x_dmtimer_attach(device_t dev)
 	if (enable) {
 		/* Enable clocks and power on the chosen devices. */
 		timer_id = ti_hwmods_get_clock(dev);
-		if (timer_id == CLK_NONE) {
+		if (timer_id == INVALID_CLK_IDENT) {
 			bus_release_resource(dev, SYS_RES_MEMORY, sc->tmr_mem_rid,
 			    sc->tmr_mem_res);
 			bus_release_resource(dev, SYS_RES_IRQ, sc->tmr_irq_rid,

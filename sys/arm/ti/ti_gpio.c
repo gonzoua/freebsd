@@ -580,7 +580,7 @@ ti_gpio_bank_init(device_t dev)
 
 	/* Enable the interface and functional clocks for the module. */
 	clk = ti_hwmods_get_clock(dev);
-	if (clk == CLK_NONE) {
+	if (clk == INVALID_CLK_IDENT) {
 		device_printf(dev, "failed to get device id based on ti,hwmods\n");
 		return (EINVAL);
 	}

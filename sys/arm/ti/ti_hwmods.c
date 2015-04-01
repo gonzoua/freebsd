@@ -106,17 +106,17 @@ ti_hwmods_get_clock(device_t dev)
 	struct hwmod *hw;
 
 	if ((node = ofw_bus_get_node(dev)) == 0)
-		return (CLK_NONE);
+		return (INVALID_CLK_IDENT);
 
 	if ((len = OF_getprop_alloc(node, "ti,hwmods", 1, (void**)&name)) <= 0) {
 		free(name, M_DEVBUF);
-		return (CLK_NONE);
+		return (INVALID_CLK_IDENT);
 	}
 
 	buf = name;
 
-	clk = CLK_NONE;
-	while ((len > 0) && (clk == CLK_NONE)) {
+	clk = INVALID_CLK_IDENT;
+	while ((len > 0) && (clk == INVALID_CLK_IDENT)) {
 		for (hw = ti_hwmods; hw->name != NULL; ++hw) {
 			if (strcmp(hw->name, name) == 0) {
 				clk = hw->clock_id;

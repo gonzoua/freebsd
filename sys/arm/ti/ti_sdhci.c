@@ -485,7 +485,7 @@ ti_sdhci_attach(device_t dev)
 	 */
 	node = ofw_bus_get_node(dev);
 	sc->mmchs_clk_id = ti_hwmods_get_clock(dev);
-	if (sc->mmchs_clk_id == CLK_NONE) {
+	if (sc->mmchs_clk_id == INVALID_CLK_IDENT) {
 		device_printf(dev, "failed to get clock based on hwmods property\n");
 	}
 

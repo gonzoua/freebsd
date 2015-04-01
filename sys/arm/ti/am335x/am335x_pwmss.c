@@ -112,7 +112,7 @@ am335x_pwmss_attach(device_t dev)
 	sc->sc_dev = dev;
 
 	sc->sc_clk = ti_hwmods_get_clock(dev);
-	if (sc->sc_clk == CLK_NONE) {
+	if (sc->sc_clk == INVALID_CLK_IDENT) {
 		device_printf(dev, "failed to get device id based on ti,hwmods\n");
 		return (EINVAL);
 	}
