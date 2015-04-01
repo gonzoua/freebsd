@@ -110,6 +110,7 @@ device		pl310			# PL310 L2 cache controller
 
 # GPIO
 device		gpio
+device		gpioled
 
 # The following enables MFS as root, this seems similar to an initramfs or initrd
 # as used in Linux.
