@@ -433,4 +433,4 @@ static driver_t ti_pinmux_driver = {
 
 static devclass_t ti_pinmux_devclass;
 
-DRIVER_MODULE(ti_pinmux, ofwbus, ti_pinmux_driver, ti_pinmux_devclass, 0, 0);
+DRIVER_MODULE(ti_pinmux, simplebus, ti_pinmux_driver, ti_pinmux_devclass, 0, 0);
