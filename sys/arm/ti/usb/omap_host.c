@@ -103,6 +103,8 @@ __FBSDID("$FreeBSD$");
 #define OMAP_UHH_REV1  0x00000010      /* OMAP3 */
 #define OMAP_UHH_REV2  0x50700100      /* OMAP4 */
 
+#define	OMAP_HS_USB_PORTS	3
+
 struct omap_uhh_softc {
 	struct simplebus_softc simplebus_sc;
 	device_t            sc_dev;
@@ -280,7 +282,7 @@ omap_uhh_init(struct omap_uhh_softc *isc)
 	                 OMAP_USBHOST_INSNREG04_DISABLE_UNSUSPEND);
 #endif
 	tll_ch_mask = 0;
-	for (i = 0; i < 3; i++) {
+	for (i = 0; i < OMAP_HS_USB_PORTS; i++) {
 		if (isc->port_mode[i] == EHCI_HCD_OMAP_MODE_TLL)
 			tll_ch_mask |= (1 << i);
 	}
@@ -356,6 +358,8 @@ omap_uhh_attach(device_t dev)
 	int rid;
 	int i;
 	phandle_t node;
+	char propname[16];
+	char *mode;
 	struct ofw_bus_devinfo obd;
 
 	/* save the device */
@@ -368,26 +372,34 @@ omap_uhh_attach(device_t dev)
 		device_printf(dev, "Error: Could not map UHH memory\n");
 		goto error;
 	}
-	
-	/* Set the defaults for the hints */
-	for (i = 0; i < 3; i++) {
+
+	node = ofw_bus_get_node(dev);
+
+	if (node == -1)
+		goto error;
+
+	/* Get port modes from FDT */
+	for (i = 0; i < OMAP_HS_USB_PORTS; i++) {
 		isc->port_mode[i] = EHCI_HCD_OMAP_MODE_UNKNOWN;
+		snprintf(propname, sizeof(propname),
+		    "port%d-mode", i+1);
+
+		if (OF_getprop_alloc(node, propname, 1, (void**)&mode) <= 0)
+			continue;
+		if (strcmp(mode, "ehci-phy") == 0)
+			isc->port_mode[i] = EHCI_HCD_OMAP_MODE_PHY;
+		else if (strcmp(mode, "ehci-tll") == 0)
+			isc->port_mode[i] = EHCI_HCD_OMAP_MODE_TLL;
+		else if (strcmp(mode, "ehci-hsic") == 0)
+			isc->port_mode[i] = EHCI_HCD_OMAP_MODE_HSIC;
 	}
 
-	/* TODO: portX-mode */
-	isc->port_mode[0] = EHCI_HCD_OMAP_MODE_PHY;
-	
 	/* Initialise the ECHI registers */
 	err = omap_uhh_init(isc);
 	if (err) {
 		device_printf(dev, "Error: could not setup OMAP EHCI, %d\n", err);
 		goto error;
 	}
-
-	node = ofw_bus_get_node(dev);
-
-	if (node == -1)
-		goto error;
 
 	simplebus_init(dev, node);
 
