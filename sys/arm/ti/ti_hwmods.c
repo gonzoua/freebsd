@@ -108,10 +108,8 @@ ti_hwmods_get_clock(device_t dev)
 	if ((node = ofw_bus_get_node(dev)) == 0)
 		return (INVALID_CLK_IDENT);
 
-	if ((len = OF_getprop_alloc(node, "ti,hwmods", 1, (void**)&name)) <= 0) {
-		free(name, M_DEVBUF);
+	if ((len = OF_getprop_alloc(node, "ti,hwmods", 1, (void**)&name)) <= 0)
 		return (INVALID_CLK_IDENT);
-	}
 
 	buf = name;
 
