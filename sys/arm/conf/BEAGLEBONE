@@ -168,4 +168,4 @@ device		fdt_pinctrl
 # Flattened Device Tree
 options 	FDT			# Configure using FDT/DTB data
 options 	FDT_DTB_STATIC
-makeoptions	FDT_DTS_FILE=am335x-boneblack.dts
+makeoptions	FDT_DTS_FILE=beaglebone-black.dts
