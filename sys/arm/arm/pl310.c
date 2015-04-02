@@ -513,6 +513,7 @@ pl310_attach(device_t dev)
 			if (config_intrhook_establish(sc->sc_ich) != 0) {
 				device_printf(dev,
 				    "config_intrhook_establish failed\n");
+				free(sc->sc_ich, M_DEVBUF);
 				return(ENXIO);
 			}
 		}
