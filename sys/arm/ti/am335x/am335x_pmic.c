@@ -115,7 +115,8 @@ am335x_pmic_probe(device_t dev)
 
 	sc = device_get_softc(dev);
 	sc->sc_dev = dev;
-	sc->sc_addr = iicbus_get_addr(dev) * 2;
+	/* Convert to 8-bit addressing */
+	sc->sc_addr = iicbus_get_addr(dev) << 1;
 
 	device_set_desc(dev, "TI TPS65217 Power Management IC");
 
