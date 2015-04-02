@@ -27,5 +27,5 @@
  */
 
 
-#include "omap4-panda.dts"
+#include "omap4-panda-es.dts"
 #include "pandaboard-common.dtsi"

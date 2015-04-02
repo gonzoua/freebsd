@@ -154,4 +154,4 @@ device		twl_clks
 # Flattened Device Tree
 options 	FDT			# Configure using FDT/DTB data
 options 	FDT_DTB_STATIC
-makeoptions	FDT_DTS_FILE=pandaboard-ti.dts
+makeoptions	FDT_DTS_FILE=pandaboard-es.dts
