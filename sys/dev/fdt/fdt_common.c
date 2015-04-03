@@ -326,7 +326,6 @@ fdt_find_child(phandle_t start, const char *child_name)
 	return (0);
 }
 
-
 phandle_t
 fdt_depth_search_compatible(phandle_t start, const char *compat, int strict)
 {
