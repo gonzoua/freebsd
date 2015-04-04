@@ -29,6 +29,8 @@ arm/freescale/imx/imx6_sdma.c		optional sdma
 arm/freescale/imx/imx6_audmux.c		optional sound
 arm/freescale/imx/imx6_ssi.c		optional sound
 
+arm/freescale/imx/imx6_ipu.c		standard
+
 #
 # Optional devices.
 #
