@@ -1,5 +1,9 @@
 /*-
- * Copyright (c) 2013 Konstantin Belousov <kib@FreeBSD.org>
+ * Copyright (c) 2014 The FreeBSD Foundation
+ * All rights reserved.
+ *
+ * This software was developed by Andrew Turner under
+ * sponsorship from the FreeBSD Foundation.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,23 +30,34 @@
 #include <sys/cdefs.h>
 __FBSDID("$FreeBSD$");
 
-#include <sys/types.h>
-#include <sys/time.h>
-#include <sys/vdso.h>
-#include <errno.h>
+#include <sys/param.h>
+#include <stand.h>
+#include <efi.h>
+#include <efilib.h>
+#include <fdt_platform.h>
 
-#pragma weak __vdso_gettc
-u_int
-__vdso_gettc(const struct vdso_timehands *th)
+#include "bootstrap.h"
+
+static EFI_GUID fdtdtb = FDT_TABLE_GUID;
+
+int
+fdt_platform_load_dtb(void)
 {
+	struct fdt_header *hdr;
+	int err;
 
-	return (0);
+	hdr = efi_get_table(&fdtdtb);
+	if (hdr != NULL) {
+		if (fdt_load_dtb_addr(hdr) == 0) {
+			printf("Using DTB provided by EFI at %p.\n", hdr);
+			return (0);
+		}
+	}
+
+	return (err);
 }
 
-#pragma weak __vdso_gettimekeep
-int
-__vdso_gettimekeep(struct vdso_timekeep **tk)
+void
+fdt_platform_fixups(void)
 {
-
-	return (ENOSYS);
 }
