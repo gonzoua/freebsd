@@ -47,6 +47,12 @@ __FBSDID("$FreeBSD$");
 #include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/ofw_bus_subr.h>
 
+#define WIDTH	1024
+#define	HEIGHT	768
+#define	BPP	24
+
+#define	DMA_CHANNEL	28
+
 #define	IPU_LOCK(_sc)		mtx_lock(&(_sc)->sc_mtx)
 #define	IPU_UNLOCK(_sc)		mtx_unlock(&(_sc)->sc_mtx)
 #define	IPU_LOCK_INIT(_sc)	mtx_init(&(_sc)->sc_mtx, \
@@ -57,7 +63,17 @@ __FBSDID("$FreeBSD$");
 #define	IPU_WRITE4(_sc, reg, value)	\
     bus_write_4((_sc)->sc_mem_res, reg, value);
 
+#define	IPU1_BASE	0x200000
+#define	IPU1_CONF	(IPU1_BASE + 0x00)
 
+struct ipu_cpmem_word {
+	uint32_t	data[5];
+	uint32_t	padding[3];
+};
+
+struct ipu_cpmem_ch_param {
+	struct ipu_cpmem_word	word[2];
+};
 
 struct ipu_softc {
 	device_t		sc_dev;
@@ -67,7 +83,134 @@ struct ipu_softc {
 	int			sc_irq_rid;
 	void			*sc_intr_hl;
 	struct mtx		sc_mtx;
+
+	/* Framebuffer */
+	bus_dma_tag_t		sc_dma_tag;
+	bus_dmamap_t		sc_dma_map;
+	size_t			sc_fb_size;
+	bus_addr_t		sc_fb_phys;
+	uint8_t			*sc_fb_base;
 };
+
+static void
+ipu_dmamap_cb(void *arg, bus_dma_segment_t *segs, int nseg, int err)
+{
+	bus_addr_t *addr;
+
+	if (err)
+		return;
+
+	addr = (bus_addr_t*)arg;
+	*addr = segs[0].ds_addr;
+}
+
+static void
+ipu_ch_param_set_value(struct ipu_cpmem_ch_param *param,
+    int word, int offset, int len, uint32_t value)
+{
+	uint32_t datapos, bitpos, mask;
+	uint32_t data;
+
+	datapos = offset / 32;
+	bitpos = offset % 32;
+	mask = (1 << len) - 1;
+
+	if (bitpos + len > 32)
+		panic("%s: data boundary violation <w:%d, o:%d, l:%d>",
+		    __func__, word, offset, len);
+	if (value > mask)
+		panic("%s: value is out of bound length:%d, value:%d\n",
+		    __func__, len, value);
+	data = param->word[word].data[datapos];
+	data &= ~(mask << offset);
+	data |= (value << offset);
+	param->word[word].data[datapos] = data;
+}
+
+static uint32_t
+ipu_ch_param_get_value(struct ipu_cpmem_ch_param *param,
+    int word, int offset, int len)
+{
+	uint32_t datapos, bitpos, mask;
+	uint32_t data;
+
+	datapos = offset / 32;
+	bitpos = offset % 32;
+	mask = (1 << len) - 1;
+
+	if (bitpos + len > 32)
+		panic("%s: data boundary violation <w:%d, o:%d, l:%d>",
+		    __func__, word, offset, len);
+	data = param->word[word].data[datapos];
+	data = data >> offset;
+	data &= mask;
+
+	return (data);
+}
+
+static void
+ipu_init_buffer()
+{
+	/* init channel paramters */
+	/* init DMFC */
+	/* set high priority? */
+}
+
+static int
+ipu_init(struct ipu_softc *sc)
+{
+	uint32_t reg;
+	int err;
+	size_t dma_size;
+
+	reg = IPU_READ4(sc, IPU1_CONF);
+	printf("IPU1_CONF == %08x\n", reg);
+
+	dma_size = round_page(1026*768*4);
+
+	/*
+	 * Now allocate framebuffer memory
+	 */
+	err = bus_dma_tag_create(
+	    bus_get_dma_tag(sc->sc_dev),
+	    4, 0,		/* alignment, boundary */
+	    BUS_SPACE_MAXADDR_32BIT,	/* lowaddr */
+	    BUS_SPACE_MAXADDR,		/* highaddr */
+	    NULL, NULL,			/* filter, filterarg */
+	    dma_size, 1,			/* maxsize, nsegments */
+	    dma_size, 0,			/* maxsegsize, flags */
+	    NULL, NULL,			/* lockfunc, lockarg */
+	    &sc->sc_dma_tag);
+	if (err)
+		goto fail;
+
+	err = bus_dmamem_alloc(sc->sc_dma_tag, (void **)&sc->sc_fb_base,
+	    BUS_DMA_COHERENT, &sc->sc_dma_map);
+
+	if (err) {
+		device_printf(sc->sc_dev, "cannot allocate framebuffer\n");
+		goto fail;
+	}
+
+	err = bus_dmamap_load(sc->sc_dma_tag, sc->sc_dma_map, sc->sc_fb_base,
+	    dma_size, ipu_dmamap_cb, &sc->sc_fb_phys, BUS_DMA_NOWAIT);
+
+	if (err) {
+		device_printf(sc->sc_dev, "cannot load DMA map\n");
+		goto fail;
+	}
+
+	/* Make sure it's blank */
+	memset(sc->sc_fb_base, 0x00, dma_size);
+
+	/* Calculate actual FB Size */
+	sc->sc_fb_size = 1026*768*4;
+
+	return (0);
+fail:
+
+	return (err);
+}
 
 static int
 ipu_probe(device_t dev)
@@ -109,6 +252,8 @@ ipu_attach(device_t dev)
 		device_printf(dev, "cannot allocate interrupt\n");
 		return (ENXIO);
 	}
+
+	ipu_init(sc);
 
 #if 0
 	if (bus_setup_intr(dev, sc->sc_irq_res, INTR_TYPE_MISC | INTR_MPSAFE,
