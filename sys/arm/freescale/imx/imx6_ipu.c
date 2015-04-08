@@ -39,6 +39,8 @@ __FBSDID("$FreeBSD$");
 #include <sys/resource.h>
 #include <sys/rman.h>
 #include <sys/sysctl.h>
+#include <sys/fbio.h>
+#include <sys/consio.h>
 
 #include <machine/bus.h>
 
@@ -47,11 +49,16 @@ __FBSDID("$FreeBSD$");
 #include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/ofw_bus_subr.h>
 
-#define WIDTH	1024
-#define	HEIGHT	768
-#define	BPP	24
+#include <dev/fb/fbreg.h>
+#include <dev/vt/vt.h>
 
-#define	DMA_CHANNEL	28
+#include "fb_if.h"
+
+#define	WIDTH	1024
+#define	HEIGHT	768
+#define	BPP	16
+
+#define	DMA_CHANNEL	23
 
 #define	IPU_LOCK(_sc)		mtx_lock(&(_sc)->sc_mtx)
 #define	IPU_UNLOCK(_sc)		mtx_unlock(&(_sc)->sc_mtx)
@@ -63,8 +70,21 @@ __FBSDID("$FreeBSD$");
 #define	IPU_WRITE4(_sc, reg, value)	\
     bus_write_4((_sc)->sc_mem_res, reg, value);
 
-#define	IPU1_BASE	0x200000
-#define	IPU1_CONF	(IPU1_BASE + 0x00)
+#define	CPMEM_BASE	0x300000
+
+#define	IPU_CONF		0x200000
+#define	IPU_CH_DB_MODE_SEL_0	0x200150
+#define	IPU_CH_DB_MODE_SEL_1	0x200154
+#define	IPU_CUR_BUF_0		0x20023C
+#define	IPU_CUR_BUF_1		0x200240
+
+#define	DMFC_RD_CHAN		0x260000
+#define	DMFC_WR_CHAN		0x260004
+#define	DMFC_WR_CHAN_DEF	0x260008
+#define	DMFC_DP_CHAN		0x26000C
+#define	DMFC_DP_CHAN_DEF	0x260010
+#define	DMFC_GENERAL_1		0x260014
+#define	DMFC_IC_CTRL		0x26001C
 
 struct ipu_cpmem_word {
 	uint32_t	data[5];
@@ -75,6 +95,58 @@ struct ipu_cpmem_ch_param {
 	struct ipu_cpmem_word	word[2];
 };
 
+#define	CH_PARAM_RESET(param) memset(param, 0, sizeof(*param))
+#define	IPU_READ_CH_PARAM(_sc, ch, param) bus_read_region_4( \
+	(_sc)->sc_mem_res, CPMEM_BASE + ch*(sizeof(*param)),\
+	(uint32_t*)param, sizeof(*param)/4)
+#define	IPU_WRITE_CH_PARAM(_sc, ch, param) bus_write_region_4( \
+	(_sc)->sc_mem_res, CPMEM_BASE + ch*(sizeof(*param)),\
+	(uint32_t*)param, sizeof(*param)/4)
+
+#define	CH_PARAM_SET_FW(param, v) ipu_ch_param_set_value((param), \
+	0, 125, 13, (v))
+#define	CH_PARAM_SET_FH(param, v) ipu_ch_param_set_value((param), \
+	0, 138, 12, (v))
+#define	CH_PARAM_SET_SLY(param, v) ipu_ch_param_set_value((param), \
+	1, 102, 14, (v))
+#define	CH_PARAM_SET_EBA0(param, v) ipu_ch_param_set_value((param), \
+	1, 0, 29, (v))
+#define	CH_PARAM_SET_EBA1(param, v) ipu_ch_param_set_value((param), \
+	1, 29, 29, (v))
+#define	CH_PARAM_SET_BPP(param, v) ipu_ch_param_set_value((param), \
+	0, 107, 3, (v))
+#define	CH_PARAM_SET_PFS(param, v) ipu_ch_param_set_value((param), \
+	1, 85, 4, (v))
+#define	CH_PARAM_SET_NPB(param, v) ipu_ch_param_set_value((param), \
+	1, 78, 7, (v))
+#define	CH_PARAM_SET_UBO(param, v) ipu_ch_param_set_value((param), \
+	0, 46, 22, (v))
+#define	CH_PARAM_SET_VBO(param, v) ipu_ch_param_set_value((param), \
+	0, 68, 22, (v))
+
+#define	CH_PARAM_GET_FW(param) ipu_ch_param_get_value((param), \
+	0, 125, 13)
+#define	CH_PARAM_GET_FH(param) ipu_ch_param_get_value((param), \
+	0, 138, 12)
+#define	CH_PARAM_GET_SLY(param) ipu_ch_param_get_value((param), \
+	1, 102, 14)
+#define	CH_PARAM_GET_EBA0(param) ipu_ch_param_get_value((param), \
+	1, 0, 29)
+#define	CH_PARAM_GET_EBA1(param) ipu_ch_param_get_value((param), \
+	1, 29, 29)
+#define	CH_PARAM_GET_BPP(param) ipu_ch_param_get_value((param), \
+	0, 107, 3)
+#define	CH_PARAM_GET_PFS(param) ipu_ch_param_get_value((param), \
+	1, 85, 4)
+#define	CH_PARAM_GET_NPB(param) ipu_ch_param_get_value((param), \
+	1, 78, 7)
+#define	CH_PARAM_GET_UBO(param) ipu_ch_param_get_value((param), \
+	0, 46, 22)
+#define	CH_PARAM_GET_VBO(param) ipu_ch_param_get_value((param), \
+	0, 68, 22)
+
+#define	IPU_PIX_FORMAT_RGB	7
+
 struct ipu_softc {
 	device_t		sc_dev;
 	struct resource		*sc_mem_res;
@@ -83,6 +155,7 @@ struct ipu_softc {
 	int			sc_irq_rid;
 	void			*sc_intr_hl;
 	struct mtx		sc_mtx;
+	struct fb_info		sc_fb_info;
 
 	/* Framebuffer */
 	bus_dma_tag_t		sc_dma_tag;
@@ -109,22 +182,29 @@ ipu_ch_param_set_value(struct ipu_cpmem_ch_param *param,
     int word, int offset, int len, uint32_t value)
 {
 	uint32_t datapos, bitpos, mask;
-	uint32_t data;
+	uint32_t data, data2;
 
 	datapos = offset / 32;
 	bitpos = offset % 32;
 	mask = (1 << len) - 1;
 
-	if (bitpos + len > 32)
-		panic("%s: data boundary violation <w:%d, o:%d, l:%d>",
-		    __func__, word, offset, len);
-	if (value > mask)
-		panic("%s: value is out of bound length:%d, value:%d\n",
-		    __func__, len, value);
+	if (len > 32)
+		panic("%s: field len is more than 32",
+		    __func__);
+
 	data = param->word[word].data[datapos];
-	data &= ~(mask << offset);
-	data |= (value << offset);
+	data &= ~(mask << bitpos);
+	data |= (value << bitpos);
 	param->word[word].data[datapos] = data;
+
+	if ((bitpos + len) > 32) {
+		len = bitpos + len - 32;
+		mask = (1UL << len) - 1;
+		data2 = param->word[word].data[datapos+1];
+		data2 &= mask;
+		data2 |= (value >> (32 - bitpos));
+		param->word[word].data[datapos+1] = data2;
+	}
 }
 
 static uint32_t
@@ -132,28 +212,106 @@ ipu_ch_param_get_value(struct ipu_cpmem_ch_param *param,
     int word, int offset, int len)
 {
 	uint32_t datapos, bitpos, mask;
-	uint32_t data;
+	uint32_t data, data2;
 
 	datapos = offset / 32;
 	bitpos = offset % 32;
-	mask = (1 << len) - 1;
+	mask = (1UL << len) - 1;
 
-	if (bitpos + len > 32)
-		panic("%s: data boundary violation <w:%d, o:%d, l:%d>",
-		    __func__, word, offset, len);
+	if (len > 32)
+		panic("%s: field len is more than 32",
+		    __func__);
 	data = param->word[word].data[datapos];
-	data = data >> offset;
+	data = data >> bitpos;
 	data &= mask;
+	if ((bitpos + len) > 32) {
+		len = bitpos + len - 32;
+		mask = (1UL << len) - 1;
+		data2 = param->word[word].data[datapos+1];
+		data2 &= mask;
+		data |= (data2 << (32 - bitpos));
+	}
 
 	return (data);
 }
 
 static void
-ipu_init_buffer()
+ipu_print_channel(struct ipu_cpmem_ch_param *param)
 {
+	printf("WORD0: %08x %08x %08x %08x %08x\n",
+		param->word[0].data[0], param->word[0].data[1],
+		param->word[0].data[2], param->word[0].data[3],
+		param->word[0].data[4]);
+	printf("WORD1: %08x %08x %08x %08x %08x\n",
+		param->word[1].data[0], param->word[1].data[1],
+		param->word[1].data[2], param->word[1].data[3],
+		param->word[1].data[4]);
+	printf("FW:   %d\n", CH_PARAM_GET_FW(param));
+	printf("FH:   %d\n", CH_PARAM_GET_FH(param));
+	printf("SLY:  %d\n", CH_PARAM_GET_SLY(param));
+	printf("EBA0: 0x%08x\n", CH_PARAM_GET_EBA0(param));
+	printf("EBA1: 0x%08x\n", CH_PARAM_GET_EBA1(param));
+	printf("BPP:  %d\n", CH_PARAM_GET_BPP(param));
+	printf("PFS:  %d\n", CH_PARAM_GET_PFS(param));
+	printf("NPB:  %d\n", CH_PARAM_GET_NPB(param));
+	printf("UBO:  %d\n", CH_PARAM_GET_UBO(param));
+	printf("VBO:  %d\n", CH_PARAM_GET_VBO(param));
+}
+
+static void
+ipu_init_buffer(struct ipu_softc *sc)
+{
+	struct ipu_cpmem_ch_param param;
+	uint32_t stride;
+	uint32_t reg, db_mode_sel, cur_buf;
+
+	stride = WIDTH*BPP/8;
+
 	/* init channel paramters */
+	CH_PARAM_RESET(&param);
+	/* XXX: interlaced modes are not supported yet */
+	CH_PARAM_SET_FW(&param, WIDTH - 1);
+	CH_PARAM_SET_FH(&param, HEIGHT - 1);
+	CH_PARAM_SET_SLY(&param, stride - 1);
+
+	CH_PARAM_SET_EBA0(&param, (sc->sc_fb_phys >> 3));
+
+	CH_PARAM_SET_BPP(&param, BPP/8);
+	CH_PARAM_SET_PFS(&param, IPU_PIX_FORMAT_RGB);
+	CH_PARAM_SET_NPB(&param, 15);
+
+	CH_PARAM_SET_UBO(&param, 0);
+	CH_PARAM_SET_VBO(&param, 0);
+
+	IPU_WRITE_CH_PARAM(sc, DMA_CHANNEL, &param);
+
 	/* init DMFC */
-	/* set high priority? */
+	IPU_WRITE4(sc, DMFC_IC_CTRL, 0x2);
+	/* High resolution DP */
+	IPU_WRITE4(sc, DMFC_WR_CHAN, 0x00000090);
+	IPU_WRITE4(sc, DMFC_WR_CHAN_DEF, 0x202020F6);
+	IPU_WRITE4(sc, DMFC_DP_CHAN, 0x0000968a);
+	IPU_WRITE4(sc, DMFC_DP_CHAN_DEF, 0x2020F6F6);
+
+	reg = IPU_READ4(sc, DMFC_GENERAL_1);
+	reg &= ~(1UL << 20);
+	IPU_WRITE4(sc, DMFC_GENERAL_1, reg);
+
+	/* XXX: set priority? */
+
+	/* Set single buffer mode */
+	if (DMA_CHANNEL < 32) {
+		db_mode_sel = IPU_CH_DB_MODE_SEL_0;
+		cur_buf = IPU_CUR_BUF_0;
+	} else {
+		db_mode_sel = IPU_CH_DB_MODE_SEL_1;
+		cur_buf = IPU_CUR_BUF_1;
+	}
+
+	reg = IPU_READ4(sc, db_mode_sel);
+	reg &= ~(1UL << (DMA_CHANNEL & 0x1f));
+	IPU_WRITE4(sc, db_mode_sel, reg);
+	IPU_WRITE4(sc, cur_buf, (1UL << (DMA_CHANNEL & 0x1f)));
 }
 
 static int
@@ -163,10 +321,32 @@ ipu_init(struct ipu_softc *sc)
 	int err;
 	size_t dma_size;
 
-	reg = IPU_READ4(sc, IPU1_CONF);
-	printf("IPU1_CONF == %08x\n", reg);
+	reg = IPU_READ4(sc, IPU_CONF);
+	printf("IPU_CONF == %08x\n", reg);
 
 	dma_size = round_page(1026*768*4);
+
+#if 0
+	struct ipu_cpmem_ch_param param;
+	CH_PARAM_RESET(&param);
+	IPU_READ_CH_PARAM(sc, 23, &param);
+	printf("Channel 23\n");
+	ipu_print_channel(&param);
+
+	CH_PARAM_RESET(&param);
+	IPU_READ_CH_PARAM(sc, 27, &param);
+	printf("Channel 27\n");
+	ipu_print_channel(&param);
+
+	CH_PARAM_RESET(&param);
+	IPU_READ_CH_PARAM(sc, 28, &param);
+	printf("Channel 28\n");
+	ipu_print_channel(&param);
+	CH_PARAM_SET_FW(&param, 1024);
+	CH_PARAM_SET_FH(&param, 768);
+	printf("Channel 28\n");
+	ipu_print_channel(&param);
+#endif
 
 	/*
 	 * Now allocate framebuffer memory
@@ -201,10 +381,32 @@ ipu_init(struct ipu_softc *sc)
 	}
 
 	/* Make sure it's blank */
-	memset(sc->sc_fb_base, 0x00, dma_size);
+	memset(sc->sc_fb_base, 0xAA, dma_size);
 
 	/* Calculate actual FB Size */
-	sc->sc_fb_size = 1026*768*4;
+	sc->sc_fb_size = WIDTH*HEIGHT*BPP/8;
+
+	ipu_init_buffer(sc);
+
+	sc->sc_fb_info.fb_name = device_get_nameunit(sc->sc_dev);
+	sc->sc_fb_info.fb_vbase = (intptr_t)sc->sc_fb_base;
+	sc->sc_fb_info.fb_pbase = sc->sc_fb_phys;
+	sc->sc_fb_info.fb_size = sc->sc_fb_size;
+	sc->sc_fb_info.fb_bpp = sc->sc_fb_info.fb_depth = BPP;
+	sc->sc_fb_info.fb_stride = WIDTH*BPP / 8;
+	sc->sc_fb_info.fb_width = WIDTH;
+	sc->sc_fb_info.fb_height = HEIGHT;
+
+	device_t fbd = device_add_child(sc->sc_dev, "fbd",
+	    device_get_unit(sc->sc_dev));
+	if (fbd == NULL) {
+		device_printf(sc->sc_dev, "Failed to add fbd child\n");
+		goto fail;
+	}
+	if (device_probe_and_attach(fbd) != 0) {
+		device_printf(sc->sc_dev, "Failed to attach fbd device\n");
+		goto fail;
+	}
 
 	return (0);
 fail:
@@ -280,16 +482,29 @@ ipu_detach(device_t dev)
 	return (EBUSY);
 }
 
+static struct fb_info *
+ipu_fb_getinfo(device_t dev)
+{
+	struct ipu_softc *sc;
+
+	sc = device_get_softc(dev);
+
+	return (&sc->sc_fb_info);
+}
+
 static device_method_t ipu_methods[] = {
 	DEVMETHOD(device_probe,		ipu_probe),
 	DEVMETHOD(device_attach,	ipu_attach),
 	DEVMETHOD(device_detach,	ipu_detach),
 
+	/* Framebuffer service methods */
+	DEVMETHOD(fb_getinfo,		ipu_fb_getinfo),
+
 	DEVMETHOD_END
 };
 
 static driver_t ipu_driver = {
-	"ipu",
+	"fb",
 	ipu_methods,
 	sizeof(struct ipu_softc),
 };
