@@ -54,11 +54,33 @@ __FBSDID("$FreeBSD$");
 
 #include "fb_if.h"
 
-#define	WIDTH	1024
-#define	HEIGHT	768
-#define	BPP	16
+#if 0
+        .xres           = 1024,
+        .yres           = 768,
+        .pixclock       = 15385,
+        .left_margin    = 220,
+        .right_margin   = 40,
+        .upper_margin   = 21,
+        .lower_margin   = 7,
+        .hsync_len      = 60,
+        .vsync_len      = 10,
+        .sync           = FB_SYNC_EXT | FB_SYNC_CLK_LAT_FALL,
+#endif
+
+#define	MODE_WIDTH	1024
+#define	MODE_HEIGHT	768
+#define MODE_HFP	220
+#define MODE_HBP	40
+#define MODE_HSYNC	60
+#define	MODE_VFP	21
+#define	MODE_VBP	7
+#define	MODE_VSYNC	10
+#define	MODE_BPP	16
+#define	MODE_PIXEL_CLOCK	15385
 
 #define	DMA_CHANNEL	23
+#define	DC_CHAN5	5
+#define	DI_PORT		0
 
 #define	IPU_LOCK(_sc)		mtx_lock(&(_sc)->sc_mtx)
 #define	IPU_UNLOCK(_sc)		mtx_unlock(&(_sc)->sc_mtx)
@@ -73,10 +95,30 @@ __FBSDID("$FreeBSD$");
 #define	CPMEM_BASE	0x300000
 
 #define	IPU_CONF		0x200000
+#define	IPU_DISP_GEN		0x2000C4
+#define		DISP_GEN_DI1_CNTR_RELEASE	(1 << 25)
+#define		DISP_GEN_DI0_CNTR_RELEASE	(1 << 24)
 #define	IPU_CH_DB_MODE_SEL_0	0x200150
 #define	IPU_CH_DB_MODE_SEL_1	0x200154
 #define	IPU_CUR_BUF_0		0x20023C
 #define	IPU_CUR_BUF_1		0x200240
+
+#define	IPU_DI0_SW_GEN0_1	0x24000C
+#define	IPU_DI0_SW_GEN1_1	0x240030
+#define	IPU_DI0_STP_REP		0x240148
+#define	IPU_DI1_SW_GEN0_1	0x24800C
+#define	IPU_DI1_SW_GEN1_1	0x248030
+#define	IPU_DI1_STP_REP		0x240148
+
+#define		DI_COUNTER_INT_HSYNC	1
+#define		DI_COUNTER_HSYNC	2
+#define		DI_COUNTER_VSYNC	3
+#define		DI_COUNTER_DE_0		4
+#define		DI_COUNTER_DE_1		5
+
+#define		DI_SYNC_NONE		0
+#define		DI_SYNC_CLK		1
+#define		DI_SYNC_COUNTER(c)	((c)+1)
 
 #define	DMFC_RD_CHAN		0x260000
 #define	DMFC_WR_CHAN		0x260004
@@ -85,6 +127,12 @@ __FBSDID("$FreeBSD$");
 #define	DMFC_DP_CHAN_DEF	0x260010
 #define	DMFC_GENERAL_1		0x260014
 #define	DMFC_IC_CTRL		0x26001C
+
+#define	DC_WRITE_CH_CONF_5	0x0025805C
+#define	DC_WRITE_CH_ADDR_5	0x00258060
+#define	DC_RL0_CH_5		0x00258064
+#define	DC_GEN			0x002580D4
+
 
 struct ipu_cpmem_word {
 	uint32_t	data[5];
@@ -146,6 +194,18 @@ struct ipu_cpmem_ch_param {
 	0, 68, 22)
 
 #define	IPU_PIX_FORMAT_RGB	7
+
+enum dc_event_t {
+	DC_EVENT_NF = 0,
+	DC_EVENT_NL,
+	DC_EVENT_EOF,
+	DC_EVENT_NFIELD,
+	DC_EVENT_EOL,
+	DC_EVENT_EOFIELD,
+	DC_EVENT_NEW_ADDR,
+	DC_EVENT_NEW_CHAN,
+	DC_EVENT_NEW_DATA
+};
 
 struct ipu_softc {
 	device_t		sc_dev;
@@ -259,30 +319,199 @@ ipu_print_channel(struct ipu_cpmem_ch_param *param)
 }
 
 static void
+ipu_di_enable(struct ipu_softc *sc, int di)
+{
+	uint32_t flag, reg;
+
+	flag = di ? DISP_GEN_DI1_CNTR_RELEASE : DISP_GEN_DI0_CNTR_RELEASE;
+	reg = IPU_READ4(sc, IPU_DISP_GEN);
+	printf("DISP_GEN: %08x -> ", reg);
+	reg |= flag;
+	printf("%08x\n", reg);
+	IPU_WRITE4(sc, IPU_DISP_GEN, reg);
+}
+
+static void
+ipu_di_disable(struct ipu_softc *sc, int di)
+{
+	uint32_t flag, reg;
+
+	flag = di ? DISP_GEN_DI1_CNTR_RELEASE : DISP_GEN_DI0_CNTR_RELEASE;
+	reg = IPU_READ4(sc, IPU_DISP_GEN);
+	reg &= ~flag;
+	IPU_WRITE4(sc, IPU_DISP_GEN, reg);
+}
+
+static void
+ipu_config_wave_gen_0(struct ipu_softc *sc, int di,
+	int wave_gen, int run_value, int run_res,
+	int offset_value, int offset_res)
+{
+	uint32_t addr, reg;
+
+	addr = (di ? IPU_DI1_SW_GEN0_1 : IPU_DI0_SW_GEN0_1)
+	    + (wave_gen-1)*sizeof(uint32_t);
+	reg = (run_value << 19) | (run_res << 16) |
+	    (offset_value << 3) | offset_res;
+	IPU_WRITE4(sc, addr, reg);
+}
+
+static void
+ipu_config_wave_gen_1(struct ipu_softc *sc, int di, int wave_gen,
+	int repeat_count, int cnt_clr_src,
+	int cnt_polarity_gen_en,
+	int cnt_polarity_clr_src,
+	int cnt_polarity_trigger_src,
+	int cnt_up, int cnt_down)
+{
+	uint32_t addr, reg;
+
+	addr = (di ? IPU_DI1_SW_GEN1_1 : IPU_DI0_SW_GEN1_1)
+	    + (wave_gen-1)*sizeof(uint32_t);
+	reg = (cnt_polarity_gen_en << 29) | (cnt_clr_src << 25)
+	    | (cnt_polarity_trigger_src << 12) | (cnt_polarity_clr_src << 9);
+	reg = (cnt_down << 16) | cnt_up;
+	if (repeat_count)
+		reg |= (1 << 28);
+	IPU_WRITE4(sc, addr, reg);
+
+	addr = (di ? IPU_DI1_STP_REP : IPU_DI0_STP_REP)
+	    + (wave_gen-1)/2*sizeof(uint32_t);
+	reg = IPU_READ4(sc, addr);
+	if (wave_gen % 2) {
+		reg &= ~(0xffff);
+		reg |= repeat_count;
+	}
+	else {
+		reg &= ~(0xffff << 16);
+		reg |= (repeat_count << 16);
+	}
+	IPU_WRITE4(sc, addr, reg);
+}
+
+static void
+ipu_config_timing(struct ipu_softc *sc, int di)
+{
+	int div;
+	/* TODO: enable timers, get divisors */
+}
+
+static void
+ipu_dc_enable(struct ipu_softc *sc)
+{
+	uint32_t conf;
+
+	conf = IPU_READ4(sc, DC_WRITE_CH_CONF_5);
+	printf("CONF: %08x -> ", conf);
+	conf &= ~(7 << 5); /* PROG_CHAN_TYP */
+	conf |= 4 << 5; /* ENABLED */
+	IPU_WRITE4(sc, DC_WRITE_CH_CONF_5, conf)
+	printf("%08x\n", conf);
+
+	/* TODO: enable clock */
+}
+
+static void
+ipu_dc_disable(struct ipu_softc *sc)
+{
+	uint32_t conf, reg;
+
+	/* TODO: wait for DC_STAT cleared */
+
+	conf = IPU_READ4(sc, DC_WRITE_CH_CONF_5);
+	printf("CONF: %08x -> ", conf);
+	conf &= ~(7 << 5); /* PROG_CHAN_TYP/DISABLE */
+	IPU_WRITE4(sc, DC_WRITE_CH_CONF_5, conf)
+	printf("%08x\n", conf);
+
+	reg = IPU_READ4(sc, IPU_DISP_GEN);
+	printf("DISP_GEN: %08x -> ", reg);
+	if (DI_PORT)
+		reg &= ~DISP_GEN_DI1_CNTR_RELEASE;
+	else
+		reg &= ~DISP_GEN_DI0_CNTR_RELEASE;
+	printf("%08x\n", reg);
+	IPU_WRITE4(sc, IPU_DISP_GEN, reg)
+
+	/* TODO: disable clock */
+}
+
+static void
+ipu_dc_link_event(struct ipu_softc *sc, int event, int addr, int priority)
+{
+	uint32_t reg;
+	int offset;
+	int shift;
+
+	if (event % 2)
+		shift = 16;
+	else
+		shift = 0;
+
+	offset = DC_RL0_CH_5 + (event/2)*sizeof(uint32_t);
+
+	reg = IPU_READ4(sc, offset);
+	reg &= ~(0xFFFF << shift);
+	reg |= ((addr << 8) | priority) << shift;
+	IPU_WRITE4(sc, offset, reg);
+}
+
+static void
+ipu_dc_init(struct ipu_softc *sc)
+{
+	int addr;
+	uint32_t conf;
+
+	if (DI_PORT)
+		addr = 2;
+	else
+		addr = 5;
+
+	ipu_dc_link_event(sc, DC_EVENT_NL, addr, 3);
+	ipu_dc_link_event(sc, DC_EVENT_EOL, addr+1, 2);
+	ipu_dc_link_event(sc, DC_EVENT_NEW_DATA, addr+2, 1);
+	ipu_dc_link_event(sc, DC_EVENT_NF, 0, 0);
+	ipu_dc_link_event(sc, DC_EVENT_NFIELD, 0, 0);
+	ipu_dc_link_event(sc, DC_EVENT_EOF, 0, 0);
+	ipu_dc_link_event(sc, DC_EVENT_EOFIELD, 0, 0);
+	ipu_dc_link_event(sc, DC_EVENT_NEW_CHAN, 0, 0);
+	ipu_dc_link_event(sc, DC_EVENT_NEW_ADDR, 0, 0);
+
+	conf = 0x02; /* W_SIZE */
+        conf |= DI_PORT << 3; /* PROG_DISP_ID */
+	conf |= DI_PORT << 2; /* PROG_DI_ID */
+	IPU_WRITE4(sc, DC_WRITE_CH_CONF_5, conf)
+	IPU_WRITE4(sc, DC_WRITE_CH_ADDR_5, 0x00000000)
+	IPU_WRITE4(sc, DC_GEN, 0x84); /* High priority, sync */
+}
+
+static void
 ipu_init_buffer(struct ipu_softc *sc)
 {
 	struct ipu_cpmem_ch_param param;
+	struct ipu_cpmem_ch_param param1;
 	uint32_t stride;
 	uint32_t reg, db_mode_sel, cur_buf;
 
-	stride = WIDTH*BPP/8;
+	stride = MODE_WIDTH*MODE_BPP/8;
 
 	/* init channel paramters */
 	CH_PARAM_RESET(&param);
 	/* XXX: interlaced modes are not supported yet */
-	CH_PARAM_SET_FW(&param, WIDTH - 1);
-	CH_PARAM_SET_FH(&param, HEIGHT - 1);
+	CH_PARAM_SET_FW(&param, MODE_WIDTH - 1);
+	CH_PARAM_SET_FH(&param, MODE_HEIGHT - 1);
 	CH_PARAM_SET_SLY(&param, stride - 1);
 
 	CH_PARAM_SET_EBA0(&param, (sc->sc_fb_phys >> 3));
 
-	CH_PARAM_SET_BPP(&param, BPP/8);
+	CH_PARAM_SET_BPP(&param, 3);
 	CH_PARAM_SET_PFS(&param, IPU_PIX_FORMAT_RGB);
 	CH_PARAM_SET_NPB(&param, 15);
 
 	CH_PARAM_SET_UBO(&param, 0);
 	CH_PARAM_SET_VBO(&param, 0);
 
+	IPU_READ_CH_PARAM(sc, DMA_CHANNEL, &param1);
 	IPU_WRITE_CH_PARAM(sc, DMA_CHANNEL, &param);
 
 	/* init DMFC */
@@ -384,7 +613,7 @@ ipu_init(struct ipu_softc *sc)
 	memset(sc->sc_fb_base, 0xAA, dma_size);
 
 	/* Calculate actual FB Size */
-	sc->sc_fb_size = WIDTH*HEIGHT*BPP/8;
+	sc->sc_fb_size = MODE_WIDTH*MODE_HEIGHT*MODE_BPP/8;
 
 	ipu_init_buffer(sc);
 
@@ -392,10 +621,10 @@ ipu_init(struct ipu_softc *sc)
 	sc->sc_fb_info.fb_vbase = (intptr_t)sc->sc_fb_base;
 	sc->sc_fb_info.fb_pbase = sc->sc_fb_phys;
 	sc->sc_fb_info.fb_size = sc->sc_fb_size;
-	sc->sc_fb_info.fb_bpp = sc->sc_fb_info.fb_depth = BPP;
-	sc->sc_fb_info.fb_stride = WIDTH*BPP / 8;
-	sc->sc_fb_info.fb_width = WIDTH;
-	sc->sc_fb_info.fb_height = HEIGHT;
+	sc->sc_fb_info.fb_bpp = sc->sc_fb_info.fb_depth = MODE_BPP;
+	sc->sc_fb_info.fb_stride = MODE_WIDTH*MODE_BPP / 8;
+	sc->sc_fb_info.fb_width = MODE_WIDTH;
+	sc->sc_fb_info.fb_height = MODE_HEIGHT;
 
 	device_t fbd = device_add_child(sc->sc_dev, "fbd",
 	    device_get_unit(sc->sc_dev));
@@ -407,6 +636,13 @@ ipu_init(struct ipu_softc *sc)
 		device_printf(sc->sc_dev, "Failed to attach fbd device\n");
 		goto fail;
 	}
+
+#if 0
+	ipu_dc_disable(sc);
+	DELAY(5000);
+	ipu_di_enable(sc, 0);
+	ipu_dc_enable(sc);
+#endif
 
 	return (0);
 fail:
