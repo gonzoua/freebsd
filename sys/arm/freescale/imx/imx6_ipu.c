@@ -113,8 +113,8 @@ __FBSDID("$FreeBSD$");
 #define		DI_COUNTER_INT_HSYNC	1
 #define		DI_COUNTER_HSYNC	2
 #define		DI_COUNTER_VSYNC	3
-#define		DI_COUNTER_DE_0		4
-#define		DI_COUNTER_DE_1		5
+#define		DI_COUNTER_AD_0		4
+#define		DI_COUNTER_AD_1		5
 
 #define		DI_SYNC_NONE		0
 #define		DI_SYNC_CLK		1
@@ -351,9 +351,12 @@ ipu_config_wave_gen_0(struct ipu_softc *sc, int di,
 
 	addr = (di ? IPU_DI1_SW_GEN0_1 : IPU_DI0_SW_GEN0_1)
 	    + (wave_gen-1)*sizeof(uint32_t);
+	reg = IPU_READ4(sc, addr);
+	printf("DI0_SW_GEN0_%d %08x -> ", wave_gen, reg);
 	reg = (run_value << 19) | (run_res << 16) |
 	    (offset_value << 3) | offset_res;
 	IPU_WRITE4(sc, addr, reg);
+	printf("%08x\n", reg);
 }
 
 static void
@@ -368,16 +371,20 @@ ipu_config_wave_gen_1(struct ipu_softc *sc, int di, int wave_gen,
 
 	addr = (di ? IPU_DI1_SW_GEN1_1 : IPU_DI0_SW_GEN1_1)
 	    + (wave_gen-1)*sizeof(uint32_t);
+	reg = IPU_READ4(sc, addr);
+	printf("DI0_SW_GEN1_%d %08x -> ", wave_gen, reg);
 	reg = (cnt_polarity_gen_en << 29) | (cnt_clr_src << 25)
 	    | (cnt_polarity_trigger_src << 12) | (cnt_polarity_clr_src << 9);
-	reg = (cnt_down << 16) | cnt_up;
-	if (repeat_count)
+	reg |= (cnt_down << 16) | cnt_up;
+	if (repeat_count == 0)
 		reg |= (1 << 28);
 	IPU_WRITE4(sc, addr, reg);
+	printf("%08x\n", reg);
 
 	addr = (di ? IPU_DI1_STP_REP : IPU_DI0_STP_REP)
 	    + (wave_gen-1)/2*sizeof(uint32_t);
 	reg = IPU_READ4(sc, addr);
+	printf("IPU_DI1_STP_REP%d %08x -> ", wave_gen/2 + 1, reg);
 	if (wave_gen % 2) {
 		reg &= ~(0xffff);
 		reg |= repeat_count;
@@ -386,6 +393,31 @@ ipu_config_wave_gen_1(struct ipu_softc *sc, int di, int wave_gen,
 		reg &= ~(0xffff << 16);
 		reg |= (repeat_count << 16);
 	}
+	printf("%08x\n", reg);
+	IPU_WRITE4(sc, addr, reg);
+}
+
+static void
+ipu_reset_wave_gen(struct ipu_softc *sc, int di,
+	int wave_gen)
+{
+	uint32_t addr, reg;
+
+	addr = (di ? IPU_DI1_SW_GEN0_1 : IPU_DI0_SW_GEN0_1)
+	    + (wave_gen-1)*sizeof(uint32_t);
+	IPU_WRITE4(sc, addr, 0);
+
+	addr = (di ? IPU_DI1_SW_GEN1_1 : IPU_DI0_SW_GEN1_1)
+	    + (wave_gen-1)*sizeof(uint32_t);
+	IPU_WRITE4(sc, addr, 0);
+
+	addr = (di ? IPU_DI1_STP_REP : IPU_DI0_STP_REP)
+	    + (wave_gen-1)/2*sizeof(uint32_t);
+	reg = IPU_READ4(sc, addr);
+	if (wave_gen % 2)
+		reg &= ~(0xffff);
+	else
+		reg &= ~(0xffff << 16);
 	IPU_WRITE4(sc, addr, reg);
 }
 
@@ -393,7 +425,61 @@ static void
 ipu_config_timing(struct ipu_softc *sc, int di)
 {
 	int div;
+	int htotal;
+	int vtotal;
+
+	/* TODO: check mode restrictions / fixup */
 	/* TODO: enable timers, get divisors */
+
+	div = 0;
+	htotal = MODE_WIDTH + MODE_HFP + MODE_HBP + MODE_HSYNC;
+	vtotal = MODE_HEIGHT + MODE_VFP + MODE_VBP + MODE_VSYNC;
+
+	/* DI_COUNTER_INT_HSYNC */
+	ipu_config_wave_gen_0(sc, di, DI_COUNTER_INT_HSYNC,
+	    htotal - 1, DI_SYNC_CLK, 0, DI_SYNC_NONE);
+	ipu_config_wave_gen_1(sc, di, DI_COUNTER_INT_HSYNC,
+	    0, DI_SYNC_NONE, 0, DI_SYNC_NONE, DI_SYNC_NONE, 0, 0);
+
+	/* DI_COUNTER_HSYNC */
+	ipu_config_wave_gen_0(sc, di, DI_COUNTER_HSYNC,
+	    htotal - 1, DI_SYNC_CLK, 0, DI_SYNC_CLK);
+	ipu_config_wave_gen_1(sc, di, DI_COUNTER_HSYNC,
+	    0, DI_SYNC_NONE, 1, DI_SYNC_NONE, DI_SYNC_CLK,
+	    0, MODE_HSYNC*2);
+
+	/* DI_COUNTER_VSYNC */
+	ipu_config_wave_gen_0(sc, di, DI_COUNTER_VSYNC,
+	    vtotal - 1, DI_SYNC_COUNTER(DI_COUNTER_INT_HSYNC),
+	    0, DI_SYNC_NONE);
+	ipu_config_wave_gen_1(sc, di, DI_COUNTER_VSYNC,
+	    0, DI_SYNC_NONE, 1, DI_SYNC_NONE,
+	    DI_SYNC_COUNTER(DI_COUNTER_INT_HSYNC),
+	    0, MODE_VSYNC*2);
+
+	/* TODO: update DI_SCR_CONF */
+
+	/* Active Data 0 */
+	ipu_config_wave_gen_0(sc, di, DI_COUNTER_AD_0,
+	    0, DI_SYNC_COUNTER(DI_COUNTER_HSYNC),
+	    MODE_VSYNC + MODE_VFP, DI_SYNC_COUNTER(DI_COUNTER_HSYNC));
+	ipu_config_wave_gen_1(sc, di, DI_COUNTER_AD_0,
+	    MODE_HEIGHT, DI_SYNC_COUNTER(DI_COUNTER_VSYNC),
+	    0, DI_SYNC_NONE, DI_SYNC_NONE, 0, 0);
+
+	ipu_config_wave_gen_0(sc, di, DI_COUNTER_AD_1,
+	    0, DI_SYNC_CLK, MODE_HSYNC + MODE_HFP, DI_SYNC_CLK);
+	ipu_config_wave_gen_1(sc, di, DI_COUNTER_AD_1,
+	    MODE_WIDTH, DI_SYNC_COUNTER(DI_COUNTER_AD_0),
+	    0, DI_SYNC_NONE, DI_SYNC_NONE, 0, 0);
+
+
+	ipu_reset_wave_gen(sc, di, 6);
+	ipu_reset_wave_gen(sc, di, 7);
+	ipu_reset_wave_gen(sc, di, 8);
+	ipu_reset_wave_gen(sc, di, 9);
+
+
 }
 
 static void
@@ -577,6 +663,7 @@ ipu_init(struct ipu_softc *sc)
 	ipu_print_channel(&param);
 #endif
 
+
 	/*
 	 * Now allocate framebuffer memory
 	 */
@@ -643,6 +730,7 @@ ipu_init(struct ipu_softc *sc)
 	ipu_di_enable(sc, 0);
 	ipu_dc_enable(sc);
 #endif
+	ipu_config_timing(sc, DI_PORT);
 
 	return (0);
 fail:
