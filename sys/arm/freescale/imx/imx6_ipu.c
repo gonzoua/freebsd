@@ -77,6 +77,9 @@ __FBSDID("$FreeBSD$");
 #define	MODE_VSYNC	10
 #define	MODE_BPP	16
 #define	MODE_PIXEL_CLOCK	15385
+#define	MODE_HSYNC_INVERT	1
+#define	MODE_VSYNC_INVERT	1
+#define	MODE_PIXEL_CLOCK_INVERT	1
 
 #define	DMA_CHANNEL	23
 #define	DC_CHAN5	5
@@ -103,12 +106,22 @@ __FBSDID("$FreeBSD$");
 #define	IPU_CUR_BUF_0		0x20023C
 #define	IPU_CUR_BUF_1		0x200240
 
+#define	IPU_DI0_GENERAL		0x240000
+#define		DI_GENERAL_POL_CLK	(1 << 17)
+#define		DI_GENERAL_POLARITY_3	(1 << 2)
+#define		DI_GENERAL_POLARITY_2	(1 << 1)
 #define	IPU_DI0_SW_GEN0_1	0x24000C
 #define	IPU_DI0_SW_GEN1_1	0x240030
+#define	IPU_DI0_SYNC_AS_GEN	0x240054
 #define	IPU_DI0_STP_REP		0x240148
+#define	IPU_DI0_SCR_CONF	0x240170
+
+#define	IPU_DI1_GENERAL		0x248000
 #define	IPU_DI1_SW_GEN0_1	0x24800C
 #define	IPU_DI1_SW_GEN1_1	0x248030
+#define	IPU_DI1_SYNC_AS_GEN	0x248054
 #define	IPU_DI1_STP_REP		0x240148
+#define	IPU_DI1_SCR_CONF	0x240170
 
 #define		DI_COUNTER_INT_HSYNC	1
 #define		DI_COUNTER_HSYNC	2
@@ -132,6 +145,7 @@ __FBSDID("$FreeBSD$");
 #define	DC_WRITE_CH_ADDR_5	0x00258060
 #define	DC_RL0_CH_5		0x00258064
 #define	DC_GEN			0x002580D4
+#define	DC_DISP_CONF2(di)	(0x002580E8 + (di)*4)
 
 
 struct ipu_cpmem_word {
@@ -427,6 +441,9 @@ ipu_config_timing(struct ipu_softc *sc, int di)
 	int div;
 	int htotal;
 	int vtotal;
+	uint32_t di_scr_conf;
+	uint32_t gen_offset, gen;
+	uint32_t as_gen_offset, as_gen;
 
 	/* TODO: check mode restrictions / fixup */
 	/* TODO: enable timers, get divisors */
@@ -457,6 +474,9 @@ ipu_config_timing(struct ipu_softc *sc, int di)
 	    DI_SYNC_COUNTER(DI_COUNTER_INT_HSYNC),
 	    0, MODE_VSYNC*2);
 
+	di_scr_conf = di ? IPU_DI1_SCR_CONF : IPU_DI0_SCR_CONF;
+	IPU_WRITE4(sc, di_scr_conf, vtotal - 1);
+
 	/* TODO: update DI_SCR_CONF */
 
 	/* Active Data 0 */
@@ -473,13 +493,46 @@ ipu_config_timing(struct ipu_softc *sc, int di)
 	    MODE_WIDTH, DI_SYNC_COUNTER(DI_COUNTER_AD_0),
 	    0, DI_SYNC_NONE, DI_SYNC_NONE, 0, 0);
 
-
 	ipu_reset_wave_gen(sc, di, 6);
 	ipu_reset_wave_gen(sc, di, 7);
 	ipu_reset_wave_gen(sc, di, 8);
 	ipu_reset_wave_gen(sc, di, 9);
 
+	/* TODO: init microcode template */
 
+	gen_offset = di ?  IPU_DI1_GENERAL : IPU_DI0_GENERAL;
+	gen = IPU_READ4(sc, gen_offset);
+	printf("DI_GENERAL: %08x -> ", gen);
+
+	if (MODE_HSYNC_INVERT)
+		gen &= ~DI_GENERAL_POLARITY_2;
+	else /* active high */
+		gen |= DI_GENERAL_POLARITY_2;
+
+	if (MODE_VSYNC_INVERT)
+		gen &= ~DI_GENERAL_POLARITY_3;
+	else /* active high */
+		gen |= DI_GENERAL_POLARITY_3;
+
+	if (MODE_PIXEL_CLOCK_INVERT)
+		gen &= ~DI_GENERAL_POL_CLK;
+	else
+		gen |= DI_GENERAL_POL_CLK;
+
+	printf("%08x\n", gen);
+	IPU_WRITE4(sc, gen_offset, gen);
+
+
+	as_gen_offset = di ?  IPU_DI1_SYNC_AS_GEN : IPU_DI0_SYNC_AS_GEN;
+	as_gen = IPU_READ4(sc, as_gen_offset);
+	printf("SYNC_AS_GEN: %08x -> ", as_gen);
+	as_gen = ((DI_COUNTER_VSYNC-1) << 13) | 2;
+	printf("%08x\n", as_gen);
+	IPU_WRITE4(sc, as_gen_offset, as_gen);
+
+	/* TODO: set DI_POL */
+
+	IPU_WRITE4(sc, DC_DISP_CONF2(di), MODE_WIDTH);
 }
 
 static void
