@@ -89,13 +89,14 @@ __FBSDID("$FreeBSD$");
 #define	IPU_UNLOCK(_sc)		mtx_unlock(&(_sc)->sc_mtx)
 #define	IPU_LOCK_INIT(_sc)	mtx_init(&(_sc)->sc_mtx, \
     device_get_nameunit(_sc->sc_dev), "ipu", MTX_DEF)
-#define	IPU_LOCK_DESTROY(_sc)	mtx_destroy(&(_sc)->sc_mtx);
+#define	IPU_LOCK_DESTROY(_sc)	mtx_destroy(&(_sc)->sc_mtx)
 
-#define	IPU_READ4(_sc, reg)	bus_read_4((_sc)->sc_mem_res, reg);
+#define	IPU_READ4(_sc, reg)	bus_read_4((_sc)->sc_mem_res, reg)
 #define	IPU_WRITE4(_sc, reg, value)	\
-    bus_write_4((_sc)->sc_mem_res, reg, value);
+    bus_write_4((_sc)->sc_mem_res, reg, value)
 
 #define	CPMEM_BASE	0x300000
+#define	DC_TEMPL_BASE	0x380000
 
 #define	IPU_CONF		0x200000
 #define	IPU_DISP_GEN		0x2000C4
@@ -113,6 +114,8 @@ __FBSDID("$FreeBSD$");
 #define	IPU_DI0_SW_GEN0_1	0x24000C
 #define	IPU_DI0_SW_GEN1_1	0x240030
 #define	IPU_DI0_SYNC_AS_GEN	0x240054
+#define	IPU_DI0_DW_GEN_0	0x240058
+#define	IPU_DI0_DW_SET3_0	0x240118
 #define	IPU_DI0_STP_REP		0x240148
 #define	IPU_DI0_SCR_CONF	0x240170
 
@@ -120,8 +123,10 @@ __FBSDID("$FreeBSD$");
 #define	IPU_DI1_SW_GEN0_1	0x24800C
 #define	IPU_DI1_SW_GEN1_1	0x248030
 #define	IPU_DI1_SYNC_AS_GEN	0x248054
-#define	IPU_DI1_STP_REP		0x240148
-#define	IPU_DI1_SCR_CONF	0x240170
+#define	IPU_DI1_DW_GEN_0	0x248058
+#define	IPU_DI1_DW_SET3_0	0x248118
+#define	IPU_DI1_STP_REP		0x248148
+#define	IPU_DI1_SCR_CONF	0x248170
 
 #define		DI_COUNTER_INT_HSYNC	1
 #define		DI_COUNTER_HSYNC	2
@@ -436,6 +441,42 @@ ipu_reset_wave_gen(struct ipu_softc *sc, int di,
 }
 
 static void
+ipu_init_micorcode_template(struct ipu_softc *sc, int di, int map)
+{
+	uint32_t addr;
+	uint32_t w1, w2;
+	int i, word;
+	int glue;
+
+	word = di ? 2 : 5;
+
+	for (i = 0; i < 3; i++) {
+		if (i == 0)
+			glue = 8; /* keep asserted */
+		else if (i == 1)
+			glue = 4; /* keep negated */
+		else if (i == 2)
+			glue = 0;
+				
+		w1 = 5; /* sync */
+		w1 |= (glue << 4); /* glue */
+		w1 |= (1 << 11); /* wave unit 0 */
+		w1 |= ((map+1) << 15);
+		/* operand is zero */
+		
+		/* Write data to DI and Hold data in register */
+		w2 = 0x18 << 4; /* opcode: WROD 0x0 */
+		w2 |= (1 << 9); /* Stop */
+
+		addr = DC_TEMPL_BASE + (word+i)*2*sizeof(uint32_t);
+		printf("W1[%d] %08x -> %08x\n", word, IPU_READ4(sc, addr), w1);
+		printf("W2[%d] %08x -> %08x\n", word, IPU_READ4(sc, addr + sizeof(uint32_t)), w2);
+		IPU_WRITE4(sc, addr, w1);
+		IPU_WRITE4(sc, addr + sizeof(uint32_t), w2);
+	}
+}
+
+static void
 ipu_config_timing(struct ipu_softc *sc, int di)
 {
 	int div;
@@ -444,9 +485,30 @@ ipu_config_timing(struct ipu_softc *sc, int di)
 	uint32_t di_scr_conf;
 	uint32_t gen_offset, gen;
 	uint32_t as_gen_offset, as_gen;
+	uint32_t dw_gen_offset, dw_gen;
+	uint32_t dw_set_offset, dw_set;
+	int map;
 
 	/* TODO: check mode restrictions / fixup */
 	/* TODO: enable timers, get divisors */
+	div = 1;
+	map = 0;
+
+	/* Setup wave generator */
+	dw_gen_offset = di ? IPU_DI1_DW_GEN_0 : IPU_DI0_DW_GEN_0;
+	dw_gen = IPU_READ4(sc, dw_gen_offset);
+	printf("DW_GEN: %08x -> ", dw_gen);
+	dw_gen = ((div - 1) << 24) | ((div - 1) << 16);
+	dw_gen |= (3 << 8); /* pin15, set 3 */
+	printf("%08x\n", dw_gen);
+	IPU_WRITE4(sc, dw_gen_offset, dw_gen);
+
+	dw_set_offset = di ? IPU_DI1_DW_SET3_0 : IPU_DI0_DW_SET3_0;
+	dw_set = IPU_READ4(sc, dw_set_offset);
+	printf("DW_SET: %08x -> ", dw_set);
+	dw_set = (div*2 << 16) | 0;
+	printf("%08x\n", dw_set);
+	IPU_WRITE4(sc, dw_set_offset, dw_set);
 
 	div = 0;
 	htotal = MODE_WIDTH + MODE_HFP + MODE_HBP + MODE_HSYNC;
@@ -498,7 +560,7 @@ ipu_config_timing(struct ipu_softc *sc, int di)
 	ipu_reset_wave_gen(sc, di, 8);
 	ipu_reset_wave_gen(sc, di, 9);
 
-	/* TODO: init microcode template */
+	ipu_init_micorcode_template(sc, di, map);
 
 	gen_offset = di ?  IPU_DI1_GENERAL : IPU_DI0_GENERAL;
 	gen = IPU_READ4(sc, gen_offset);
@@ -544,7 +606,7 @@ ipu_dc_enable(struct ipu_softc *sc)
 	printf("CONF: %08x -> ", conf);
 	conf &= ~(7 << 5); /* PROG_CHAN_TYP */
 	conf |= 4 << 5; /* ENABLED */
-	IPU_WRITE4(sc, DC_WRITE_CH_CONF_5, conf)
+	IPU_WRITE4(sc, DC_WRITE_CH_CONF_5, conf);
 	printf("%08x\n", conf);
 
 	/* TODO: enable clock */
@@ -560,7 +622,7 @@ ipu_dc_disable(struct ipu_softc *sc)
 	conf = IPU_READ4(sc, DC_WRITE_CH_CONF_5);
 	printf("CONF: %08x -> ", conf);
 	conf &= ~(7 << 5); /* PROG_CHAN_TYP/DISABLE */
-	IPU_WRITE4(sc, DC_WRITE_CH_CONF_5, conf)
+	IPU_WRITE4(sc, DC_WRITE_CH_CONF_5, conf);
 	printf("%08x\n", conf);
 
 	reg = IPU_READ4(sc, IPU_DISP_GEN);
@@ -570,7 +632,7 @@ ipu_dc_disable(struct ipu_softc *sc)
 	else
 		reg &= ~DISP_GEN_DI0_CNTR_RELEASE;
 	printf("%08x\n", reg);
-	IPU_WRITE4(sc, IPU_DISP_GEN, reg)
+	IPU_WRITE4(sc, IPU_DISP_GEN, reg);
 
 	/* TODO: disable clock */
 }
@@ -619,8 +681,15 @@ ipu_dc_init(struct ipu_softc *sc)
 	conf = 0x02; /* W_SIZE */
         conf |= DI_PORT << 3; /* PROG_DISP_ID */
 	conf |= DI_PORT << 2; /* PROG_DI_ID */
-	IPU_WRITE4(sc, DC_WRITE_CH_CONF_5, conf)
-	IPU_WRITE4(sc, DC_WRITE_CH_ADDR_5, 0x00000000)
+	printf("DC_WRITE_CH_CONF_5: %08x -> %08x\n", 
+		IPU_READ4(sc, DC_WRITE_CH_CONF_5), conf);
+	printf("DC_WRITE_CH_ADDR_5: %08x -> 0x00000000\n", 
+		IPU_READ4(sc, DC_WRITE_CH_ADDR_5));
+	printf("DC_GEN: %08x -> 0x00000084\n", 
+		IPU_READ4(sc, DC_GEN));
+
+	IPU_WRITE4(sc, DC_WRITE_CH_CONF_5, conf);
+	IPU_WRITE4(sc, DC_WRITE_CH_ADDR_5, 0x00000000);
 	IPU_WRITE4(sc, DC_GEN, 0x84); /* High priority, sync */
 }
 
@@ -755,6 +824,9 @@ ipu_init(struct ipu_softc *sc)
 	/* Calculate actual FB Size */
 	sc->sc_fb_size = MODE_WIDTH*MODE_HEIGHT*MODE_BPP/8;
 
+	ipu_dc_init(sc);
+	ipu_di_enable(sc, DI_PORT);
+	ipu_dc_enable(sc);
 	ipu_init_buffer(sc);
 
 	sc->sc_fb_info.fb_name = device_get_nameunit(sc->sc_dev);
@@ -777,12 +849,6 @@ ipu_init(struct ipu_softc *sc)
 		goto fail;
 	}
 
-#if 0
-	ipu_dc_disable(sc);
-	DELAY(5000);
-	ipu_di_enable(sc, 0);
-	ipu_dc_enable(sc);
-#endif
 	ipu_config_timing(sc, DI_PORT);
 
 	return (0);
