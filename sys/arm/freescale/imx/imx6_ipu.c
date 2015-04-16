@@ -819,7 +819,7 @@ ipu_init(struct ipu_softc *sc)
 	}
 
 	/* Make sure it's blank */
-	memset(sc->sc_fb_base, 0xAA, dma_size);
+	memset(sc->sc_fb_base, 0x00, dma_size);
 
 	/* Calculate actual FB Size */
 	sc->sc_fb_size = MODE_WIDTH*MODE_HEIGHT*MODE_BPP/8;
