@@ -52,7 +52,12 @@ __FBSDID("$FreeBSD$");
 #include <dev/fb/fbreg.h>
 #include <dev/vt/vt.h>
 
+#include <arm/freescale/imx/imx6_src.h>
+
 #include "fb_if.h"
+
+#define IPU_RESET
+#undef IPU_RESET
 
 #if 0
         .xres           = 1024,
@@ -107,6 +112,9 @@ __FBSDID("$FreeBSD$");
 #define	IPU_CUR_BUF_0		0x20023C
 #define	IPU_CUR_BUF_1		0x200240
 
+#define	IPU_IDMAC_CH_EN_1	0x208004
+#define	IPU_IDMAC_CH_EN_2	0x208008
+
 #define	IPU_DI0_GENERAL		0x240000
 #define		DI_GENERAL_POL_CLK	(1 << 17)
 #define		DI_GENERAL_POLARITY_3	(1 << 2)
@@ -151,6 +159,10 @@ __FBSDID("$FreeBSD$");
 #define	DC_RL0_CH_5		0x00258064
 #define	DC_GEN			0x002580D4
 #define	DC_DISP_CONF2(di)	(0x002580E8 + (di)*4)
+#define	DC_MAP_CONF_0		0x00258108
+#define	DC_MAP_CONF_15		0x00258144
+#define	DC_MAP_CONF_VAL(map)	(DC_MAP_CONF_15 + ((map)/2)*sizeof(uint32_t))
+#define	DC_MAP_CONF_PTR(ptr)	(DC_MAP_CONF_0 + ((ptr)/2)*sizeof(uint32_t))
 
 
 struct ipu_cpmem_word {
@@ -658,6 +670,52 @@ ipu_dc_link_event(struct ipu_softc *sc, int event, int addr, int priority)
 }
 
 static void
+ipu_dc_setup_map(struct ipu_softc *sc, int map,
+    int byte, int offset, int mask)
+{
+	uint32_t reg, shift, ptr;
+
+	ptr = map*3 + byte;
+
+	reg = IPU_READ4(sc, DC_MAP_CONF_VAL(ptr));
+	printf("DC_MAP_CONF_VAL[%08x]: %08x -> ", DC_MAP_CONF_VAL(ptr), reg);
+	if (ptr & 1)
+		shift = 16;
+	else
+		shift = 0;
+	reg &= ~(0xffff << shift);
+	reg |= ((offset << 8) | mask) << shift;
+	printf("%08x\n", reg);
+	IPU_WRITE4(sc, DC_MAP_CONF_VAL(ptr), reg);
+
+	reg = IPU_READ4(sc, DC_MAP_CONF_PTR(map));
+	printf("DC_MAP_CONF_PTR[%08x]: %08x -> ", DC_MAP_CONF_PTR(map), reg);
+	if (map & 1)
+		shift = 16  + 5*byte;
+	else
+		shift = 5*byte;
+	reg &= ~(0x1f << shift);
+	reg |= (ptr) << shift;
+	printf("%08x\n", reg);
+	IPU_WRITE4(sc, DC_MAP_CONF_PTR(map), reg);
+}
+
+
+static void
+ipu_dc_reset_map(struct ipu_softc *sc, int map)
+{
+	uint32_t reg;
+	reg = IPU_READ4(sc, DC_MAP_CONF_PTR(map));
+	printf("DC_MAP_CONF[%d]: %08x -> ", map, reg);
+	if (map & 1)
+		reg &= 0x0000ffff;
+	else
+		reg &= 0xffff0000;
+	printf(" -> %08x\n", reg);
+	IPU_WRITE4(sc, DC_MAP_CONF_PTR(map), reg);
+}
+
+static void
 ipu_dc_init(struct ipu_softc *sc)
 {
 	int addr;
@@ -700,6 +758,7 @@ ipu_init_buffer(struct ipu_softc *sc)
 	struct ipu_cpmem_ch_param param1;
 	uint32_t stride;
 	uint32_t reg, db_mode_sel, cur_buf;
+	uint32_t off;
 
 	stride = MODE_WIDTH*MODE_BPP/8;
 
@@ -749,6 +808,18 @@ ipu_init_buffer(struct ipu_softc *sc)
 	reg &= ~(1UL << (DMA_CHANNEL & 0x1f));
 	IPU_WRITE4(sc, db_mode_sel, reg);
 	IPU_WRITE4(sc, cur_buf, (1UL << (DMA_CHANNEL & 0x1f)));
+
+	/* Enable DMA channel */
+	off = (DMA_CHANNEL > 31) ? IPU_IDMAC_CH_EN_2 : IPU_IDMAC_CH_EN_1;
+	reg = IPU_READ4(sc, off);
+	printf("%08x: %08x\n", IPU_IDMAC_CH_EN_1, IPU_READ4(sc, IPU_IDMAC_CH_EN_1));
+	printf("%08x: %08x\n", IPU_IDMAC_CH_EN_2, IPU_READ4(sc, IPU_IDMAC_CH_EN_2));
+	printf("%08x: %08x -> ", off, reg);
+	reg |= (1 << (DMA_CHANNEL & 0x1f));
+	printf("%08x\n", reg);
+	IPU_WRITE4(sc, off, reg);
+
+	ipu_dc_enable(sc);
 }
 
 static int
@@ -824,9 +895,15 @@ ipu_init(struct ipu_softc *sc)
 	/* Calculate actual FB Size */
 	sc->sc_fb_size = MODE_WIDTH*MODE_HEIGHT*MODE_BPP/8;
 
+#ifdef IPU_RESET
+	ipu_dc_reset_map(sc, 0);
+	ipu_dc_setup_map(sc, 0, 0,  7, 0xff);
+	ipu_dc_setup_map(sc, 0, 1, 15, 0xff);
+	ipu_dc_setup_map(sc, 0, 2, 23, 0xff);
+#endif
+
 	ipu_dc_init(sc);
 	ipu_di_enable(sc, DI_PORT);
-	ipu_dc_enable(sc);
 	ipu_init_buffer(sc);
 
 	sc->sc_fb_info.fb_name = device_get_nameunit(sc->sc_dev);
@@ -879,6 +956,13 @@ ipu_attach(device_t dev)
 
 	sc = device_get_softc(dev);
 	sc->sc_dev = dev;
+
+	#ifdef IPU_RESET
+	if (src_reset_ipu() != 0) {
+		device_printf(dev, "failed to reset IPU\n");
+		return (ENXIO);
+	}
+	#endif
 
 	sc->sc_mem_rid = 0;
 	sc->sc_mem_res = bus_alloc_resource_any(dev, SYS_RES_MEMORY,
