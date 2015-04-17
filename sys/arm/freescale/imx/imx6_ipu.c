@@ -57,7 +57,7 @@ __FBSDID("$FreeBSD$");
 #include "fb_if.h"
 
 #define IPU_RESET
-#undef IPU_RESET
+//#undef IPU_RESET
 
 #if 0
         .xres           = 1024,
@@ -96,9 +96,9 @@ __FBSDID("$FreeBSD$");
     device_get_nameunit(_sc->sc_dev), "ipu", MTX_DEF)
 #define	IPU_LOCK_DESTROY(_sc)	mtx_destroy(&(_sc)->sc_mtx)
 
-#define	IPU_READ4(_sc, reg)	bus_read_4((_sc)->sc_mem_res, reg)
+#define	IPU_READ4(_sc, reg)	bus_read_4((_sc)->sc_mem_res, (reg))
 #define	IPU_WRITE4(_sc, reg, value)	\
-    bus_write_4((_sc)->sc_mem_res, reg, value)
+    bus_write_4((_sc)->sc_mem_res, (reg), (value))
 
 #define	CPMEM_BASE	0x300000
 #define	DC_TEMPL_BASE	0x380000
@@ -107,6 +107,9 @@ __FBSDID("$FreeBSD$");
 #define	IPU_DISP_GEN		0x2000C4
 #define		DISP_GEN_DI1_CNTR_RELEASE	(1 << 25)
 #define		DISP_GEN_DI0_CNTR_RELEASE	(1 << 24)
+#define		DISP_GEN_MCU_MAX_BURST_STOP	(1 << 22)
+#define		DISP_GEN_MCU_T_SHIFT		18
+#define	IPU_MEM_RST		0x2000DC
 #define	IPU_CH_DB_MODE_SEL_0	0x200150
 #define	IPU_CH_DB_MODE_SEL_1	0x200154
 #define	IPU_CUR_BUF_0		0x20023C
@@ -114,24 +117,32 @@ __FBSDID("$FreeBSD$");
 
 #define	IPU_IDMAC_CH_EN_1	0x208004
 #define	IPU_IDMAC_CH_EN_2	0x208008
+#define	IPU_IDMAC_CH_PRI_1	0x208014
+#define	IPU_IDMAC_CH_PRI_2	0x208018
 
 #define	IPU_DI0_GENERAL		0x240000
 #define		DI_GENERAL_POL_CLK	(1 << 17)
 #define		DI_GENERAL_POLARITY_3	(1 << 2)
 #define		DI_GENERAL_POLARITY_2	(1 << 1)
+#define	IPU_DI0_BS_CLKGEN0	0x240004
+#define	IPU_DI0_BS_CLKGEN1	0x240008
 #define	IPU_DI0_SW_GEN0_1	0x24000C
 #define	IPU_DI0_SW_GEN1_1	0x240030
 #define	IPU_DI0_SYNC_AS_GEN	0x240054
 #define	IPU_DI0_DW_GEN_0	0x240058
 #define	IPU_DI0_DW_SET3_0	0x240118
 #define	IPU_DI0_STP_REP		0x240148
+#define	IPU_DI0_POL		0x240164
 #define	IPU_DI0_SCR_CONF	0x240170
 
 #define	IPU_DI1_GENERAL		0x248000
+#define	IPU_DI1_BS_CLKGEN0	0x248004
+#define	IPU_DI1_BS_CLKGEN1	0x248008
 #define	IPU_DI1_SW_GEN0_1	0x24800C
 #define	IPU_DI1_SW_GEN1_1	0x248030
 #define	IPU_DI1_SYNC_AS_GEN	0x248054
 #define	IPU_DI1_DW_GEN_0	0x248058
+#define	IPU_DI1_POL		0x248164
 #define	IPU_DI1_DW_SET3_0	0x248118
 #define	IPU_DI1_STP_REP		0x248148
 #define	IPU_DI1_SCR_CONF	0x248170
@@ -154,6 +165,8 @@ __FBSDID("$FreeBSD$");
 #define	DMFC_GENERAL_1		0x260014
 #define	DMFC_IC_CTRL		0x26001C
 
+#define	DC_WRITE_CH_CONF_1	0x0025801C
+#define	DC_WRITE_CH_ADDR_1	0x00258020
 #define	DC_WRITE_CH_CONF_5	0x0025805C
 #define	DC_WRITE_CH_ADDR_5	0x00258060
 #define	DC_RL0_CH_5		0x00258064
@@ -462,13 +475,16 @@ ipu_init_micorcode_template(struct ipu_softc *sc, int di, int map)
 
 	word = di ? 2 : 5;
 
+		printf("%s:%d\n", __FILE__, __LINE__);
 	for (i = 0; i < 3; i++) {
+		printf("%s:%d\n", __FILE__, __LINE__);
 		if (i == 0)
 			glue = 8; /* keep asserted */
 		else if (i == 1)
 			glue = 4; /* keep negated */
 		else if (i == 2)
 			glue = 0;
+		printf("%s:%d\n", __FILE__, __LINE__);
 				
 		w1 = 5; /* sync */
 		w1 |= (glue << 4); /* glue */
@@ -480,9 +496,13 @@ ipu_init_micorcode_template(struct ipu_softc *sc, int di, int map)
 		w2 = 0x18 << 4; /* opcode: WROD 0x0 */
 		w2 |= (1 << 9); /* Stop */
 
+		printf("%s:%d\n", __FILE__, __LINE__);
 		addr = DC_TEMPL_BASE + (word+i)*2*sizeof(uint32_t);
+		printf("%s:%d\n", __FILE__, __LINE__);
 		printf("W1[%d] %08x -> %08x\n", word, IPU_READ4(sc, addr), w1);
+		printf("%s:%d\n", __FILE__, __LINE__);
 		printf("W2[%d] %08x -> %08x\n", word, IPU_READ4(sc, addr + sizeof(uint32_t)), w2);
+		printf("%s:%d\n", __FILE__, __LINE__);
 		IPU_WRITE4(sc, addr, w1);
 		IPU_WRITE4(sc, addr + sizeof(uint32_t), w2);
 	}
@@ -499,12 +519,20 @@ ipu_config_timing(struct ipu_softc *sc, int di)
 	uint32_t as_gen_offset, as_gen;
 	uint32_t dw_gen_offset, dw_gen;
 	uint32_t dw_set_offset, dw_set;
+	uint32_t bs_clkgen_offset;
 	int map;
 
 	/* TODO: check mode restrictions / fixup */
 	/* TODO: enable timers, get divisors */
 	div = 1;
 	map = 0;
+
+	bs_clkgen_offset = di ? IPU_DI1_BS_CLKGEN0 : IPU_DI0_BS_CLKGEN0;
+	printf("DI_BS_CLKGEN0: %08x\n", IPU_READ4(sc, bs_clkgen_offset));
+	printf("DI_BS_CLKGEN1: %08x\n", IPU_READ4(sc, bs_clkgen_offset + 4));
+	IPU_WRITE4(sc, bs_clkgen_offset, 0x00000010);
+	IPU_WRITE4(sc, bs_clkgen_offset + 4, 0x00010000);
+
 
 	/* Setup wave generator */
 	dw_gen_offset = di ? IPU_DI1_DW_GEN_0 : IPU_DI0_DW_GEN_0;
@@ -567,12 +595,19 @@ ipu_config_timing(struct ipu_softc *sc, int di)
 	    MODE_WIDTH, DI_SYNC_COUNTER(DI_COUNTER_AD_0),
 	    0, DI_SYNC_NONE, DI_SYNC_NONE, 0, 0);
 
+	printf("%s:%d\n", __FILE__, __LINE__);
 	ipu_reset_wave_gen(sc, di, 6);
+	printf("%s:%d\n", __FILE__, __LINE__);
 	ipu_reset_wave_gen(sc, di, 7);
+	printf("%s:%d\n", __FILE__, __LINE__);
 	ipu_reset_wave_gen(sc, di, 8);
+	printf("%s:%d\n", __FILE__, __LINE__);
 	ipu_reset_wave_gen(sc, di, 9);
+	printf("%s:%d\n", __FILE__, __LINE__);
 
+	printf("%s:%d\n", __FILE__, __LINE__);
 	ipu_init_micorcode_template(sc, di, map);
+	printf("%s:%d\n", __FILE__, __LINE__);
 
 	gen_offset = di ?  IPU_DI1_GENERAL : IPU_DI0_GENERAL;
 	gen = IPU_READ4(sc, gen_offset);
@@ -593,7 +628,9 @@ ipu_config_timing(struct ipu_softc *sc, int di)
 	else
 		gen |= DI_GENERAL_POL_CLK;
 
-	printf("%08x\n", gen);
+	gen |= 0x00100000;
+
+	printf("%08x (XXX)\n", gen);
 	IPU_WRITE4(sc, gen_offset, gen);
 
 
@@ -604,7 +641,7 @@ ipu_config_timing(struct ipu_softc *sc, int di)
 	printf("%08x\n", as_gen);
 	IPU_WRITE4(sc, as_gen_offset, as_gen);
 
-	/* TODO: set DI_POL */
+	IPU_WRITE4(sc, (di ? IPU_DI1_POL : IPU_DI0_POL), 0x10);
 
 	IPU_WRITE4(sc, DC_DISP_CONF2(di), MODE_WIDTH);
 }
@@ -613,6 +650,9 @@ static void
 ipu_dc_enable(struct ipu_softc *sc)
 {
 	uint32_t conf;
+
+	/* channel 1 uses DI1 */
+	IPU_WRITE4(sc, DC_WRITE_CH_CONF_1, 0x00000004);
 
 	conf = IPU_READ4(sc, DC_WRITE_CH_CONF_5);
 	printf("CONF: %08x -> ", conf);
@@ -805,8 +845,11 @@ ipu_init_buffer(struct ipu_softc *sc)
 	}
 
 	reg = IPU_READ4(sc, db_mode_sel);
+	printf("DB_MODE_SEL %08x: %08x -> ", db_mode_sel, reg);
 	reg &= ~(1UL << (DMA_CHANNEL & 0x1f));
 	IPU_WRITE4(sc, db_mode_sel, reg);
+	printf("%08x\n", reg);
+
 	IPU_WRITE4(sc, cur_buf, (1UL << (DMA_CHANNEL & 0x1f)));
 
 	/* Enable DMA channel */
@@ -828,6 +871,7 @@ ipu_init(struct ipu_softc *sc)
 	uint32_t reg;
 	int err;
 	size_t dma_size;
+	int i;
 
 	reg = IPU_READ4(sc, IPU_CONF);
 	printf("IPU_CONF == %08x\n", reg);
@@ -895,14 +939,34 @@ ipu_init(struct ipu_softc *sc)
 	/* Calculate actual FB Size */
 	sc->sc_fb_size = MODE_WIDTH*MODE_HEIGHT*MODE_BPP/8;
 
+
+	IPU_WRITE4(sc, IPU_MEM_RST, 0x807FFFFF);
+	i = 1000;
+	while (i-- > 0) {
+		if (!(IPU_READ4(sc, IPU_MEM_RST) & 0x80000000))
+			break;
+		DELAY(1);
+	}
+
+	if (i <= 0) {
+		err = ETIMEDOUT;
+		device_printf(sc->sc_dev, "timeout while resetting memory\n");
+		goto fail;
+	}
+
 #ifdef IPU_RESET
 	ipu_dc_reset_map(sc, 0);
 	ipu_dc_setup_map(sc, 0, 0,  7, 0xff);
 	ipu_dc_setup_map(sc, 0, 1, 15, 0xff);
 	ipu_dc_setup_map(sc, 0, 2, 23, 0xff);
 #endif
+	IPU_WRITE4(sc, IPU_DISP_GEN, DISP_GEN_MCU_MAX_BURST_STOP |
+	    (8 << DISP_GEN_MCU_T_SHIFT));
+
+	IPU_WRITE4(sc, IPU_IDMAC_CH_PRI_1, 0x18800000);
 
 	ipu_dc_init(sc);
+	IPU_WRITE4(sc, IPU_CONF, 0x00000660);
 	ipu_di_enable(sc, DI_PORT);
 	ipu_init_buffer(sc);
 
@@ -927,6 +991,32 @@ ipu_init(struct ipu_softc *sc)
 	}
 
 	ipu_config_timing(sc, DI_PORT);
+
+#ifdef IPU_RESET
+	int zero;
+	zero = 0;
+	for (i = IPU_CONF; i < IPU_CONF + 0x00068020; i += 16) {
+		uint32_t r1, r2, r3, r4;
+		r1 = IPU_READ4(sc, i);
+		r2 = IPU_READ4(sc, i + 4);
+		r3 = IPU_READ4(sc, i + 8);
+		r4 = IPU_READ4(sc, i + 12);
+		if (r1 || r2 || r3 || r4) {
+			if (zero) {
+				printf("...\n");
+				zero = 0;
+			}
+		}
+		else
+			zero = 1;
+		if (!zero)
+			printf("[%08x]: %08x %08x %08x %08x\n", i,
+				r1, r2, r3, r4);
+	}
+
+	if (zero)
+		printf("...\n");
+#endif
 
 	return (0);
 fail:
@@ -981,6 +1071,34 @@ ipu_attach(device_t dev)
 		device_printf(dev, "cannot allocate interrupt\n");
 		return (ENXIO);
 	}
+
+#if 0
+	int i, zero;
+	zero = 0;
+	for (i = IPU_CONF; i < IPU_CONF + 0x00068020; i += 16) {
+		uint32_t r1, r2, r3, r4;
+		r1 = IPU_READ4(sc, i);
+		r2 = IPU_READ4(sc, i + 4);
+		r3 = IPU_READ4(sc, i + 8);
+		r4 = IPU_READ4(sc, i + 12);
+		if (r1 || r2 || r3 || r4) {
+			if (zero) {
+				printf("...\n");
+				zero = 0;
+			}
+		}
+		else
+			zero = 1;
+		if (!zero)
+			printf("[%08x]: %08x %08x %08x %08x\n", i,
+				r1, r2, r3, r4);
+	}
+
+	if (zero)
+		printf("...\n");
+#endif
+
+
 
 	ipu_init(sc);
 
