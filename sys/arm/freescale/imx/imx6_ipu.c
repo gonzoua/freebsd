@@ -53,6 +53,7 @@ __FBSDID("$FreeBSD$");
 #include <dev/vt/vt.h>
 
 #include <arm/freescale/imx/imx6_src.h>
+#include <arm/freescale/imx/imx6_hdmi.h>
 
 #include "fb_if.h"
 
@@ -60,7 +61,7 @@ void
 imx_ccm_ipu_ctrl(int enable);
 
 #define IPU_RESET
-//#undef IPU_RESET
+#undef IPU_RESET
 
 #if 0
         .xres           = 1024,
@@ -480,7 +481,9 @@ ipu_di_disable(struct ipu_softc *sc, int di)
 
 	flag = di ? DISP_GEN_DI1_CNTR_RELEASE : DISP_GEN_DI0_CNTR_RELEASE;
 	reg = IPU_READ4(sc, IPU_DISP_GEN);
+	printf("DISP_GEN: %08x -> ", reg);
 	reg &= ~flag;
+	printf("%08x\n", reg);
 	IPU_WRITE4(sc, IPU_DISP_GEN, reg);
 }
 
@@ -573,16 +576,13 @@ ipu_init_micorcode_template(struct ipu_softc *sc, int di, int map)
 
 	word = di ? 2 : 5;
 
-		printf("%s:%d\n", __FILE__, __LINE__);
 	for (i = 0; i < 3; i++) {
-		printf("%s:%d\n", __FILE__, __LINE__);
 		if (i == 0)
 			glue = 8; /* keep asserted */
 		else if (i == 1)
 			glue = 4; /* keep negated */
 		else if (i == 2)
 			glue = 0;
-		printf("%s:%d\n", __FILE__, __LINE__);
 				
 		w1 = 5; /* sync */
 		w1 |= (glue << 4); /* glue */
@@ -594,13 +594,9 @@ ipu_init_micorcode_template(struct ipu_softc *sc, int di, int map)
 		w2 = 0x18 << 4; /* opcode: WROD 0x0 */
 		w2 |= (1 << 9); /* Stop */
 
-		printf("%s:%d\n", __FILE__, __LINE__);
 		addr = DC_TEMPL_BASE + (word+i)*2*sizeof(uint32_t);
-		printf("%s:%d\n", __FILE__, __LINE__);
 		printf("W1[%d] %08x -> %08x\n", word, IPU_READ4(sc, addr), w1);
-		printf("%s:%d\n", __FILE__, __LINE__);
 		printf("W2[%d] %08x -> %08x\n", word, IPU_READ4(sc, addr + sizeof(uint32_t)), w2);
-		printf("%s:%d\n", __FILE__, __LINE__);
 		IPU_WRITE4(sc, addr, w1);
 		IPU_WRITE4(sc, addr + sizeof(uint32_t), w2);
 	}
@@ -694,19 +690,12 @@ ipu_config_timing(struct ipu_softc *sc, int di)
 	    MODE_WIDTH, DI_SYNC_COUNTER(DI_COUNTER_AD_0),
 	    0, DI_SYNC_NONE, DI_SYNC_NONE, 0, 0);
 
-	printf("%s:%d\n", __FILE__, __LINE__);
 	ipu_reset_wave_gen(sc, di, 6);
-	printf("%s:%d\n", __FILE__, __LINE__);
 	ipu_reset_wave_gen(sc, di, 7);
-	printf("%s:%d\n", __FILE__, __LINE__);
 	ipu_reset_wave_gen(sc, di, 8);
-	printf("%s:%d\n", __FILE__, __LINE__);
 	ipu_reset_wave_gen(sc, di, 9);
-	printf("%s:%d\n", __FILE__, __LINE__);
 
-	printf("%s:%d\n", __FILE__, __LINE__);
-	ipu_init_micorcode_template(sc, di, map);
-	printf("%s:%d\n", __FILE__, __LINE__);
+	// ipu_init_micorcode_template(sc, di, map);
 
 	gen_offset = di ?  IPU_DI1_GENERAL : IPU_DI0_GENERAL;
 	gen = IPU_READ4(sc, gen_offset);
@@ -865,6 +854,7 @@ ipu_dc_init(struct ipu_softc *sc)
 	else
 		addr = 5;
 
+
 	ipu_dc_link_event(sc, DC_EVENT_NL, addr, 3);
 	ipu_dc_link_event(sc, DC_EVENT_EOL, addr+1, 2);
 	ipu_dc_link_event(sc, DC_EVENT_NEW_DATA, addr+2, 1);
@@ -874,6 +864,8 @@ ipu_dc_init(struct ipu_softc *sc)
 	ipu_dc_link_event(sc, DC_EVENT_EOFIELD, 0, 0);
 	ipu_dc_link_event(sc, DC_EVENT_NEW_CHAN, 0, 0);
 	ipu_dc_link_event(sc, DC_EVENT_NEW_ADDR, 0, 0);
+
+	return;
 
 	conf = 0x02; /* W_SIZE */
         conf |= DI_PORT << 3; /* PROG_DISP_ID */
@@ -907,6 +899,7 @@ ipu_init_buffer(struct ipu_softc *sc)
 	CH_PARAM_SET_SLY(&param, stride - 1);
 
 	CH_PARAM_SET_EBA0(&param, (sc->sc_fb_phys >> 3));
+	CH_PARAM_SET_EBA1(&param, (sc->sc_fb_phys >> 3));
 
 	CH_PARAM_SET_BPP(&param, 3);
 	CH_PARAM_SET_PFS(&param, IPU_PIX_FORMAT_RGB);
@@ -952,7 +945,7 @@ ipu_init_buffer(struct ipu_softc *sc)
 
 	reg = IPU_READ4(sc, db_mode_sel);
 	printf("DB_MODE_SEL %08x: %08x -> ", db_mode_sel, reg);
-	reg &= ~(1UL << (DMA_CHANNEL & 0x1f));
+	reg |= (1UL << (DMA_CHANNEL & 0x1f));
 	IPU_WRITE4(sc, db_mode_sel, reg);
 	printf("%08x\n", reg);
 
@@ -966,11 +959,17 @@ ipu_init(struct ipu_softc *sc)
 	uint32_t reg;
 	int err;
 	size_t dma_size;
-	int i;
 
 	reg = IPU_READ4(sc, IPU_CONF);
 	printf("IPU_CONF == %08x\n", reg);
 
+	IPU_WRITE4(sc, IPU_CONF, 0x00000040);
+	ipu_di_disable(sc, DI_PORT);
+	// DELAY(100000);
+	ipu_di_enable(sc, DI_PORT);
+
+	#if 0
+	int i;
 	IPU_WRITE4(sc, IPU_MEM_RST, 0x807FFFFF);
 	i = 1000;
 	while (i-- > 0) {
@@ -984,6 +983,7 @@ ipu_init(struct ipu_softc *sc)
 		device_printf(sc->sc_dev, "timeout while resetting memory\n");
 		goto fail;
 	}
+	#endif
 
 #ifdef IPU_RESET
 	ipu_dc_reset_map(sc, 0);
@@ -996,12 +996,12 @@ ipu_init(struct ipu_softc *sc)
 	IPU_WRITE4(sc, IPU_INT_CTRL_6, 0);
 	IPU_WRITE4(sc, IPU_INT_CTRL_9, 0);
 	IPU_WRITE4(sc, IPU_INT_CTRL_10, 0);
-	#endif
 
 	IPU_WRITE4(sc, IPU_IDMAC_CH_PRI_1, 0x18800000);
 
 	IPU_WRITE4(sc, IPU_DISP_GEN, DISP_GEN_MCU_MAX_BURST_STOP |
 	    (8 << DISP_GEN_MCU_T_SHIFT));
+	#endif
 
 	dma_size = round_page(1026*768*4);
 
@@ -1043,13 +1043,13 @@ ipu_init(struct ipu_softc *sc)
 	/* Calculate actual FB Size */
 	sc->sc_fb_size = MODE_WIDTH*MODE_HEIGHT*MODE_BPP/8;
 
-	ipu_dc_init(sc);
-	IPU_WRITE4(sc, IPU_CONF, 0x00000660);
+	// ipu_dc_init(sc);
 
-	ipu_di_enable(sc, DI_PORT);
-	ipu_config_timing(sc, DI_PORT);
-	ipu_init_buffer(sc);
+	// ipu_config_timing(sc, DI_PORT);
+	// ipu_init_buffer(sc);
+	// ipu_di_enable(sc, DI_PORT);
 
+	#if 0
 	/* Enable DMA channel */
 	uint32_t off = (DMA_CHANNEL > 31) ? IPU_IDMAC_CH_EN_2 : IPU_IDMAC_CH_EN_1;
 	reg = IPU_READ4(sc, off);
@@ -1061,6 +1061,9 @@ ipu_init(struct ipu_softc *sc)
 	IPU_WRITE4(sc, off, reg);
 
 	ipu_dc_enable(sc);
+
+	#endif
+	IPU_WRITE4(sc, IPU_CONF, 0x00000660);
 
 	sc->sc_fb_info.fb_name = device_get_nameunit(sc->sc_dev);
 	sc->sc_fb_info.fb_vbase = (intptr_t)sc->sc_fb_base;
@@ -1082,7 +1085,8 @@ ipu_init(struct ipu_softc *sc)
 		goto fail;
 	}
 
-
+	hdmi_enable();
+		
 	return (0);
 fail:
 
@@ -1151,7 +1155,7 @@ ipu_attach(device_t dev)
 	ipu_init(sc);
 
 	printf("--\n");
-	dump_registers(sc, DC_TEMPL_BASE, 16*4);
+	// dump_registers(sc, DC_TEMPL_BASE, 16*4);
 
 #if 0
 	if (bus_setup_intr(dev, sc->sc_irq_res, INTR_TYPE_MISC | INTR_MPSAFE,
