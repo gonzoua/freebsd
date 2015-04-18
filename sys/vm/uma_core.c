@@ -3060,7 +3060,7 @@ uma_zone_set_fini(uma_zone_t zone, uma_fini fini)
 	uma_keg_t keg;
 
 	keg = zone_first_keg(zone);
-	KASSERT(keg != NULL, ("uma_zone_set_init: Invalid zone type"));
+	KASSERT(keg != NULL, ("uma_zone_set_fini: Invalid zone type"));
 	KEG_LOCK(keg);
 	KASSERT(keg->uk_pages == 0,
 	    ("uma_zone_set_fini on non-empty keg"));
@@ -3100,7 +3100,7 @@ uma_zone_set_freef(uma_zone_t zone, uma_free freef)
 	uma_keg_t keg;
 
 	keg = zone_first_keg(zone);
-	KASSERT(keg != NULL, ("uma_zone_set_init: Invalid zone type"));
+	KASSERT(keg != NULL, ("uma_zone_set_freef: Invalid zone type"));
 	KEG_LOCK(keg);
 	keg->uk_freef = freef;
 	KEG_UNLOCK(keg);
@@ -3540,15 +3540,12 @@ int
 sysctl_handle_uma_zone_max(SYSCTL_HANDLER_ARGS)
 {
 	uma_zone_t zone = *(uma_zone_t *)arg1;
-	int error, max, old;
+	int error, max;
 
-	old = max = uma_zone_get_max(zone);
+	max = uma_zone_get_max(zone);
 	error = sysctl_handle_int(oidp, &max, 0, req);
 	if (error || !req->newptr)
 		return (error);
-
-	if (max < old)
-		return (EINVAL);
 
 	uma_zone_set_max(zone, max);
 
