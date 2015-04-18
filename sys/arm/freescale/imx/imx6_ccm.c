@@ -320,6 +320,20 @@ imx_ccm_ahb_hz(void)
 	return (132000000);
 }
 
+void
+imx_ccm_ipu_ctrl(int enable);
+
+void
+imx_ccm_ipu_ctrl(int enable)
+{
+	struct ccm_softc *sc;
+	uint32_t reg;
+
+	sc = ccm_sc;
+	reg = RD4(sc, CCM_CCGR3);
+	printf("-----> %08x\n", reg);
+}
+
 static device_method_t ccm_methods[] = {
 	/* Device interface */
 	DEVMETHOD(device_probe,  ccm_probe),

@@ -56,6 +56,9 @@ __FBSDID("$FreeBSD$");
 
 #include "fb_if.h"
 
+void
+imx_ccm_ipu_ctrl(int enable);
+
 #define IPU_RESET
 //#undef IPU_RESET
 
@@ -216,6 +219,26 @@ struct ipu_cpmem_ch_param {
 #define	CH_PARAM_SET_VBO(param, v) ipu_ch_param_set_value((param), \
 	0, 68, 22, (v))
 
+#define	CH_PARAM_SET_RED_WIDTH(param, v) ipu_ch_param_set_value((param), \
+	1, 116, 3, (v))
+#define	CH_PARAM_SET_RED_OFFSET(param, v) ipu_ch_param_set_value((param), \
+	1, 128, 5, (v))
+
+#define	CH_PARAM_SET_GREEN_WIDTH(param, v) ipu_ch_param_set_value((param), \
+	1, 119, 3, (v))
+#define	CH_PARAM_SET_GREEN_OFFSET(param, v) ipu_ch_param_set_value((param), \
+	1, 133, 5, (v))
+
+#define	CH_PARAM_SET_BLUE_WIDTH(param, v) ipu_ch_param_set_value((param), \
+	1, 122, 3, (v))
+#define	CH_PARAM_SET_BLUE_OFFSET(param, v) ipu_ch_param_set_value((param), \
+	1, 138, 5, (v))
+
+#define	CH_PARAM_SET_ALPHA_WIDTH(param, v) ipu_ch_param_set_value((param), \
+	1, 125, 3, (v))
+#define	CH_PARAM_SET_ALPHA_OFFSET(param, v) ipu_ch_param_set_value((param), \
+	1, 143, 5, (v))
+
 #define	CH_PARAM_GET_FW(param) ipu_ch_param_get_value((param), \
 	0, 125, 13)
 #define	CH_PARAM_GET_FH(param) ipu_ch_param_get_value((param), \
@@ -236,6 +259,26 @@ struct ipu_cpmem_ch_param {
 	0, 46, 22)
 #define	CH_PARAM_GET_VBO(param) ipu_ch_param_get_value((param), \
 	0, 68, 22)
+
+#define	CH_PARAM_GET_RED_WIDTH(param) ipu_ch_param_get_value((param), \
+	1, 116, 3)
+#define	CH_PARAM_GET_RED_OFFSET(param) ipu_ch_param_get_value((param), \
+	1, 128, 5)
+
+#define	CH_PARAM_GET_GREEN_WIDTH(param) ipu_ch_param_get_value((param), \
+	1, 119, 3)
+#define	CH_PARAM_GET_GREEN_OFFSET(param) ipu_ch_param_get_value((param), \
+	1, 133, 5)
+
+#define	CH_PARAM_GET_BLUE_WIDTH(param) ipu_ch_param_get_value((param), \
+	1, 122, 3)
+#define	CH_PARAM_GET_BLUE_OFFSET(param) ipu_ch_param_get_value((param), \
+	1, 138, 5)
+
+#define	CH_PARAM_GET_ALPHA_WIDTH(param) ipu_ch_param_get_value((param), \
+	1, 125, 3)
+#define	CH_PARAM_GET_ALPHA_OFFSET(param) ipu_ch_param_get_value((param), \
+	1, 143, 5)
 
 #define	IPU_PIX_FORMAT_RGB	7
 
@@ -268,6 +311,33 @@ struct ipu_softc {
 	bus_addr_t		sc_fb_phys;
 	uint8_t			*sc_fb_base;
 };
+
+static void dump_registers(struct ipu_softc *sc, uint32_t addr, int size)
+{
+	int i, zero;
+	zero = 0;
+	for (i = addr; i < addr + size; i += 16) {
+		uint32_t r1, r2, r3, r4;
+		r1 = IPU_READ4(sc, i);
+		r2 = IPU_READ4(sc, i + 4);
+		r3 = IPU_READ4(sc, i + 8);
+		r4 = IPU_READ4(sc, i + 12);
+		if (r1 || r2 || r3 || r4) {
+			if (zero) {
+				printf("...\n");
+				zero = 0;
+			}
+		}
+		else
+			zero = 1;
+		if (!zero)
+			printf("[%08x]: %08x %08x %08x %08x\n", i,
+				r1, r2, r3, r4);
+	}
+
+	if (zero)
+		printf("...\n");
+}
 
 static void
 ipu_dmamap_cb(void *arg, bus_dma_segment_t *segs, int nseg, int err)
@@ -342,6 +412,8 @@ ipu_ch_param_get_value(struct ipu_cpmem_ch_param *param,
 static void
 ipu_print_channel(struct ipu_cpmem_ch_param *param)
 {
+	int offset0[] = {0, 10, 19, 32, 44, 45, 46, 68, 90, 94, 95, 113, 114, 117, 119, 120, 121, 122, 123, 124, 125, 138, 150, 151, -1};
+	int offset1[] = {0, 29, 58, 78, 85, 89, 90, 93, 95, 102, 116, 119, 122, 125, 128, 133, 138, 143, 148, 149, 150, -1};
 	printf("WORD0: %08x %08x %08x %08x %08x\n",
 		param->word[0].data[0], param->word[0].data[1],
 		param->word[0].data[2], param->word[0].data[3],
@@ -350,6 +422,24 @@ ipu_print_channel(struct ipu_cpmem_ch_param *param)
 		param->word[1].data[0], param->word[1].data[1],
 		param->word[1].data[2], param->word[1].data[3],
 		param->word[1].data[4]);
+
+	for (int i = 0; offset0[i+1] != -1; i++) {
+		int len = offset0[i+1] - offset0[i];
+		printf("W0[%d:%d] = %d\n", offset0[i],
+			offset0[i] + len - 1, 
+			ipu_ch_param_get_value(param, 0, offset0[i], len)
+			);
+	}
+
+
+	for (int i = 0; offset1[i+1] != -1; i++) {
+		int len = offset1[i+1] - offset1[i];
+		printf("W1[%d:%d] = %d\n", offset1[i],
+			offset1[i] + len - 1, 
+			ipu_ch_param_get_value(param, 1, offset1[i], len)
+			);
+	}
+
 	printf("FW:   %d\n", CH_PARAM_GET_FW(param));
 	printf("FH:   %d\n", CH_PARAM_GET_FH(param));
 	printf("SLY:  %d\n", CH_PARAM_GET_SLY(param));
@@ -360,6 +450,14 @@ ipu_print_channel(struct ipu_cpmem_ch_param *param)
 	printf("NPB:  %d\n", CH_PARAM_GET_NPB(param));
 	printf("UBO:  %d\n", CH_PARAM_GET_UBO(param));
 	printf("VBO:  %d\n", CH_PARAM_GET_VBO(param));
+	printf("RED:  %d bits @%d\n", CH_PARAM_GET_RED_WIDTH(param) + 1,
+		CH_PARAM_GET_RED_OFFSET(param));
+	printf("GREEN:  %d bits @%d\n", CH_PARAM_GET_GREEN_WIDTH(param) + 1,
+		CH_PARAM_GET_GREEN_OFFSET(param));
+	printf("BLUE:  %d bits @%d\n", CH_PARAM_GET_BLUE_WIDTH(param) + 1,
+		CH_PARAM_GET_BLUE_OFFSET(param));
+	printf("ALPHA:  %d bits @%d\n", CH_PARAM_GET_ALPHA_WIDTH(param) + 1,
+		CH_PARAM_GET_ALPHA_OFFSET(param));
 }
 
 static void
@@ -539,6 +637,7 @@ ipu_config_timing(struct ipu_softc *sc, int di)
 	dw_gen = IPU_READ4(sc, dw_gen_offset);
 	printf("DW_GEN: %08x -> ", dw_gen);
 	dw_gen = ((div - 1) << 24) | ((div - 1) << 16);
+	dw_gen &= ~(3 << 8); /* pin15  */
 	dw_gen |= (3 << 8); /* pin15, set 3 */
 	printf("%08x\n", dw_gen);
 	IPU_WRITE4(sc, dw_gen_offset, dw_gen);
@@ -795,10 +894,8 @@ static void
 ipu_init_buffer(struct ipu_softc *sc)
 {
 	struct ipu_cpmem_ch_param param;
-	struct ipu_cpmem_ch_param param1;
 	uint32_t stride;
 	uint32_t reg, db_mode_sel, cur_buf;
-	uint32_t off;
 
 	stride = MODE_WIDTH*MODE_BPP/8;
 
@@ -815,11 +912,20 @@ ipu_init_buffer(struct ipu_softc *sc)
 	CH_PARAM_SET_PFS(&param, IPU_PIX_FORMAT_RGB);
 	CH_PARAM_SET_NPB(&param, 15);
 
+	CH_PARAM_SET_RED_OFFSET(&param, 0);
+	CH_PARAM_SET_RED_WIDTH(&param, 5 - 1);
+	CH_PARAM_SET_GREEN_OFFSET(&param, 5);
+	CH_PARAM_SET_GREEN_WIDTH(&param, 6 - 1);
+	CH_PARAM_SET_BLUE_OFFSET(&param, 11);
+	CH_PARAM_SET_BLUE_WIDTH(&param, 5 - 1);
+	CH_PARAM_SET_ALPHA_OFFSET(&param, 16);
+	CH_PARAM_SET_ALPHA_WIDTH(&param, 8 - 1);
+
 	CH_PARAM_SET_UBO(&param, 0);
 	CH_PARAM_SET_VBO(&param, 0);
 
-	IPU_READ_CH_PARAM(sc, DMA_CHANNEL, &param1);
 	IPU_WRITE_CH_PARAM(sc, DMA_CHANNEL, &param);
+	// ipu_print_channel(&param);
 
 	/* init DMFC */
 	IPU_WRITE4(sc, DMFC_IC_CTRL, 0x2);
@@ -852,17 +958,6 @@ ipu_init_buffer(struct ipu_softc *sc)
 
 	IPU_WRITE4(sc, cur_buf, (1UL << (DMA_CHANNEL & 0x1f)));
 
-	/* Enable DMA channel */
-	off = (DMA_CHANNEL > 31) ? IPU_IDMAC_CH_EN_2 : IPU_IDMAC_CH_EN_1;
-	reg = IPU_READ4(sc, off);
-	printf("%08x: %08x\n", IPU_IDMAC_CH_EN_1, IPU_READ4(sc, IPU_IDMAC_CH_EN_1));
-	printf("%08x: %08x\n", IPU_IDMAC_CH_EN_2, IPU_READ4(sc, IPU_IDMAC_CH_EN_2));
-	printf("%08x: %08x -> ", off, reg);
-	reg |= (1 << (DMA_CHANNEL & 0x1f));
-	printf("%08x\n", reg);
-	IPU_WRITE4(sc, off, reg);
-
-	ipu_dc_enable(sc);
 }
 
 static int
@@ -876,30 +971,39 @@ ipu_init(struct ipu_softc *sc)
 	reg = IPU_READ4(sc, IPU_CONF);
 	printf("IPU_CONF == %08x\n", reg);
 
-	dma_size = round_page(1026*768*4);
+	IPU_WRITE4(sc, IPU_MEM_RST, 0x807FFFFF);
+	i = 1000;
+	while (i-- > 0) {
+		if (!(IPU_READ4(sc, IPU_MEM_RST) & 0x80000000))
+			break;
+		DELAY(1);
+	}
 
-#if 0
-	struct ipu_cpmem_ch_param param;
-	CH_PARAM_RESET(&param);
-	IPU_READ_CH_PARAM(sc, 23, &param);
-	printf("Channel 23\n");
-	ipu_print_channel(&param);
+	if (i <= 0) {
+		err = ETIMEDOUT;
+		device_printf(sc->sc_dev, "timeout while resetting memory\n");
+		goto fail;
+	}
 
-	CH_PARAM_RESET(&param);
-	IPU_READ_CH_PARAM(sc, 27, &param);
-	printf("Channel 27\n");
-	ipu_print_channel(&param);
-
-	CH_PARAM_RESET(&param);
-	IPU_READ_CH_PARAM(sc, 28, &param);
-	printf("Channel 28\n");
-	ipu_print_channel(&param);
-	CH_PARAM_SET_FW(&param, 1024);
-	CH_PARAM_SET_FH(&param, 768);
-	printf("Channel 28\n");
-	ipu_print_channel(&param);
+#ifdef IPU_RESET
+	ipu_dc_reset_map(sc, 0);
+	ipu_dc_setup_map(sc, 0, 0,  7, 0xff);
+	ipu_dc_setup_map(sc, 0, 1, 15, 0xff);
+	ipu_dc_setup_map(sc, 0, 2, 23, 0xff);
 #endif
+	#if 0
+	IPU_WRITE4(sc, IPU_INT_CTRL_5, 0);
+	IPU_WRITE4(sc, IPU_INT_CTRL_6, 0);
+	IPU_WRITE4(sc, IPU_INT_CTRL_9, 0);
+	IPU_WRITE4(sc, IPU_INT_CTRL_10, 0);
+	#endif
 
+	IPU_WRITE4(sc, IPU_IDMAC_CH_PRI_1, 0x18800000);
+
+	IPU_WRITE4(sc, IPU_DISP_GEN, DISP_GEN_MCU_MAX_BURST_STOP |
+	    (8 << DISP_GEN_MCU_T_SHIFT));
+
+	dma_size = round_page(1026*768*4);
 
 	/*
 	 * Now allocate framebuffer memory
@@ -939,36 +1043,24 @@ ipu_init(struct ipu_softc *sc)
 	/* Calculate actual FB Size */
 	sc->sc_fb_size = MODE_WIDTH*MODE_HEIGHT*MODE_BPP/8;
 
-
-	IPU_WRITE4(sc, IPU_MEM_RST, 0x807FFFFF);
-	i = 1000;
-	while (i-- > 0) {
-		if (!(IPU_READ4(sc, IPU_MEM_RST) & 0x80000000))
-			break;
-		DELAY(1);
-	}
-
-	if (i <= 0) {
-		err = ETIMEDOUT;
-		device_printf(sc->sc_dev, "timeout while resetting memory\n");
-		goto fail;
-	}
-
-#ifdef IPU_RESET
-	ipu_dc_reset_map(sc, 0);
-	ipu_dc_setup_map(sc, 0, 0,  7, 0xff);
-	ipu_dc_setup_map(sc, 0, 1, 15, 0xff);
-	ipu_dc_setup_map(sc, 0, 2, 23, 0xff);
-#endif
-	IPU_WRITE4(sc, IPU_DISP_GEN, DISP_GEN_MCU_MAX_BURST_STOP |
-	    (8 << DISP_GEN_MCU_T_SHIFT));
-
-	IPU_WRITE4(sc, IPU_IDMAC_CH_PRI_1, 0x18800000);
-
 	ipu_dc_init(sc);
 	IPU_WRITE4(sc, IPU_CONF, 0x00000660);
+
 	ipu_di_enable(sc, DI_PORT);
+	ipu_config_timing(sc, DI_PORT);
 	ipu_init_buffer(sc);
+
+	/* Enable DMA channel */
+	uint32_t off = (DMA_CHANNEL > 31) ? IPU_IDMAC_CH_EN_2 : IPU_IDMAC_CH_EN_1;
+	reg = IPU_READ4(sc, off);
+	printf("%08x: %08x\n", IPU_IDMAC_CH_EN_1, IPU_READ4(sc, IPU_IDMAC_CH_EN_1));
+	printf("%08x: %08x\n", IPU_IDMAC_CH_EN_2, IPU_READ4(sc, IPU_IDMAC_CH_EN_2));
+	printf("%08x: %08x -> ", off, reg);
+	reg |= (1 << (DMA_CHANNEL & 0x1f));
+	printf("%08x\n", reg);
+	IPU_WRITE4(sc, off, reg);
+
+	ipu_dc_enable(sc);
 
 	sc->sc_fb_info.fb_name = device_get_nameunit(sc->sc_dev);
 	sc->sc_fb_info.fb_vbase = (intptr_t)sc->sc_fb_base;
@@ -990,33 +1082,6 @@ ipu_init(struct ipu_softc *sc)
 		goto fail;
 	}
 
-	ipu_config_timing(sc, DI_PORT);
-
-#ifdef IPU_RESET
-	int zero;
-	zero = 0;
-	for (i = IPU_CONF; i < IPU_CONF + 0x00068020; i += 16) {
-		uint32_t r1, r2, r3, r4;
-		r1 = IPU_READ4(sc, i);
-		r2 = IPU_READ4(sc, i + 4);
-		r3 = IPU_READ4(sc, i + 8);
-		r4 = IPU_READ4(sc, i + 12);
-		if (r1 || r2 || r3 || r4) {
-			if (zero) {
-				printf("...\n");
-				zero = 0;
-			}
-		}
-		else
-			zero = 1;
-		if (!zero)
-			printf("[%08x]: %08x %08x %08x %08x\n", i,
-				r1, r2, r3, r4);
-	}
-
-	if (zero)
-		printf("...\n");
-#endif
 
 	return (0);
 fail:
@@ -1047,12 +1112,6 @@ ipu_attach(device_t dev)
 	sc = device_get_softc(dev);
 	sc->sc_dev = dev;
 
-	#ifdef IPU_RESET
-	if (src_reset_ipu() != 0) {
-		device_printf(dev, "failed to reset IPU\n");
-		return (ENXIO);
-	}
-	#endif
 
 	sc->sc_mem_rid = 0;
 	sc->sc_mem_res = bus_alloc_resource_any(dev, SYS_RES_MEMORY,
@@ -1072,35 +1131,27 @@ ipu_attach(device_t dev)
 		return (ENXIO);
 	}
 
-#if 0
-	int i, zero;
-	zero = 0;
-	for (i = IPU_CONF; i < IPU_CONF + 0x00068020; i += 16) {
-		uint32_t r1, r2, r3, r4;
-		r1 = IPU_READ4(sc, i);
-		r2 = IPU_READ4(sc, i + 4);
-		r3 = IPU_READ4(sc, i + 8);
-		r4 = IPU_READ4(sc, i + 12);
-		if (r1 || r2 || r3 || r4) {
-			if (zero) {
-				printf("...\n");
-				zero = 0;
-			}
-		}
-		else
-			zero = 1;
-		if (!zero)
-			printf("[%08x]: %08x %08x %08x %08x\n", i,
-				r1, r2, r3, r4);
+	imx_ccm_ipu_ctrl(1);
+
+	dump_registers(sc, DC_TEMPL_BASE, 16*4);
+	// struct ipu_cpmem_ch_param param;
+	// CH_PARAM_RESET(&param);
+	// IPU_READ_CH_PARAM(sc, DMA_CHANNEL, &param);
+	// ipu_print_channel(&param);
+
+	#ifdef IPU_RESET
+	if (src_reset_ipu() != 0) {
+		device_printf(dev, "failed to reset IPU\n");
+		return (ENXIO);
 	}
+	#endif
 
-	if (zero)
-		printf("...\n");
-#endif
-
-
+	imx_ccm_ipu_ctrl(1);
 
 	ipu_init(sc);
+
+	printf("--\n");
+	dump_registers(sc, DC_TEMPL_BASE, 16*4);
 
 #if 0
 	if (bus_setup_intr(dev, sc->sc_irq_res, INTR_TYPE_MISC | INTR_MPSAFE,
