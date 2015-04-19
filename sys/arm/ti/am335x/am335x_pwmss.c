@@ -98,7 +98,6 @@ am335x_pwmss_attach(device_t dev)
 	struct am335x_pwmss_softc *sc;
 	uint32_t reg, id;
 	phandle_t node;
-	struct ofw_bus_devinfo obd;
 
 	sc = device_get_softc(dev);
 	sc->sc_dev = dev;
@@ -144,11 +143,8 @@ am335x_pwmss_attach(device_t dev)
 	/*
 	 * Now walk the OFW tree and attach top-level devices.
 	 */
-	for (node = OF_child(node); node > 0; node = OF_peer(node)) {
-		if (ofw_bus_gen_setup_devinfo(&obd, node) != 0)
-			continue;
+	for (node = OF_child(node); node > 0; node = OF_peer(node))
 		simplebus_add_device(dev, node, 0, NULL, -1, NULL);
-	}
 
 	return (bus_generic_attach(dev));
 }

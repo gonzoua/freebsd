@@ -360,7 +360,6 @@ omap_uhh_attach(device_t dev)
 	phandle_t node;
 	char propname[16];
 	char *mode;
-	struct ofw_bus_devinfo obd;
 
 	/* save the device */
 	isc->sc_dev = dev;
@@ -411,11 +410,8 @@ omap_uhh_attach(device_t dev)
 	/*
 	 * Now walk the OFW tree and attach top-level devices.
 	 */
-	for (node = OF_child(node); node > 0; node = OF_peer(node)) {
-		if (ofw_bus_gen_setup_devinfo(&obd, node) != 0)
-			continue;
+	for (node = OF_child(node); node > 0; node = OF_peer(node))
 		simplebus_add_device(dev, node, 0, NULL, -1, NULL);
-	}
 	return (bus_generic_attach(dev));
 	
 error:

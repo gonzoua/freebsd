@@ -133,7 +133,6 @@ usbss_attach(device_t dev)
 	int i;
 	uint32_t rev;
 	phandle_t node;
-	struct ofw_bus_devinfo obd;
 
 	/* Request the memory resources */
 	sc->sc_mem_res = bus_alloc_resource_any(dev, SYS_RES_MEMORY,
@@ -185,11 +184,8 @@ usbss_attach(device_t dev)
 	/*
 	 * Now walk the OFW tree and attach top-level devices.
 	 */
-	for (node = OF_child(node); node > 0; node = OF_peer(node)) {
-		if (ofw_bus_gen_setup_devinfo(&obd, node) != 0)
-			continue;
+	for (node = OF_child(node); node > 0; node = OF_peer(node))
 		simplebus_add_device(dev, node, 0, NULL, -1, NULL);
-	}
 
 	return (bus_generic_attach(dev));
 }
