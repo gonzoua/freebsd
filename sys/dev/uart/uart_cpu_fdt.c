@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD$");
+__FBSDID("$FreeBSD: head/sys/dev/uart/uart_cpu_fdt.c 281438 2015-04-11 17:16:23Z andrew $");
 
 #include "opt_platform.h"
 
@@ -181,9 +181,6 @@ uart_cpu_getdev(int devtype, struct uart_devinfo *di)
 			return (ENXIO);
 		rclk = 0;
 	}
-
-	if (uart_fdt_get_shift(node, &shift) < 0)
-		shift = class->uc_regshft;
 
 	/*
 	 * Retrieve serial attributes.
