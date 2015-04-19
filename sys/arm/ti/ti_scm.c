@@ -95,6 +95,12 @@ ti_scm_probe(device_t dev)
 	if (!ofw_bus_is_compatible(dev, "syscon"))
 		return (ENXIO);
 
+	if (ti_scm_sc) {
+		printf("%s: multiple SCM modules in device tree data, ignoring\n",
+		    __func__);
+		return (EEXIST);
+	}
+
 	device_set_desc(dev, "TI Control Module");
 	return (BUS_PROBE_DEFAULT);
 }
@@ -113,9 +119,6 @@ static int
 ti_scm_attach(device_t dev)
 {
 	struct ti_scm_softc *sc = device_get_softc(dev);
-
-	if (ti_scm_sc)
-		return (ENXIO);
 
 	sc->sc_dev = dev;
 
