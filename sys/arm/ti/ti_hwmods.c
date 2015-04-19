@@ -72,9 +72,9 @@ struct hwmod ti_hwmods[] = {
 	{"mmc5",	MMC5_CLK},
 	{"mmc6",	MMC6_CLK},
 
-	{"pwmss0",	PWMSS0_CLK},
-	{"pwmss1",	PWMSS1_CLK},
-	{"pwmss2",	PWMSS2_CLK},
+	{"epwmss0",	PWMSS0_CLK},
+	{"epwmss1",	PWMSS1_CLK},
+	{"epwmss2",	PWMSS2_CLK},
 
 	{"timer1",	TIMER1_CLK},
 	{"timer2",	TIMER2_CLK},
