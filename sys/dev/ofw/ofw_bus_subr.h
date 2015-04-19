@@ -55,7 +55,6 @@ struct ofw_compat_data {
 /* Generic implementation of ofw_bus_if.m methods and helper routines */
 int	ofw_bus_gen_setup_devinfo(struct ofw_bus_devinfo *, phandle_t);
 void	ofw_bus_gen_destroy_devinfo(struct ofw_bus_devinfo *);
-const struct ofw_bus_devinfo * ofw_bus_gen_get_devinfo(device_t bus, device_t dev);
 
 ofw_bus_get_compat_t	ofw_bus_gen_get_compat;
 ofw_bus_get_model_t	ofw_bus_gen_get_model;
