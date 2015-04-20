@@ -219,7 +219,10 @@ static int
 omap_ehci_init(struct omap_ehci_softc *isc)
 {
 	uint32_t reg = 0;
+	int i;
+	device_t uhh_dev;
 	
+	uhh_dev = device_get_parent(isc->sc_dev);
 	device_printf(isc->sc_dev, "Starting TI EHCI USB Controller\n");
 
 	/* Set the interrupt threshold control, it controls the maximum rate at
@@ -232,8 +235,11 @@ omap_ehci_init(struct omap_ehci_softc *isc)
 	omap_ehci_write_4(isc, OMAP_USBHOST_USBCMD, reg);
 
 	/* Soft reset the PHY using PHY reset command over ULPI */
-	omap_ehci_soft_phy_reset(isc, 0);
-	omap_ehci_soft_phy_reset(isc, 1);	
+	for (i = 0; i < OMAP_HS_USB_PORTS; i++) {
+		if (omap_usb_port_mode(uhh_dev, i) == EHCI_HCD_OMAP_MODE_PHY)
+			omap_ehci_soft_phy_reset(isc, i);
+
+	}
 
 	return(0);
 }

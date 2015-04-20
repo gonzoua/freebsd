@@ -103,8 +103,6 @@ __FBSDID("$FreeBSD$");
 #define OMAP_UHH_REV1  0x00000010      /* OMAP3 */
 #define OMAP_UHH_REV2  0x50700100      /* OMAP4 */
 
-#define	OMAP_HS_USB_PORTS	3
-
 struct omap_uhh_softc {
 	struct simplebus_softc simplebus_sc;
 	device_t            sc_dev;
@@ -333,6 +331,18 @@ omap_uhh_fini(struct omap_uhh_softc *isc)
 	ti_prcm_clk_disable(USBHSHOST_CLK);
 
 	device_printf(isc->sc_dev, "Clock to USB host has been disabled\n");
+}
+
+int
+omap_usb_port_mode(device_t dev, int port)
+{
+	struct omap_uhh_softc *isc;
+
+	isc = device_get_softc(dev);
+	if ((port < 0) || (port >= OMAP_HS_USB_PORTS))
+		return (-1);
+
+	return isc->port_mode[port];
 }
 
 static int
