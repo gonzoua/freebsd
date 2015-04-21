@@ -379,6 +379,12 @@ ti_pinmux_probe(device_t dev)
 	if (!ofw_bus_is_compatible(dev, "pinctrl-single"))
 		return (ENXIO);
 
+	if (ti_pinmux_sc) {
+		printf("%s: multiple pinctrl modules in device tree data, ignoring\n",
+		    __func__);
+		return (EEXIST);
+	}
+
 	device_set_desc(dev, "TI Pinmux Module");
 	return (BUS_PROBE_DEFAULT);
 }
@@ -395,8 +401,10 @@ ti_pinmux_attach(device_t dev)
 {
 	struct ti_pinmux_softc *sc = device_get_softc(dev);
 
+#if 0
 	if (ti_pinmux_sc)
 		return (ENXIO);
+#endif
 
 	sc->sc_dev = dev;
 
@@ -408,7 +416,8 @@ ti_pinmux_attach(device_t dev)
 	sc->sc_bst = rman_get_bustag(sc->sc_res[0]);
 	sc->sc_bsh = rman_get_bushandle(sc->sc_res[0]);
 
-	ti_pinmux_sc = sc;
+	if (ti_pinmux_sc == NULL)
+		ti_pinmux_sc = sc;
 
 	fdt_pinctrl_register(dev, "pinctrl-single,pins");
 	fdt_pinctrl_configure_tree(dev);
