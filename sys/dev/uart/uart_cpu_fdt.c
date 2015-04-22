@@ -28,7 +28,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: head/sys/dev/uart/uart_cpu_fdt.c 281438 2015-04-11 17:16:23Z andrew $");
+__FBSDID("$FreeBSD$");
 
 #include "opt_platform.h"
 
