@@ -168,20 +168,20 @@ omap_tll_utmi_enable(unsigned int en_mask)
 	sc = omap_tll_sc;
 	if (sc == NULL)
 		return;
-	
+
 	/* There are 3 TLL channels, one per USB controller so set them all up the
 	 * same, SDR mode, bit stuffing and no autoidle.
 	 */
 	for (i=0; i<3; i++) {
 		reg = omap_tll_read_4(sc, OMAP_USBTLL_TLL_CHANNEL_CONF(i));
-		
+
 		reg &= ~(TLL_CHANNEL_CONF_UTMIAUTOIDLE
 				 | TLL_CHANNEL_CONF_ULPINOBITSTUFF
 				 | TLL_CHANNEL_CONF_ULPIDDRMODE);
-		
+
 		omap_tll_write_4(sc, OMAP_USBTLL_TLL_CHANNEL_CONF(i), reg);
 	}
-	
+
 	/* Program the common TLL register */
 	reg = omap_tll_read_4(sc, OMAP_USBTLL_TLL_SHARED_CONF);
 
@@ -190,17 +190,17 @@ omap_tll_utmi_enable(unsigned int en_mask)
 	reg |=  ( TLL_SHARED_CONF_FCLK_IS_ON
 			| TLL_SHARED_CONF_USB_DIVRATIO_2
 			| TLL_SHARED_CONF_USB_180D_SDR_EN);
-	
+
 	omap_tll_write_4(sc, OMAP_USBTLL_TLL_SHARED_CONF, reg);
-	
+
 	/* Enable channels now */
 	for (i = 0; i < 3; i++) {
 		reg = omap_tll_read_4(sc, OMAP_USBTLL_TLL_CHANNEL_CONF(i));
-		
+
 		/* Enable only the reg that is needed */
 		if ((en_mask & (1 << i)) == 0)
 			continue;
-		
+
 		reg |= TLL_CHANNEL_CONF_CHANEN;
 		omap_tll_write_4(sc, OMAP_USBTLL_TLL_CHANNEL_CONF(i), reg);
 	}
@@ -211,30 +211,30 @@ omap_tll_init(struct omap_tll_softc *sc)
 {
 	unsigned long timeout;
 	int ret = 0;
-	
+
 	/* Enable the USB TLL */
 	ti_prcm_clk_enable(USBTLL_CLK);
 
 	/* Perform TLL soft reset, and wait until reset is complete */
 	omap_tll_write_4(sc, OMAP_USBTLL_SYSCONFIG, TLL_SYSCONFIG_SOFTRESET);
-	
+
 	/* Set the timeout to 100ms*/
 	timeout = (hz < 10) ? 1 : ((100 * hz) / 1000);
 
 	/* Wait for TLL reset to complete */
-	while ((omap_tll_read_4(sc, OMAP_USBTLL_SYSSTATUS) & 
+	while ((omap_tll_read_4(sc, OMAP_USBTLL_SYSSTATUS) &
 	        TLL_SYSSTATUS_RESETDONE) == 0x00) {
 
 		/* Sleep for a tick */
 		pause("USBRESET", 1);
-		
+
 		if (timeout-- == 0) {
 			device_printf(sc->sc_dev, "TLL reset operation timed out\n");
 			ret = EINVAL;
 			goto err_sys_status;
 		}
 	}
-		
+
 	/* CLOCKACTIVITY = 1 : OCP-derived internal clocks ON during idle
 	 * SIDLEMODE = 2     : Smart-idle mode. Sidleack asserted after Idlereq
 	 *                     assertion when no more activity on the USB.
@@ -250,7 +250,7 @@ omap_tll_init(struct omap_tll_softc *sc)
 err_sys_status:
 	/* Disable the TLL clocks */
 	ti_prcm_clk_disable(USBTLL_CLK);
-	
+
 	return(ret);
 }
 
@@ -260,13 +260,13 @@ omap_tll_disable(struct omap_tll_softc *sc)
 	unsigned long timeout;
 
 	timeout = (hz < 10) ? 1 : ((100 * hz) / 1000);
-	
+
 	/* Reset the TLL module */
 	omap_tll_write_4(sc, OMAP_USBTLL_SYSCONFIG, 0x0002);
 	while ((omap_tll_read_4(sc, OMAP_USBTLL_SYSSTATUS) & (0x01)) == 0x00) {
 		/* Sleep for a tick */
 		pause("USBRESET", 1);
-		
+
 		if (timeout-- == 0) {
 			device_printf(sc->sc_dev, "operation timed out\n");
 			break;
@@ -288,7 +288,7 @@ omap_tll_probe(device_t dev)
 		return (ENXIO);
 
 	device_set_desc(dev, "TI OMAP USB 2.0 TLL module");
-	
+
 	return (BUS_PROBE_DEFAULT);
 }
 
@@ -313,9 +313,9 @@ omap_tll_attach(device_t dev)
 	omap_tll_init(sc);
 
 	omap_tll_sc = sc;
-	
+
 	return (0);
-	
+
 error:
 	omap_tll_detach(dev);
 	return (ENXIO);
@@ -328,7 +328,7 @@ omap_tll_detach(device_t dev)
 
 	sc = device_get_softc(dev);
 	omap_tll_disable(sc);
-	
+
 	/* Release the other register set memory maps */
 	if (sc->tll_mem_res) {
 		bus_release_resource(dev, SYS_RES_MEMORY,
@@ -349,7 +349,7 @@ static device_method_t omap_tll_methods[] = {
 	DEVMETHOD(device_suspend, bus_generic_suspend),
 	DEVMETHOD(device_resume, bus_generic_resume),
 	DEVMETHOD(device_shutdown, bus_generic_shutdown),
-	
+
 	{0, 0}
 };
 
