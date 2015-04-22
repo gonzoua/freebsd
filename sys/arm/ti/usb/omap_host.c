@@ -80,7 +80,7 @@ __FBSDID("$FreeBSD$");
 #define UHH_HOSTCONFIG_AUTOPPD_ON_OVERCUR_EN    (1UL << 1)
 #define UHH_HOSTCONFIG_P1_ULPI_BYPASS           (1UL << 0)
 
-/* The following are on rev2 (OMAP44xx) of the EHCI only */ 
+/* The following are on rev2 (OMAP44xx) of the EHCI only */
 #define UHH_SYSCONFIG_IDLEMODE_MASK             (3UL << 2)
 #define UHH_SYSCONFIG_IDLEMODE_NOIDLE           (1UL << 2)
 #define UHH_SYSCONFIG_STANDBYMODE_MASK          (3UL << 4)
@@ -95,7 +95,7 @@ __FBSDID("$FreeBSD$");
 #define UHH_HOSTCONFIG_P2_MODE_UTMI_PHY         (1UL << 18)
 #define UHH_HOSTCONFIG_P2_MODE_HSIC             (3UL << 18)
 
-/* 
+/*
  * Values of UHH_REVISION - Note: these are not given in the TRM but taken
  * from the linux OMAP EHCI driver (thanks guys).  It has been verified on
  * a Panda and Beagle board.
@@ -138,21 +138,21 @@ omap_uhh_init(struct omap_uhh_softc *isc)
 	uint8_t tll_ch_mask;
 	uint32_t reg;
 	int i;
-	
+
 	/* Enable Clocks for high speed USBHOST */
 	ti_prcm_clk_enable(USBHSHOST_CLK);
-	
+
 	/* Read the UHH revision */
 	isc->uhh_rev = omap_uhh_read_4(isc, OMAP_USBHOST_UHH_REVISION);
 	device_printf(isc->sc_dev, "UHH revision 0x%08x\n", isc->uhh_rev);
-	
+
 	if (isc->uhh_rev == OMAP_UHH_REV2) {
 		/* For OMAP44xx devices you have to enable the per-port clocks:
 		 *  PHY_MODE  - External ULPI clock
 		 *  TTL_MODE  - Internal UTMI clock
 		 *  HSIC_MODE - Internal 480Mhz and 60Mhz clocks
 		 */
-		switch(isc->port_mode[0]) { 
+		switch(isc->port_mode[0]) {
 		case EHCI_HCD_OMAP_MODE_UNKNOWN:
 			break;
 		case EHCI_HCD_OMAP_MODE_PHY:
@@ -176,7 +176,7 @@ omap_uhh_init(struct omap_uhh_softc *isc)
 		default:
 			device_printf(isc->sc_dev, "unknown port mode %d for port 0\n", isc->port_mode[0]);
 		}
-		switch(isc->port_mode[1]) { 
+		switch(isc->port_mode[1]) {
 		case EHCI_HCD_OMAP_MODE_UNKNOWN:
 			break;
 		case EHCI_HCD_OMAP_MODE_PHY:
@@ -206,12 +206,12 @@ omap_uhh_init(struct omap_uhh_softc *isc)
 	reg = omap_uhh_read_4(isc, OMAP_USBHOST_UHH_SYSCONFIG);
 	if (isc->uhh_rev == OMAP_UHH_REV1) {
 		reg &= ~(UHH_SYSCONFIG_SIDLEMODE_MASK |
-		         UHH_SYSCONFIG_MIDLEMODE_MASK);
+		    UHH_SYSCONFIG_MIDLEMODE_MASK);
 		reg |= (UHH_SYSCONFIG_ENAWAKEUP |
-		        UHH_SYSCONFIG_AUTOIDLE |
-		        UHH_SYSCONFIG_CLOCKACTIVITY |
-		        UHH_SYSCONFIG_SIDLEMODE_SMARTIDLE |
-		        UHH_SYSCONFIG_MIDLEMODE_SMARTSTANDBY);
+		    UHH_SYSCONFIG_AUTOIDLE |
+		    UHH_SYSCONFIG_CLOCKACTIVITY |
+		    UHH_SYSCONFIG_SIDLEMODE_SMARTIDLE |
+		    UHH_SYSCONFIG_MIDLEMODE_SMARTSTANDBY);
 	} else if (isc->uhh_rev == OMAP_UHH_REV2) {
 		reg &= ~UHH_SYSCONFIG_IDLEMODE_MASK;
 		reg |=  UHH_SYSCONFIG_IDLEMODE_NOIDLE;
@@ -222,13 +222,13 @@ omap_uhh_init(struct omap_uhh_softc *isc)
 	device_printf(isc->sc_dev, "OMAP_UHH_SYSCONFIG: 0x%08x\n", reg);
 
 	reg = omap_uhh_read_4(isc, OMAP_USBHOST_UHH_HOSTCONFIG);
-	
+
 	/* Setup ULPI bypass and burst configurations */
 	reg |= (UHH_HOSTCONFIG_ENA_INCR4 |
 			UHH_HOSTCONFIG_ENA_INCR8 |
 			UHH_HOSTCONFIG_ENA_INCR16);
 	reg &= ~UHH_HOSTCONFIG_ENA_INCR_ALIGN;
-	
+
 	if (isc->uhh_rev == OMAP_UHH_REV1) {
 		if (isc->port_mode[0] == EHCI_HCD_OMAP_MODE_UNKNOWN)
 			reg &= ~UHH_HOSTCONFIG_P1_CONNECT_STATUS;
@@ -236,7 +236,7 @@ omap_uhh_init(struct omap_uhh_softc *isc)
 			reg &= ~UHH_HOSTCONFIG_P2_CONNECT_STATUS;
 		if (isc->port_mode[2] == EHCI_HCD_OMAP_MODE_UNKNOWN)
 			reg &= ~UHH_HOSTCONFIG_P3_CONNECT_STATUS;
-	
+
 		/* Bypass the TLL module for PHY mode operation */
 		if ((isc->port_mode[0] == EHCI_HCD_OMAP_MODE_PHY) ||
 		    (isc->port_mode[1] == EHCI_HCD_OMAP_MODE_PHY) ||
@@ -244,10 +244,10 @@ omap_uhh_init(struct omap_uhh_softc *isc)
 			reg &= ~UHH_HOSTCONFIG_P1_ULPI_BYPASS;
 		else
 			reg |= UHH_HOSTCONFIG_P1_ULPI_BYPASS;
-			
+
 	} else if (isc->uhh_rev == OMAP_UHH_REV2) {
 		reg |=  UHH_HOSTCONFIG_APP_START_CLK;
-		
+
 		/* Clear port mode fields for PHY mode*/
 		reg &= ~UHH_HOSTCONFIG_P1_MODE_MASK;
 		reg &= ~UHH_HOSTCONFIG_P2_MODE_MASK;
@@ -265,7 +265,7 @@ omap_uhh_init(struct omap_uhh_softc *isc)
 
 	omap_uhh_write_4(isc, OMAP_USBHOST_UHH_HOSTCONFIG, reg);
 	device_printf(isc->sc_dev, "UHH setup done, uhh_hostconfig=0x%08x\n", reg);
-	
+
 
 	/* I found the code and comments in the Linux EHCI driver - thanks guys :)
 	 *
@@ -277,7 +277,7 @@ omap_uhh_init(struct omap_uhh_softc *isc)
 	 */
 #if 0
 	omap_uhh_write_4(isc, OMAP_USBHOST_INSNREG04,
-	                 OMAP_USBHOST_INSNREG04_DISABLE_UNSUSPEND);
+	    OMAP_USBHOST_INSNREG04_DISABLE_UNSUSPEND);
 #endif
 	tll_ch_mask = 0;
 	for (i = 0; i < OMAP_HS_USB_PORTS; i++) {
@@ -294,7 +294,7 @@ omap_uhh_init(struct omap_uhh_softc *isc)
  *	omap_uhh_fini - shutdown the EHCI controller
  *	@isc: omap ehci device context
  *
- *	
+ *
  *
  *	LOCKING:
  *	none
@@ -306,9 +306,9 @@ static void
 omap_uhh_fini(struct omap_uhh_softc *isc)
 {
 	unsigned long timeout;
-	
+
 	device_printf(isc->sc_dev, "Stopping TI EHCI USB Controller\n");
-	
+
 	/* Set the timeout */
 	if (hz < 10)
 		timeout = 1;
@@ -320,7 +320,7 @@ omap_uhh_fini(struct omap_uhh_softc *isc)
 	while ((omap_uhh_read_4(isc, OMAP_USBHOST_UHH_SYSSTATUS) & 0x07) == 0x00) {
 		/* Sleep for a tick */
 		pause("USBRESET", 1);
-		
+
 		if (timeout-- == 0) {
 			device_printf(isc->sc_dev, "operation timed out\n");
 			break;
@@ -356,7 +356,7 @@ omap_uhh_probe(device_t dev)
 		return (ENXIO);
 
 	device_set_desc(dev, "TI OMAP USB 2.0 Host module");
-	
+
 	return (BUS_PROBE_DEFAULT);
 }
 
@@ -373,7 +373,7 @@ omap_uhh_attach(device_t dev)
 
 	/* save the device */
 	isc->sc_dev = dev;
-	
+
 	/* Allocate resource for the UHH register set */
 	rid = 0;
 	isc->uhh_mem_res = bus_alloc_resource_any(dev, SYS_RES_MEMORY, &rid, RF_ACTIVE);
@@ -423,7 +423,7 @@ omap_uhh_attach(device_t dev)
 	for (node = OF_child(node); node > 0; node = OF_peer(node))
 		simplebus_add_device(dev, node, 0, NULL, -1, NULL);
 	return (bus_generic_attach(dev));
-	
+
 error:
 	omap_uhh_detach(dev);
 	return (ENXIO);
@@ -433,17 +433,17 @@ static int
 omap_uhh_detach(device_t dev)
 {
 	struct omap_uhh_softc *isc = device_get_softc(dev);
-	
+
 	/* during module unload there are lots of children leftover */
 	device_delete_children(dev);
-	
+
 	if (isc->uhh_mem_res) {
 		bus_release_resource(dev, SYS_RES_MEMORY, 0, isc->uhh_mem_res);
 		isc->uhh_mem_res = NULL;
 	}
 
 	omap_uhh_fini(isc);
-	
+
 	return (0);
 }
 
@@ -456,7 +456,7 @@ static device_method_t omap_uhh_methods[] = {
 	DEVMETHOD(device_suspend, bus_generic_suspend),
 	DEVMETHOD(device_resume, bus_generic_resume),
 	DEVMETHOD(device_shutdown, bus_generic_shutdown),
-	
+
 	DEVMETHOD_END
 };
 
