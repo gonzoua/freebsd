@@ -203,12 +203,14 @@ udl_buffer_alloc(uint32_t size)
 	}
 	mtx_unlock(&udl_buffer_mtx);
 	if (buf != NULL) {
+		uint8_t *ptr = ((uint8_t *)buf) - size;
 		/* wipe and recycle buffer */
-		memset(buf, 0, size);
-		return (buf);
+		memset(ptr, 0, size);
+		/* return buffer pointer */
+		return (ptr);
 	}
 	/* allocate new buffer */
-	return (malloc(size, M_USB_DL, M_WAITOK | M_ZERO));
+	return (malloc(size + sizeof(*buf), M_USB_DL, M_WAITOK | M_ZERO));
 }
 
 static void
@@ -216,9 +218,11 @@ udl_buffer_free(void *_buf, uint32_t size)
 {
 	struct udl_buffer *buf;
 
-	buf = (struct udl_buffer *)_buf;
-	if (buf == NULL)
+	/* check for NULL pointer */
+	if (_buf == NULL)
 		return;
+	/* compute pointer to recycle list */
+	buf = (struct udl_buffer *)(((uint8_t *)_buf) + size);
 
 	/*
 	 * Memory mapped buffers should never be freed.
@@ -1082,8 +1086,7 @@ udl_select_mode(struct udl_softc *sc)
 	}
 
 	if (index == UDL_MAX_MODES) {
-		DPRINTF("no mode line found for %dx%d @ %dHz!\n",
-		    mode.hdisplay, mode.vdisplay, mode.hz);
+		DPRINTF("no mode line found\n");
 
 		i = 0;
 		while (i < sc->sc_edid_info.edid_nmodes) {

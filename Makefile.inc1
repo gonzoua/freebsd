@@ -1263,7 +1263,8 @@ _gperf=		gnu/usr.bin/gperf
 .endif
 
 .if ${MK_GROFF} != "no"
-_groff=		gnu/usr.bin/groff
+_groff=		gnu/usr.bin/groff \
+		usr.bin/soelim
 .endif
 
 .if ${MK_VT} != "no"
@@ -1357,14 +1358,11 @@ _kerberos5_bootstrap_tools= \
 	kerberos5/tools/slc \
 	usr.bin/compile_et
 
-${_bt}-kerberos5/lib/libroken: ${_bt}-kerberos5/tools/make-roken
-${_bt}-kerberos5/tools/asn1_compile: \
-    ${_bt}-kerberos5/lib/libroken ${_bt}-kerberos5/lib/libvers
-${_bt}-kerberos5/tools/slc: \
-    ${_bt}-kerberos5/lib/libroken ${_bt}-kerberos5/lib/libvers
-${_bt}-usr.bin/compile_et: \
-    ${_bt}-kerberos5/lib/libroken ${_bt}-kerberos5/lib/libvers
+.ORDER: ${_kerberos5_bootstrap_tools:C/^/${_bt}-/g}
 .endif
+
+# Rebuild up-to-date libmd for xinstall
+${_bt}-usr.bin/xinstall: ${_bt}-lib/libmd
 
 bootstrap-tools: .PHONY
 
@@ -1528,7 +1526,8 @@ cross-tools: .MAKE
 
 NXBENV=		MAKEOBJDIRPREFIX=${OBJTREE}/nxb \
 		INSTALL="sh ${.CURDIR}/tools/install.sh" \
-		VERSION="${VERSION}"
+		VERSION="${VERSION}" \
+		PATH=${PATH}:${OBJTREE}/gperf_for_gcc/usr/bin
 NXBMAKE=	${NXBENV} ${MAKE} \
 		TBLGEN=${OBJTREE}/nxb-bin/usr/bin/tblgen \
 		CLANG_TBLGEN=${OBJTREE}/nxb-bin/usr/bin/clang-tblgen \
@@ -1541,7 +1540,21 @@ NXBMAKE=	${NXBENV} ${MAKE} \
 		MK_CLANG_EXTRAS=no MK_CLANG_FULL=no \
 		MK_LLDB=no
 
+# native-xtools is the current target for qemu-user cross builds of ports
+# via poudriere and the imgact_binmisc kernel module.
+# For non-clang enabled targets that are still using the in tree gcc
+# we must build a gperf binary for one instance of its Makefiles.  On
+# clang-enabled systems, the gperf binary is obsolete.
 native-xtools: .MAKE
+.if ${MK_GCC_BOOTSTRAP} != "no"
+	mkdir -p ${OBJTREE}/gperf_for_gcc/usr/bin
+	${_+_}@${ECHODIR} "===> ${_gperf} (obj,depend,all,install)"; \
+	cd ${.CURDIR}/${_gperf} && \
+	${NXBMAKE} DIRPRFX=${_gperf}/ obj && \
+	${NXBMAKE} DIRPRFX=${_gperf}/ depend && \
+	${NXBMAKE} DIRPRFX=${_gperf}/ all && \
+	${NXBMAKE} DIRPRFX=${_gperf}/ DESTDIR=${OBJTREE}/gperf_for_gcc install
+.endif
 	mkdir -p ${OBJTREE}/nxb-bin/bin
 	mkdir -p ${OBJTREE}/nxb-bin/sbin
 	mkdir -p ${OBJTREE}/nxb-bin/usr
@@ -1647,13 +1660,7 @@ _prereq_libs= gnu/lib/libssp/libssp_nonshared gnu/lib/libgcc lib/libcompiler_rt
 # all shared libraries for ELF.
 #
 _startup_libs=	gnu/lib/csu
-.if exists(${.CURDIR}/lib/csu/${MACHINE_ARCH}-elf)
-_startup_libs+=	lib/csu/${MACHINE_ARCH}-elf
-.elif exists(${.CURDIR}/lib/csu/${MACHINE_ARCH})
-_startup_libs+=	lib/csu/${MACHINE_ARCH}
-.else
-_startup_libs+=	lib/csu/${MACHINE_CPUARCH}
-.endif
+_startup_libs+=	lib/csu
 _startup_libs+=	gnu/lib/libgcc
 _startup_libs+=	lib/libcompiler_rt
 _startup_libs+=	lib/libc
