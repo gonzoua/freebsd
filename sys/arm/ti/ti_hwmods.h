@@ -29,5 +29,6 @@
 #define _TI_HWMODS_H_
 
 clk_ident_t ti_hwmods_get_clock(device_t dev);
+int ti_hwmods_contains(device_t dev, const char *hwmod);
 
 #endif /* _TI_HWMODS_H_ */

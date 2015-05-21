@@ -134,3 +134,37 @@ ti_hwmods_get_clock(device_t dev)
 	free(buf, M_OFWPROP);
 	return (clk);
 }
+
+int ti_hwmods_contains(device_t dev, const char *hwmod)
+{
+	phandle_t node;
+	int len, l;
+	char *name;
+	char *buf;
+	int result;
+
+	if ((node = ofw_bus_get_node(dev)) == 0)
+		return (0);
+
+	if ((len = OF_getprop_alloc(node, "ti,hwmods", 1, (void**)&name)) <= 0)
+		return (0);
+
+	buf = name;
+
+	result = 0;
+	while (len > 0) {
+		if (strcmp(name, hwmod) == 0) {
+			result = 1;
+			break;
+		}
+
+		/* Slide to the next sub-string. */
+		l = strlen(name) + 1;
+		name += l;
+		len -= l;
+	}
+
+	free(buf, M_OFWPROP);
+
+	return (result);
+}
