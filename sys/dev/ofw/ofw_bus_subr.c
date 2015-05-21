@@ -430,7 +430,8 @@ ofw_bus_reg_to_rl(device_t dev, phandle_t node, pcell_t acells, pcell_t scells,
 }
 
 int
-ofw_bus_intr_to_rl(device_t dev, phandle_t node, struct resource_list *rl)
+ofw_bus_intr_to_rl(device_t dev, phandle_t node,
+    struct resource_list *rl, int *rlen)
 {
 	phandle_t iparent;
 	uint32_t icells, *intr;
@@ -495,6 +496,8 @@ ofw_bus_intr_to_rl(device_t dev, phandle_t node, struct resource_list *rl)
 		irqnum = ofw_bus_map_intr(dev, iparent, icells, &intr[i]);
 		resource_list_add(rl, SYS_RES_IRQ, rid++, irqnum, irqnum, 1);
 	}
+	if (rlen != NULL)
+		*rlen = rid;
 	free(intr, M_OFWPROP);
 	return (err);
 }
@@ -511,7 +514,7 @@ ofw_bus_find_compatible(phandle_t node, const char *onecompat)
 	 * matching 'compatible' property.
 	 */
 	for (child = OF_child(node); child != 0; child = OF_peer(child)) {
-		len = OF_getprop_alloc(node, "compatible", 1, &compat);
+		len = OF_getprop_alloc(child, "compatible", 1, &compat);
 		if (len >= 0) {
 			ret = ofw_bus_node_is_compatible(compat, len,
 			    onecompat);
