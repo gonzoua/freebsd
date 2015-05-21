@@ -55,7 +55,7 @@ __FBSDID("$FreeBSD$");
 
 #include <arm/ti/ti_prcm.h>
 #include <arm/ti/ti_hwmods.h>
-#include <arm/ti/ti_scm.h>
+#include <arm/ti/ti_pinmux.h>
 
 #define	AM335X_NUM_TIMERS	8
 
@@ -136,6 +136,13 @@ struct am335x_dmtimer_softc {
 static struct am335x_dmtimer_softc *am335x_dmtimer_et_sc = NULL;
 static struct am335x_dmtimer_softc *am335x_dmtimer_tc_sc = NULL;
 
+
+#ifdef PPS_SYNC
+/* -1 - not detected, 0 - not found, > 0 - timerX module */
+static int am335x_dmtimer_pps_module = -1;
+static const char *am335x_dmtimer_pps_hwmod = NULL;
+#endif
+
 /*
  * PPS driver routines, included when the kernel is built with option PPS_SYNC.
  *
@@ -151,7 +158,6 @@ static struct am335x_dmtimer_softc *am335x_dmtimer_tc_sc = NULL;
  * latched value from the timer.  The remaining work (done by pps_event()) is
  * scheduled to be done later in a non-interrupt context.
  */
-#if 0
 #ifdef PPS_SYNC
 
 #define	PPS_CDEV_NAME	"dmtpps"
@@ -294,21 +300,15 @@ static struct cdevsw am335x_dmtimer_pps_cdevsw = {
 	.d_name =       PPS_CDEV_NAME,
 };
 
-/*
- * Set up the PPS cdev and the the kernel timepps stuff.
- *
- * Note that this routine cannot touch the hardware, because bus space resources
- * are not fully set up yet when this is called.
- */
-static int
-am335x_dmtimer_pps_init(device_t dev, struct am335x_dmtimer_softc *sc)
+static void
+am335x_dmtimer_pps_find()
 {
-	int i, timer_num, unit;
+	int i;
 	unsigned int padstate;
 	const char * padmux;
 	struct padinfo {
 		char * ballname;
-		char * muxname;
+		const char * muxname;
 		int    timer_num;
 	} padinfo[] = {
 		{"GPMC_ADVn_ALE", "timer4", 4}, 
@@ -325,21 +325,47 @@ am335x_dmtimer_pps_init(device_t dev, struct am335x_dmtimer_softc *sc)
 	 * is configured for input.  The right symbolic values aren't exported
 	 * yet from ti_scm.h.
 	 */
-	timer_num = 0;
-	for (i = 0; i < nitems(padinfo) && timer_num == 0; ++i) {
-		if (ti_scm_padconf_get(padinfo[i].ballname, &padmux, 
+	am335x_dmtimer_pps_module = 0;
+	for (i = 0; i < nitems(padinfo) && am335x_dmtimer_pps_module == 0; ++i) {
+		if (ti_pinmux_padconf_get(padinfo[i].ballname, &padmux, 
 		    &padstate) == 0) {
 			if (strcasecmp(padinfo[i].muxname, padmux) == 0 &&
-			    (padstate & (0x01 << 5)))
-				timer_num = padinfo[i].timer_num;
+			    (padstate & (0x01 << 5))) {
+				am335x_dmtimer_pps_module = padinfo[i].timer_num;
+				am335x_dmtimer_pps_hwmod = padinfo[i].muxname;
+			}
 		}
 	}
 
-	if (timer_num == 0) {
-		device_printf(dev, "No DMTimer found with capture pin "
+
+	if (am335x_dmtimer_pps_module == 0) {
+		printf("am335x_dmtimer: No DMTimer found with capture pin "
 		    "configured as input; PPS driver disabled.\n");
-		return (DEFAULT_TC_TIMER);
 	}
+}
+
+/*
+ * Set up the PPS cdev and the the kernel timepps stuff.
+ *
+ * Note that this routine cannot touch the hardware, because bus space resources
+ * are not fully set up yet when this is called.
+ */
+static void
+am335x_dmtimer_pps_init(device_t dev, struct am335x_dmtimer_softc *sc)
+{
+	int unit;
+
+	if (am335x_dmtimer_pps_module == -1)
+		am335x_dmtimer_pps_find();
+
+	/* No PPS input */
+	if (am335x_dmtimer_pps_module == 0)
+		return;
+
+	/* Not PPS-enabled input */
+	if ((am335x_dmtimer_pps_module > 0) &&
+	    (!ti_hwmods_contains(dev, am335x_dmtimer_pps_hwmod)))
+	 	return;
 
 	/*
 	 * Indicate our capabilities (pretty much just capture of either edge).
@@ -363,26 +389,11 @@ am335x_dmtimer_pps_init(device_t dev, struct am335x_dmtimer_softc *sc)
 	sc->pps_cdev->si_drv1 = sc;
 
 	device_printf(dev, "Using DMTimer%d for PPS device /dev/%s%d\n", 
-	    timer_num, PPS_CDEV_NAME, unit);
-
-	return (timer_num);
+	    am335x_dmtimer_pps_module, PPS_CDEV_NAME, unit);
 }
 
-#else /* PPS_SYNC */
+#endif
 
-static int
-am335x_dmtimer_pps_init(device_t dev, struct am335x_dmtimer_softc *sc)
-{
-
-	/*
-	 * When PPS support is not compiled in, there's no need to use a timer
-	 * that has an associated capture-input pin, so use the default.
-	 */
-	return (DEFAULT_TC_TIMER);
-}
-
-#endif /* PPS_SYNC */
-#endif /* 0 */
 /*
  * End of PPS driver code.
  */
@@ -490,8 +501,6 @@ am335x_dmtimer_system_compatible(device_t dev)
 	node = ofw_bus_get_node(dev);
 	if (OF_hasprop(node, "ti,timer-alwon"))
 		return (0);
-	if (OF_hasprop(node, "ti,timer-pwm"))
-		return (0);
 
 	return (1);
 }
@@ -501,6 +510,14 @@ am335x_dmtimer_init_et(struct am335x_dmtimer_softc *sc)
 {
 	if (am335x_dmtimer_et_sc != NULL)
 		return (EEXIST);
+
+#ifdef PPS_SYNC
+	if ((am335x_dmtimer_pps_module > 0) &&
+	    (!ti_hwmods_contains(sc->dev, am335x_dmtimer_pps_hwmod))) {
+	    	device_printf(sc->dev, "not PPS enabled\n");
+	 	return (ENXIO);
+	}
+#endif
 
 	/* Setup eventtimer interrupt handler. */
 	if (bus_setup_intr(sc->dev, sc->tmr_irq_res, INTR_TYPE_CLK,
@@ -613,6 +630,10 @@ am335x_dmtimer_attach(device_t dev)
 		device_printf(dev, "Error: could not allocate irq resources\n");
 		return (ENXIO);
 	}
+
+#ifdef PPS_SYNC
+	am335x_dmtimer_pps_init(dev, sc);
+#endif
 
 	enable = 0;
 	/* Try to use as a timecounter or event timer */
