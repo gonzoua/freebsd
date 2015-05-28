@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2013 Oleksandr Tymoshenko <gonzo@freebsd.org>
+ * Copyright (c) 2015 Oleksandr Tymoshenko
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -23,36 +23,16 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD$
+ *	$FreeBSD$
  */
-#ifndef __AM335X_LCD_H__
-#define __AM335X_LCD_H__
 
-struct panel_info {
-	/* Timing part */
-	uint32_t panel_width;
-	uint32_t panel_height;
-	uint32_t panel_hfp;
-	uint32_t panel_hbp;
-	uint32_t panel_hsw;
-	uint32_t panel_vfp;
-	uint32_t panel_vbp;
-	uint32_t panel_vsw;
-	uint32_t hsync_active;
-	uint32_t vsync_active;
-	uint32_t panel_pxl_clk;
+#ifndef _HDMI_H_
+#define _HDMI_H_
 
-	uint32_t ac_bias;
-	uint32_t ac_bias_intrpt;
-	uint32_t dma_burst_sz;
-	uint32_t bpp;
-	uint32_t fdd;
-	uint32_t sync_edge;
-	uint32_t sync_ctrl;
-	uint32_t pixelclk_active;
-};
+#include <sys/eventhandler.h>
 
-int am335x_lcd_syscons_setup(vm_offset_t vaddr, vm_paddr_t paddr,
-    struct panel_info *panel);
+typedef void (*hdmi_event_hook)(void *, int);
+EVENTHANDLER_DECLARE(hdmi_event, hdmi_event_hook);
 
-#endif /* __AM335X_LCD_H__ */
+#endif	/* !_HDMI_H_ */
+
