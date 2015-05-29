@@ -439,44 +439,34 @@ out:
 static int
 am335x_read_panel_info(device_t dev, phandle_t node, struct panel_info *panel)
 {
-	int error;
 	phandle_t panel_info_node;
 
 	panel_info_node = ofw_bus_find_child(node, "panel-info");
 	if (panel_info_node == 0)
 		return (-1);
 
-	error = 0;
+	am335x_read_property(dev, panel_info_node,
+	    "ac-bias", &panel->ac_bias);
 
-	if ((error = am335x_read_property(dev, panel_info_node,
-	    "ac-bias", &panel->ac_bias)))
-		goto out;
+	am335x_read_property(dev, panel_info_node,
+	    "ac-bias-intrpt", &panel->ac_bias_intrpt);
 
-	if ((error = am335x_read_property(dev, panel_info_node,
-	    "ac-bias-intrpt", &panel->ac_bias_intrpt)))
-		goto out;
+	am335x_read_property(dev, panel_info_node,
+	    "dma-burst-sz", &panel->dma_burst_sz);
 
-	if ((error = am335x_read_property(dev, panel_info_node,
-	    "dma-burst-sz", &panel->dma_burst_sz)))
-		goto out;
+	am335x_read_property(dev, panel_info_node,
+	    "bpp", &panel->bpp);
 
-	if ((error = am335x_read_property(dev, panel_info_node,
-	    "bpp", &panel->bpp)))
-		goto out;
+	am335x_read_property(dev, panel_info_node,
+	    "fdd", &panel->fdd);
 
-	if ((error = am335x_read_property(dev, panel_info_node,
-	    "fdd", &panel->fdd)))
-		goto out;
+	am335x_read_property(dev, panel_info_node,
+	    "sync-edge", &panel->sync_edge);
 
-	if ((error = am335x_read_property(dev, panel_info_node,
-	    "sync-edge", &panel->sync_edge)))
-		goto out;
-
-	error = am335x_read_property(dev, panel_info_node,
+	am335x_read_property(dev, panel_info_node,
 	    "sync-ctrl", &panel->sync_ctrl);
 
-out:
-	return (error);
+	return (0);
 }
 
 
@@ -851,6 +841,7 @@ am335x_lcd_hdmi_event(void *arg)
 	sc->sc_panel.panel_vfp = videomode->vsync_start - videomode->vdisplay;
 	sc->sc_panel.panel_vbp = videomode->vtotal - videomode->vsync_end;
 	sc->sc_panel.panel_vsw = videomode->vsync_end - videomode->vsync_start;
+	sc->sc_panel.pixelclk_active = 1;
 
 	if (videomode->flags & VID_NHSYNC)
 		sc->sc_panel.hsync_active = 0;
@@ -930,8 +921,17 @@ am335x_lcd_attach(device_t dev)
 		return (ENXIO);
 	}
 
+	sc->sc_panel.ac_bias = 255;
+	sc->sc_panel.ac_bias_intrpt = 0;
+	sc->sc_panel.dma_burst_sz = 16;
+	sc->sc_panel.bpp = 16;
+	sc->sc_panel.fdd = 128;
+	sc->sc_panel.sync_edge = 0;
+	sc->sc_panel.sync_ctrl = 1;
+
 	panel_node = fdt_find_compatible(root, "ti,tilcdc,panel", 1);
 	if (panel_node != 0) {
+		device_printf(dev, "using static panel info\n");
 		if (am335x_read_panel_info(dev, panel_node, &sc->sc_panel)) {
 			device_printf(dev, "failed to read panel info\n");
 			return (ENXIO);
