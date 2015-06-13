@@ -843,10 +843,12 @@ am335x_lcd_hdmi_event(void *arg)
 	sc->sc_panel.panel_vsw = videomode->vsync_end - videomode->vsync_start;
 	sc->sc_panel.pixelclk_active = 1;
 
+	/* logic for HSYNC should be reversed */
 	if (videomode->flags & VID_NHSYNC)
-		sc->sc_panel.hsync_active = 0;
-	else
 		sc->sc_panel.hsync_active = 1;
+	else
+		sc->sc_panel.hsync_active = 0;
+
 	if (videomode->flags & VID_NVSYNC)
 		sc->sc_panel.vsync_active = 0;
 	else
