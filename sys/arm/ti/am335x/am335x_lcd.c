@@ -206,7 +206,6 @@ struct am335x_lcd_softc {
 	struct sysctl_oid	*sc_oid;
 
 	struct panel_info	sc_panel;
-	int			sc_ref_freq;
 
 	/* Framebuffer */
 	bus_dma_tag_t		sc_dma_tag;
@@ -235,13 +234,22 @@ am335x_fb_dmamap_cb(void *arg, bus_dma_segment_t *segs, int nseg, int err)
 static uint32_t
 am335x_lcd_calc_divisor(uint32_t reference, uint32_t freq)
 {
-	uint32_t div;
-	/* Raster mode case: divisors are in range from 2 to 255 */
-	for (div = 2; div < 255; div++)
-		if (reference/div <= freq)
-			return (div);
+	uint32_t div, i;
+	uint32_t delta, min_delta;
 
-	return (255);
+	min_delta = freq;
+	div = 255;
+
+	/* Raster mode case: divisors are in range from 2 to 255 */
+	for (i = 2; i < 255; i++) {
+		delta = abs(reference/i - freq);
+		if (delta < min_delta) {
+			div = i;
+			min_delta = delta;
+		}
+	}
+
+	return (div);
 }
 
 static int
@@ -573,7 +581,22 @@ am335x_lcd_configure(struct am335x_lcd_softc *sc)
 	uint32_t hbp, hfp, hsw;
 	uint32_t vbp, vfp, vsw;
 	uint32_t width, height;
+	unsigned int ref_freq;
 	int err;
+
+	/*
+	 * try to adjust clock to get double of requested frequency
+	 * HDMI/DVI displays are very sensitive to error in frequncy value
+	 */
+	if (ti_prcm_clk_set_source_freq(LCDC_CLK, sc->sc_panel.panel_pxl_clk*2)) {
+		device_printf(sc->sc_dev, "can't set source frequency\n");
+		return (ENXIO);
+	}
+
+	if (ti_prcm_clk_get_source_freq(LCDC_CLK, &ref_freq)) {
+		device_printf(sc->sc_dev, "can't get reference frequency\n");
+		return (ENXIO);
+	}
 
 	/* Panle initialization */
 	dma_size = round_page(sc->sc_panel.panel_width*sc->sc_panel.panel_height*sc->sc_panel.bpp/8);
@@ -618,7 +641,7 @@ am335x_lcd_configure(struct am335x_lcd_softc *sc)
 
 	/* Only raster mode is supported */
 	reg = CTRL_RASTER_MODE;
-	div = am335x_lcd_calc_divisor(sc->sc_ref_freq, sc->sc_panel.panel_pxl_clk);
+	div = am335x_lcd_calc_divisor(ref_freq, sc->sc_panel.panel_pxl_clk);
 	reg |= (div << CTRL_DIV_SHIFT);
 	LCD_WRITE4(sc, LCD_CTRL, reg); 
 
@@ -946,10 +969,6 @@ am335x_lcd_attach(device_t dev)
 	}
 
 	ti_prcm_clk_enable(LCDC_CLK);
-	if (ti_prcm_clk_get_source_freq(LCDC_CLK, &sc->sc_ref_freq)) {
-		device_printf(dev, "Can't get reference frequency\n");
-		return (ENXIO);
-	}
 
 	rid = 0;
 	sc->sc_mem_res = bus_alloc_resource_any(dev, SYS_RES_MEMORY, &rid,
