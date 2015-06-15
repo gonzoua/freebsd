@@ -141,8 +141,8 @@ options 	FDT			# Configure using FDT/DTB data
 
 # Comment following lines for boot console on serial port
 device		vt
+device		videomode
 device		hdmi
 device		ums
 device		ukbd
 device		kbdmux
-device		tda19988

@@ -48,9 +48,9 @@ __FBSDID("$FreeBSD$");
 #include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/ofw_bus_subr.h>
 
-#include <dev/hdmi/videomode.h>
-#include <dev/hdmi/edidvar.h>
-#include <dev/hdmi/hdmi.h>
+#include <dev/videomode/videomode.h>
+#include <dev/videomode/edidvar.h>
+#include <arm/ti/am335x/hdmi.h>
 
 #include "iicbus_if.h"
 #include "hdmi_if.h"

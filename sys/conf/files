@@ -1430,11 +1430,6 @@ dev/hatm/if_hatm_intr.c		optional hatm pci
 dev/hatm/if_hatm_ioctl.c	optional hatm pci
 dev/hatm/if_hatm_rx.c		optional hatm pci
 dev/hatm/if_hatm_tx.c		optional hatm pci
-dev/hdmi/hdmi_if.m		optional hdmi
-dev/hdmi/edid.c			optional hdmi
-dev/hdmi/pickmode.c		optional hdmi
-dev/hdmi/videomode.c		optional hdmi
-dev/hdmi/vesagtf.c		optional hdmi
 dev/hifn/hifn7751.c		optional hifn
 dev/hme/if_hme.c		optional hme
 dev/hme/if_hme_pci.c		optional hme pci
