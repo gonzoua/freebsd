@@ -1455,7 +1455,6 @@ dev/iicbus/ds1374.c		optional ds1374
 dev/iicbus/ds1672.c		optional ds1672
 dev/iicbus/ds3231.c		optional ds3231
 dev/iicbus/icee.c		optional icee
-dev/iicbus/tda19988.c		optional tda19988
 dev/iicbus/if_ic.c		optional ic
 dev/iicbus/iic.c		optional iic
 dev/iicbus/iicbb.c		optional iicbb
