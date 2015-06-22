@@ -28,7 +28,7 @@
 .\"     From: @(#)inet.4	8.1 (Berkeley) 6/5/93
 .\" $FreeBSD$
 .\"
-.Dd April 2, 2015
+.Dd April 7, 2015
 .Dt INET 4
 .Os
 .Sh NAME
@@ -247,7 +247,7 @@ generated.
 This closes a minor information leak which allows remote observers to
 determine the rate of packet generation on the machine by watching the
 counter.
-In the same time, on high-speed links, it can decrease the ID reuse
+At the same time, on high-speed links, it can decrease the ID reuse
 cycle greatly.
 Default is 0 (sequential IP IDs).
 IPv6 flow IDs and fragment IDs are always random.

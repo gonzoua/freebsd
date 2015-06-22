@@ -766,7 +766,7 @@ vmem_start_callout(void *unused)
 
 	TASK_INIT(&vmem_periodic_wk, 0, vmem_periodic, NULL);
 	vmem_periodic_interval = hz * 10;
-	callout_init(&vmem_periodic_ch, CALLOUT_MPSAFE);
+	callout_init(&vmem_periodic_ch, 1);
 	callout_reset(&vmem_periodic_ch, vmem_periodic_interval,
 	    vmem_periodic_kick, NULL);
 }
@@ -1320,6 +1320,7 @@ vmem_add(vmem_t *vm, vmem_addr_t addr, vmem_size_t size, int flags)
 vmem_size_t
 vmem_size(vmem_t *vm, int typemask)
 {
+	int i;
 
 	switch (typemask) {
 	case VMEM_ALLOC:
@@ -1328,6 +1329,17 @@ vmem_size(vmem_t *vm, int typemask)
 		return vm->vm_size - vm->vm_inuse;
 	case VMEM_FREE|VMEM_ALLOC:
 		return vm->vm_size;
+	case VMEM_MAXFREE:
+		VMEM_LOCK(vm);
+		for (i = VMEM_MAXORDER - 1; i >= 0; i--) {
+			if (LIST_EMPTY(&vm->vm_freelist[i]))
+				continue;
+			VMEM_UNLOCK(vm);
+			return ((vmem_size_t)ORDER2SIZE(i) <<
+			    vm->vm_quantum_shift);
+		}
+		VMEM_UNLOCK(vm);
+		return (0);
 	default:
 		panic("vmem_size");
 	}

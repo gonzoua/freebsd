@@ -48,13 +48,12 @@
 /*
  * Compiler versions and names
  */
-#define ASL_REVISION                ACPI_CA_VERSION
 #define ASL_COMPILER_NAME           "ASL+ Optimizing Compiler"
 #define AML_DISASSEMBLER_NAME       "AML/ASL+ Disassembler"
 #define ASL_INVOCATION_NAME         "iasl"
 #define ASL_CREATOR_ID              "INTL"
 
-#define ASL_COMPLIANCE              "Supports ACPI Specification Revision 5.1"
+#define ASL_COMPLIANCE              "Supports ACPI Specification Revision 6.0"
 
 
 /* Configuration constants */

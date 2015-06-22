@@ -1826,7 +1826,7 @@ arc_hdr_destroy(arc_buf_hdr_t *hdr)
 
 		if (l2hdr != NULL) {
 			trim_map_free(l2hdr->b_dev->l2ad_vdev, l2hdr->b_daddr,
-			    hdr->b_size, 0);
+			    l2hdr->b_asize, 0);
 			list_remove(l2hdr->b_dev->l2ad_buflist, hdr);
 			arc_buf_l2_cdata_free(hdr);
 			ARCSTAT_INCR(arcstat_l2_size, -hdr->b_size);
@@ -2648,8 +2648,11 @@ arc_reclaim_needed(void)
 		    (vmem_size(heap_arena, VMEM_FREE | VMEM_ALLOC)) >> 2);
 		return (1);
 	}
+#define	zio_arena	NULL
+#else
+#define	zio_arena	heap_arena
 #endif
-#ifdef illumos
+
 	/*
 	 * If zio data pages are being allocated out of a separate heap segment,
 	 * then enforce that the size of available vmem for this arena remains
@@ -2663,7 +2666,18 @@ arc_reclaim_needed(void)
 	    vmem_size(zio_arena, VMEM_FREE) <
 	    (vmem_size(zio_arena, VMEM_ALLOC) >> 4))
 		return (1);
-#endif	/* illumos */
+
+	/*
+	 * Above limits know nothing about real level of KVA fragmentation.
+	 * Start aggressive reclamation if too little sequential KVA left.
+	 */
+	if (vmem_size(heap_arena, VMEM_MAXFREE) < zfs_max_recordsize) {
+		DTRACE_PROBE2(arc__reclaim_maxfree, uint64_t,
+		    vmem_size(heap_arena, VMEM_MAXFREE),
+		    uint64_t, zfs_max_recordsize);
+		return (1);
+	}
+
 #else	/* _KERNEL */
 	if (spa_get_random(100) == 0)
 		return (1);
@@ -3854,7 +3868,7 @@ arc_release(arc_buf_t *buf, void *tag)
 		vdev_space_update(l2hdr->b_dev->l2ad_vdev,
 		    -l2hdr->b_asize, 0, 0);
 		trim_map_free(l2hdr->b_dev->l2ad_vdev, l2hdr->b_daddr,
-		    hdr->b_size, 0);
+		    l2hdr->b_asize, 0);
 		kmem_free(l2hdr, sizeof (l2arc_buf_hdr_t));
 		ARCSTAT_INCR(arcstat_l2_size, -buf_size);
 		mutex_exit(&l2arc_buflist_mtx);
@@ -4799,7 +4813,7 @@ l2arc_write_done(zio_t *zio)
 			bytes_dropped += abl2->b_asize;
 			hdr->b_l2hdr = NULL;
 			trim_map_free(abl2->b_dev->l2ad_vdev, abl2->b_daddr,
-			    hdr->b_size, 0);
+			    abl2->b_asize, 0);
 			kmem_free(abl2, sizeof (l2arc_buf_hdr_t));
 			ARCSTAT_INCR(arcstat_l2_size, -hdr->b_size);
 		}
