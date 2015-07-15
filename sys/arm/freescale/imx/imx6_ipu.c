@@ -61,7 +61,6 @@ void
 imx_ccm_ipu_ctrl(int enable);
 
 #define IPU_RESET
-#undef IPU_RESET
 
 #if 0
         .xres           = 1024,
@@ -1085,7 +1084,7 @@ ipu_init(struct ipu_softc *sc)
 		goto fail;
 	}
 
-	hdmi_enable();
+	hdmi_video_enable();
 		
 	return (0);
 fail:

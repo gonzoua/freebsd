@@ -29,7 +29,9 @@
 #ifndef	__IMX6_HDMI_H__
 #define	__IMX6_HDMI_H__
 
-int hdmi_enable(void);
+int hdmi_video_enable(void);
 int hdmi_edid_read(void);
+uint8_t hdmi_core_read_1(bus_size_t off);
+void hdmi_core_write_1(bus_size_t off, uint8_t val);
 
 #endif	/* __IMX6_HDMI_H__ */
