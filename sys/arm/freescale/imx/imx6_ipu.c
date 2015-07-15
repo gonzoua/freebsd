@@ -990,11 +990,11 @@ ipu_init(struct ipu_softc *sc)
 	IPU_WRITE4(sc, IPU_INT_CTRL_9, 0);
 	IPU_WRITE4(sc, IPU_INT_CTRL_10, 0);
 
-	#endif
 	IPU_WRITE4(sc, IPU_IDMAC_CH_PRI_1, 0x18800000);
 
 	IPU_WRITE4(sc, IPU_DISP_GEN, DISP_GEN_MCU_MAX_BURST_STOP |
 	    (8 << DISP_GEN_MCU_T_SHIFT));
+	#endif
 
 	dma_size = round_page(1026*768*4);
 
