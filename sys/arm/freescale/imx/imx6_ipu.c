@@ -61,7 +61,7 @@ void
 imx_ccm_ipu_ctrl(int enable);
 
 #define IPU_RESET
-// #undef IPU_RESET
+#undef IPU_RESET
 
 #if 0
         .xres           = 1024,
