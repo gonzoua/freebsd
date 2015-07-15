@@ -91,7 +91,7 @@ ccm_init_gates(struct ccm_softc *sc)
                                         /* Turns on... */
 	WR4(sc, CCM_CCGR0, 0x0000003f); /* ahpbdma, aipstz 1 & 2 busses */
 	WR4(sc, CCM_CCGR1, 0x00300c00); /* gpt, enet */
-	WR4(sc, CCM_CCGR2, 0x0fffffc0); /* ipmux & ipsync (bridges), iomux, i2c */
+	WR4(sc, CCM_CCGR2, 0x0ffffff3); /* ipmux & ipsync (bridges), iomux, i2c, HDMI */
 	WR4(sc, CCM_CCGR3, 0x3ff0000f); /* DDR memory controller, IPU */
 	WR4(sc, CCM_CCGR4, 0x0000f300); /* pl301 bus crossbar */
 	WR4(sc, CCM_CCGR5, 0x0ffc00c0); /* uarts, ssi, sdma */

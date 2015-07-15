@@ -29,3 +29,4 @@ makeoptions	FDT_DTS_FILE=wandboard-solo.dts
 device		vt
 device		kbdmux
 device		ukbd
+device		videomode
