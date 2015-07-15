@@ -61,6 +61,7 @@ void
 imx_ccm_ipu_ctrl(int enable);
 
 #define IPU_RESET
+#undef IPU_RESET
 
 #if 0
         .xres           = 1024,
@@ -694,7 +695,7 @@ ipu_config_timing(struct ipu_softc *sc, int di)
 	ipu_reset_wave_gen(sc, di, 8);
 	ipu_reset_wave_gen(sc, di, 9);
 
-	// ipu_init_micorcode_template(sc, di, map);
+	ipu_init_micorcode_template(sc, di, map);
 
 	gen_offset = di ?  IPU_DI1_GENERAL : IPU_DI0_GENERAL;
 	gen = IPU_READ4(sc, gen_offset);
@@ -864,8 +865,6 @@ ipu_dc_init(struct ipu_softc *sc)
 	ipu_dc_link_event(sc, DC_EVENT_NEW_CHAN, 0, 0);
 	ipu_dc_link_event(sc, DC_EVENT_NEW_ADDR, 0, 0);
 
-	return;
-
 	conf = 0x02; /* W_SIZE */
         conf |= DI_PORT << 3; /* PROG_DISP_ID */
 	conf |= DI_PORT << 2; /* PROG_DI_ID */
@@ -963,11 +962,7 @@ ipu_init(struct ipu_softc *sc)
 	printf("IPU_CONF == %08x\n", reg);
 
 	IPU_WRITE4(sc, IPU_CONF, 0x00000040);
-	ipu_di_disable(sc, DI_PORT);
-	// DELAY(100000);
-	ipu_di_enable(sc, DI_PORT);
 
-	#if 0
 	int i;
 	IPU_WRITE4(sc, IPU_MEM_RST, 0x807FFFFF);
 	i = 1000;
@@ -982,7 +977,6 @@ ipu_init(struct ipu_softc *sc)
 		device_printf(sc->sc_dev, "timeout while resetting memory\n");
 		goto fail;
 	}
-	#endif
 
 #ifdef IPU_RESET
 	ipu_dc_reset_map(sc, 0);
@@ -1042,13 +1036,12 @@ ipu_init(struct ipu_softc *sc)
 	/* Calculate actual FB Size */
 	sc->sc_fb_size = MODE_WIDTH*MODE_HEIGHT*MODE_BPP/8;
 
-	// ipu_dc_init(sc);
+	ipu_dc_init(sc);
 
-	// ipu_config_timing(sc, DI_PORT);
-	// ipu_init_buffer(sc);
-	// ipu_di_enable(sc, DI_PORT);
+	ipu_config_timing(sc, DI_PORT);
+	ipu_init_buffer(sc);
+	ipu_di_enable(sc, DI_PORT);
 
-	#if 0
 	/* Enable DMA channel */
 	uint32_t off = (DMA_CHANNEL > 31) ? IPU_IDMAC_CH_EN_2 : IPU_IDMAC_CH_EN_1;
 	reg = IPU_READ4(sc, off);
@@ -1061,7 +1054,6 @@ ipu_init(struct ipu_softc *sc)
 
 	ipu_dc_enable(sc);
 
-	#endif
 	IPU_WRITE4(sc, IPU_CONF, 0x00000660);
 
 	sc->sc_fb_info.fb_name = device_get_nameunit(sc->sc_dev);
@@ -1084,7 +1076,7 @@ ipu_init(struct ipu_softc *sc)
 		goto fail;
 	}
 
-	hdmi_video_enable();
+	// hdmi_video_enable();
 		
 	return (0);
 fail:
