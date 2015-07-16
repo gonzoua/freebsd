@@ -635,14 +635,10 @@ hdmi_video_detect_mode(void *arg)
 	sc->phy_reg_vlev = 0x294;
 	sc->phy_reg_cksymtx = 0x800d;
 
-	return;
-
-	printf("HDMI setup");
+	printf("HDMI setup\n");
 	hdmi_video_setup(sc);
 	printf("HDMI setup done\n");
 
-	/* Finished with the interrupt hook */
-	config_intrhook_disestablish(&sc->mode_hook);
 }
 
 int hdmi_video_enable()

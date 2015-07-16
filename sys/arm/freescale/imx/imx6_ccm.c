@@ -88,14 +88,25 @@ WR4(struct ccm_softc *sc, bus_size_t off, uint32_t val)
 static void
 ccm_init_gates(struct ccm_softc *sc)
 {
+	uint32_t reg;
                                         /* Turns on... */
 	WR4(sc, CCM_CCGR0, 0x0000003f); /* ahpbdma, aipstz 1 & 2 busses */
 	WR4(sc, CCM_CCGR1, 0x00300c00); /* gpt, enet */
 	WR4(sc, CCM_CCGR2, 0x0ffffff3); /* ipmux & ipsync (bridges), iomux, i2c, HDMI */
-	WR4(sc, CCM_CCGR3, 0x3ff0000f); /* DDR memory controller, IPU */
+	WR4(sc, CCM_CCGR3, 0x3ff0300f); /* DDR memory controller, IPU */
 	WR4(sc, CCM_CCGR4, 0x0000f300); /* pl301 bus crossbar */
 	WR4(sc, CCM_CCGR5, 0x0ffc00c0); /* uarts, ssi, sdma */
 	WR4(sc, CCM_CCGR6, 0x000000ff); /* usdhc 1-4 */
+
+	/* Set HDMI clock to 280MHz */
+	reg = RD4(sc, CCM_CHSCCDR);
+	reg &= ~(CHSCCDR_IPU1_DI0_PRE_CLK_SEL_MASK |
+	    CHSCCDR_IPU1_DI0_PODF_MASK | CHSCCDR_IPU1_DI0_CLK_SEL_MASK);
+	reg |= (CHSCCDR_PODF_DIVIDE_BY_3 << CHSCCDR_IPU1_DI0_PODF_SHIFT);
+	reg |= (CHSCCDR_IPU_PRE_CLK_540M_PFD << CHSCCDR_IPU1_DI0_PRE_CLK_SEL_SHIFT);
+	WR4(sc, CCM_CHSCCDR, reg);
+	reg |= (CHSCCDR_CLK_SEL_LDB_DI0 << CHSCCDR_IPU1_DI0_CLK_SEL_SHIFT);
+	WR4(sc, CCM_CHSCCDR, reg);
 }
 
 static int

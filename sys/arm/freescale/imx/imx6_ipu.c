@@ -61,7 +61,6 @@ void
 imx_ccm_ipu_ctrl(int enable);
 
 #define IPU_RESET
-#undef IPU_RESET
 
 #if 0
         .xres           = 1024,
@@ -76,6 +75,7 @@ imx_ccm_ipu_ctrl(int enable);
         .sync           = FB_SYNC_EXT | FB_SYNC_CLK_LAT_FALL,
 #endif
 
+#if 1
 #define	MODE_WIDTH	1024
 #define	MODE_HEIGHT	768
 #define MODE_HFP	220
@@ -84,11 +84,26 @@ imx_ccm_ipu_ctrl(int enable);
 #define	MODE_VFP	21
 #define	MODE_VBP	7
 #define	MODE_VSYNC	10
+#else
+
+#define	MODE_WIDTH	640
+#define	MODE_HEIGHT	480
+#define MODE_HFP	16
+#define MODE_HBP	48
+#define MODE_HSYNC	96
+#define	MODE_VFP	10
+#define	MODE_VBP	33
+#define	MODE_VSYNC	2
+#endif
+
 #define	MODE_BPP	16
 #define	MODE_PIXEL_CLOCK	15385
 #define	MODE_HSYNC_INVERT	1
 #define	MODE_VSYNC_INVERT	1
 #define	MODE_PIXEL_CLOCK_INVERT	1
+
+
+
 
 #define	DMA_CHANNEL	23
 #define	DC_CHAN5	5
