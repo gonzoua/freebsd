@@ -639,6 +639,8 @@ hdmi_video_detect_mode(void *arg)
 	hdmi_video_setup(sc);
 	printf("HDMI setup done\n");
 
+	/* Finished with the interrupt hook */
+	config_intrhook_disestablish(&sc->mode_hook);
 }
 
 int hdmi_video_enable()
