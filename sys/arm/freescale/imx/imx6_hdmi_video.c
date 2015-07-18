@@ -538,42 +538,6 @@ static void hdmi_video_video_packetize(struct hdmi_video_softc *sc)
 	hdmi_core_write_1(HDMI_VP_CONF, val);
 }
 
-#if 0
-static void hdmi_video_video_csc(struct hdmi *hdmi)
-{
-	int color_depth = 0;
-	int interpolation = HDMI_CSC_CFG_INTMODE_DISABLE;
-	int decimation = HDMI_CSC_CFG_DECMODE_DISABLE;
-	uint8_t val;
-
-	/* YCC422 interpolation to 444 mode */
-	if (isColorSpaceInterpolation(hdmi))
-		interpolation = HDMI_CSC_CFG_INTMODE_CHROMA_INT_FORMULA1;
-	else if (isColorSpaceDecimation(hdmi))
-		decimation = HDMI_CSC_CFG_DECMODE_CHROMA_INT_FORMULA3;
-
-	if (hdmi->hdmi_video_data.enc_color_depth == 8)
-		color_depth = HDMI_CSC_SCALE_CSC_COLORDE_PTH_24BPP;
-	else if (hdmi->hdmi_video_data.enc_color_depth == 10)
-		color_depth = HDMI_CSC_SCALE_CSC_COLORDE_PTH_30BPP;
-	else if (hdmi->hdmi_video_data.enc_color_depth == 12)
-		color_depth = HDMI_CSC_SCALE_CSC_COLORDE_PTH_36BPP;
-	else if (hdmi->hdmi_video_data.enc_color_depth == 16)
-		color_depth = HDMI_CSC_SCALE_CSC_COLORDE_PTH_48BPP;
-	else
-		return;
-
-	/*configure the CSC registers */
-	hdmi_core_write_1(HDMI_CSC_CFG, interpolation | decimation);
-	val = hdmi_core_read_1(HDMI_CSC_SCALE);
-	val &= ~HDMI_CSC_SCALE_CSC_COLORDE_PTH_MASK;
-	val |= color_depth;
-	hdmi_core_write_1(HDMI_CSC_SCALE, val);
-
-	update_csc_coeffs(hdmi);
-}
-#endif 
-
 static void hdmi_video_video_sample(struct hdmi_video_softc *sc)
 {
 	int color_format;
@@ -636,9 +600,7 @@ hdmi_video_detect_mode(void *arg)
 	sc->phy_reg_vlev = 0x294;
 	sc->phy_reg_cksymtx = 0x800d;
 
-	printf("HDMI setup\n");
 	hdmi_video_setup(sc);
-	printf("HDMI setup done\n");
 
 	/* Finished with the interrupt hook */
 	config_intrhook_disestablish(&sc->mode_hook);
@@ -657,7 +619,7 @@ hdmi_video_detach(device_t dev)
 	sc = device_get_softc(dev);
 
 	if (sc->irq_res != NULL)
-		bus_release_resource(dev, SYS_RES_MEMORY, sc->irq_rid, sc->irq_res);
+		bus_release_resource(dev, SYS_RES_IRQ, sc->irq_rid, sc->irq_res);
 
 	return (0);
 }
