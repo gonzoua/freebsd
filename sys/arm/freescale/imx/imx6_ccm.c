@@ -243,6 +243,28 @@ imx_ccm_ssi_configure(device_t _ssidev)
 }
 
 void
+imx_ccm_ldb_configure(uint32_t freq)
+{
+	struct ccm_softc *sc;
+	uint32_t reg;
+
+	sc = ccm_sc;
+
+	reg = RD4(sc, CCM_CS2CDR);
+	printf("CCM_CS2CDR = %08x\n",
+	    (reg & LDB_DI0_CLK_SEL_MASK) >> LDB_DI0_CLK_SEL_SHIFT);
+
+	reg = RD4(sc,  CCM_CSCMR2);
+	printf("CCM_CSCMR2 = %s\n",
+	    (reg & CSCMR2_LDB_DI0_IPU_DIV_SHIFT) ? "7" : "3.5");
+
+	reg = RD4(sc,  CCM_CBCDR);
+	printf("CCM_CBCDR = %d [%s]\n",
+	    ((reg & CBCDR_MMDC_CH1_AXI_PODF_MASK) >> CBCDR_MMDC_CH1_AXI_PODF_SHIFT) + 1,
+	    (reg & (1 << 26)) ? "periph_clk2_clk" : "PLL2");
+}
+
+void
 imx_ccm_usb_enable(device_t _usbdev)
 {
 

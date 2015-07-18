@@ -52,13 +52,26 @@ __FBSDID("$FreeBSD$");
 #include <dev/fb/fbreg.h>
 #include <dev/vt/vt.h>
 
+#include <dev/videomode/videomode.h>
+#include <dev/videomode/edidvar.h>
+
 #include <arm/freescale/imx/imx6_src.h>
+#include <arm/freescale/imx/imx_ccmvar.h>
 #include <arm/freescale/imx/imx6_hdmi.h>
 
 #include "fb_if.h"
 
 void
 imx_ccm_ipu_ctrl(int enable);
+
+#define	LDB_CLOCK_RATE	280000000
+
+#define	MODE_HBP(mode)	((mode)->htotal - (mode)->hsync_end)
+#define	MODE_HFP(mode)	((mode)->hsync_start - (mode)->hdisplay)
+#define	MODE_HSW(mode)	((mode)->hsync_end - (mode)->hsync_start)
+#define	MODE_VBP(mode)	((mode)->vtotal - (mode)->vsync_end)
+#define	MODE_VFP(mode)	((mode)->vsync_start - (mode)->vdisplay)
+#define	MODE_VSW(mode)	((mode)->vsync_end - (mode)->vsync_start)
 
 #define IPU_RESET
 
@@ -75,7 +88,8 @@ imx_ccm_ipu_ctrl(int enable);
         .sync           = FB_SYNC_EXT | FB_SYNC_CLK_LAT_FALL,
 #endif
 
-#if 1
+#if 0
+#if 0
 #define	MODE_WIDTH	1024
 #define	MODE_HEIGHT	768
 #define MODE_HFP	220
@@ -84,8 +98,10 @@ imx_ccm_ipu_ctrl(int enable);
 #define	MODE_VFP	21
 #define	MODE_VBP	7
 #define	MODE_VSYNC	10
+#define	MODE_PIXEL_CLOCK	15385
 #else
 
+#if 0
 #define	MODE_WIDTH	640
 #define	MODE_HEIGHT	480
 #define MODE_HFP	16
@@ -94,15 +110,46 @@ imx_ccm_ipu_ctrl(int enable);
 #define	MODE_VFP	10
 #define	MODE_VBP	33
 #define	MODE_VSYNC	2
+#else
+#define	MODE_WIDTH	640
+#define	MODE_HEIGHT	480
+#define MODE_HFP	56
+#define MODE_HBP	80
+#define MODE_HSYNC	56
+#define	MODE_VFP	1
+#define	MODE_VBP	25
+#define	MODE_VSYNC	3
+#endif
+
+
+#define	MODE_PIXEL_CLOCK	25175
+#define	MODE_HSYNC_INVERT	1
+#define	MODE_VSYNC_INVERT	1
+#endif
+
+
 #endif
 
 #define	MODE_BPP	16
-#define	MODE_PIXEL_CLOCK	15385
-#define	MODE_HSYNC_INVERT	1
-#define	MODE_VSYNC_INVERT	1
-#define	MODE_PIXEL_CLOCK_INVERT	1
+#define	MODE_PIXEL_CLOCK_INVERT	0
 
+/*
+ * These macros help the modelines below fit on one line.
+ */
+#define HP VID_PHSYNC
+#define HN VID_NHSYNC
+#define VP VID_PVSYNC
+#define VN VID_NVSYNC
+#define I VID_INTERLACE
+#define DS VID_DBLSCAN
 
+#define M(nm,hr,vr,clk,hs,he,ht,vs,ve,vt,f) \
+	{ clk, hr, hs, he, ht, vr, vs, ve, vt, f, nm } 
+
+//static struct videomode mode1024x768 = M("1024x768x60",1024,768,65000,1048,1184,1344,771,777,806,HN|VN);
+// static struct videomode mode640x480 = M("640x480x60",640,480,25175,656,752,800,490,492,525,HN|VN);
+static struct videomode mode640x480_2 = M("640x480x85",640,480,36000,696,752,832,481,484,509,HN|VN);
+static struct videomode *mode = &mode640x480_2;
 
 
 #define	DMA_CHANNEL	23
@@ -621,8 +668,6 @@ static void
 ipu_config_timing(struct ipu_softc *sc, int di)
 {
 	int div;
-	int htotal;
-	int vtotal;
 	uint32_t di_scr_conf;
 	uint32_t gen_offset, gen;
 	uint32_t as_gen_offset, as_gen;
@@ -633,14 +678,16 @@ ipu_config_timing(struct ipu_softc *sc, int di)
 
 	/* TODO: check mode restrictions / fixup */
 	/* TODO: enable timers, get divisors */
-	div = 1;
+	div = 2;
 	map = 0;
 
 	bs_clkgen_offset = di ? IPU_DI1_BS_CLKGEN0 : IPU_DI0_BS_CLKGEN0;
 	printf("DI_BS_CLKGEN0: %08x\n", IPU_READ4(sc, bs_clkgen_offset));
 	printf("DI_BS_CLKGEN1: %08x\n", IPU_READ4(sc, bs_clkgen_offset + 4));
-	IPU_WRITE4(sc, bs_clkgen_offset, 0x00000010);
-	IPU_WRITE4(sc, bs_clkgen_offset + 4, 0x00010000);
+	IPU_WRITE4(sc, bs_clkgen_offset, 0x00000020);
+	IPU_WRITE4(sc, bs_clkgen_offset + 4, 0x00020000);
+
+	imx_ccm_ldb_configure(0);
 
 
 	/* Setup wave generator */
@@ -661,48 +708,46 @@ ipu_config_timing(struct ipu_softc *sc, int di)
 	IPU_WRITE4(sc, dw_set_offset, dw_set);
 
 	div = 0;
-	htotal = MODE_WIDTH + MODE_HFP + MODE_HBP + MODE_HSYNC;
-	vtotal = MODE_HEIGHT + MODE_VFP + MODE_VBP + MODE_VSYNC;
 
 	/* DI_COUNTER_INT_HSYNC */
 	ipu_config_wave_gen_0(sc, di, DI_COUNTER_INT_HSYNC,
-	    htotal - 1, DI_SYNC_CLK, 0, DI_SYNC_NONE);
+	    mode->htotal - 1, DI_SYNC_CLK, 0, DI_SYNC_NONE);
 	ipu_config_wave_gen_1(sc, di, DI_COUNTER_INT_HSYNC,
 	    0, DI_SYNC_NONE, 0, DI_SYNC_NONE, DI_SYNC_NONE, 0, 0);
 
 	/* DI_COUNTER_HSYNC */
 	ipu_config_wave_gen_0(sc, di, DI_COUNTER_HSYNC,
-	    htotal - 1, DI_SYNC_CLK, 0, DI_SYNC_CLK);
+	    mode->htotal - 1, DI_SYNC_CLK, 0, DI_SYNC_CLK);
 	ipu_config_wave_gen_1(sc, di, DI_COUNTER_HSYNC,
 	    0, DI_SYNC_NONE, 1, DI_SYNC_NONE, DI_SYNC_CLK,
-	    0, MODE_HSYNC*2);
+	    0, MODE_HSW(mode)*2);
 
 	/* DI_COUNTER_VSYNC */
 	ipu_config_wave_gen_0(sc, di, DI_COUNTER_VSYNC,
-	    vtotal - 1, DI_SYNC_COUNTER(DI_COUNTER_INT_HSYNC),
+	    mode->vtotal - 1, DI_SYNC_COUNTER(DI_COUNTER_INT_HSYNC),
 	    0, DI_SYNC_NONE);
 	ipu_config_wave_gen_1(sc, di, DI_COUNTER_VSYNC,
 	    0, DI_SYNC_NONE, 1, DI_SYNC_NONE,
 	    DI_SYNC_COUNTER(DI_COUNTER_INT_HSYNC),
-	    0, MODE_VSYNC*2);
+	    0, MODE_VSW(mode)*2);
 
 	di_scr_conf = di ? IPU_DI1_SCR_CONF : IPU_DI0_SCR_CONF;
-	IPU_WRITE4(sc, di_scr_conf, vtotal - 1);
+	IPU_WRITE4(sc, di_scr_conf, mode->vtotal - 1);
 
 	/* TODO: update DI_SCR_CONF */
 
 	/* Active Data 0 */
 	ipu_config_wave_gen_0(sc, di, DI_COUNTER_AD_0,
 	    0, DI_SYNC_COUNTER(DI_COUNTER_HSYNC),
-	    MODE_VSYNC + MODE_VFP, DI_SYNC_COUNTER(DI_COUNTER_HSYNC));
+	    MODE_VSW(mode) + MODE_VFP(mode), DI_SYNC_COUNTER(DI_COUNTER_HSYNC));
 	ipu_config_wave_gen_1(sc, di, DI_COUNTER_AD_0,
-	    MODE_HEIGHT, DI_SYNC_COUNTER(DI_COUNTER_VSYNC),
+	    mode->vdisplay, DI_SYNC_COUNTER(DI_COUNTER_VSYNC),
 	    0, DI_SYNC_NONE, DI_SYNC_NONE, 0, 0);
 
 	ipu_config_wave_gen_0(sc, di, DI_COUNTER_AD_1,
-	    0, DI_SYNC_CLK, MODE_HSYNC + MODE_HFP, DI_SYNC_CLK);
+	    0, DI_SYNC_CLK, MODE_HSW(mode) + MODE_HFP(mode), DI_SYNC_CLK);
 	ipu_config_wave_gen_1(sc, di, DI_COUNTER_AD_1,
-	    MODE_WIDTH, DI_SYNC_COUNTER(DI_COUNTER_AD_0),
+	    mode->hdisplay, DI_SYNC_COUNTER(DI_COUNTER_AD_0),
 	    0, DI_SYNC_NONE, DI_SYNC_NONE, 0, 0);
 
 	ipu_reset_wave_gen(sc, di, 6);
@@ -716,12 +761,12 @@ ipu_config_timing(struct ipu_softc *sc, int di)
 	gen = IPU_READ4(sc, gen_offset);
 	printf("DI_GENERAL: %08x -> ", gen);
 
-	if (MODE_HSYNC_INVERT)
+	if (mode->flags & VID_NHSYNC)
 		gen &= ~DI_GENERAL_POLARITY_2;
 	else /* active high */
 		gen |= DI_GENERAL_POLARITY_2;
 
-	if (MODE_VSYNC_INVERT)
+	if (mode->flags & VID_NVSYNC)
 		gen &= ~DI_GENERAL_POLARITY_3;
 	else /* active high */
 		gen |= DI_GENERAL_POLARITY_3;
@@ -731,6 +776,7 @@ ipu_config_timing(struct ipu_softc *sc, int di)
 	else
 		gen |= DI_GENERAL_POL_CLK;
 
+	/* User LDB clock to drive pixel clock */
 	gen |= 0x00100000;
 
 	printf("%08x (XXX)\n", gen);
@@ -746,7 +792,7 @@ ipu_config_timing(struct ipu_softc *sc, int di)
 
 	IPU_WRITE4(sc, (di ? IPU_DI1_POL : IPU_DI0_POL), 0x10);
 
-	IPU_WRITE4(sc, DC_DISP_CONF2(di), MODE_WIDTH);
+	IPU_WRITE4(sc, DC_DISP_CONF2(di), mode->hdisplay);
 }
 
 static void
@@ -902,13 +948,13 @@ ipu_init_buffer(struct ipu_softc *sc)
 	uint32_t stride;
 	uint32_t reg, db_mode_sel, cur_buf;
 
-	stride = MODE_WIDTH*MODE_BPP/8;
+	stride = mode->hdisplay*MODE_BPP/8;
 
 	/* init channel paramters */
 	CH_PARAM_RESET(&param);
 	/* XXX: interlaced modes are not supported yet */
-	CH_PARAM_SET_FW(&param, MODE_WIDTH - 1);
-	CH_PARAM_SET_FH(&param, MODE_HEIGHT - 1);
+	CH_PARAM_SET_FW(&param, mode->hdisplay - 1);
+	CH_PARAM_SET_FH(&param, mode->vdisplay - 1);
 	CH_PARAM_SET_SLY(&param, stride - 1);
 
 	CH_PARAM_SET_EBA0(&param, (sc->sc_fb_phys >> 3));
@@ -1049,7 +1095,7 @@ ipu_init(struct ipu_softc *sc)
 	memset(sc->sc_fb_base, 0x00, dma_size);
 
 	/* Calculate actual FB Size */
-	sc->sc_fb_size = MODE_WIDTH*MODE_HEIGHT*MODE_BPP/8;
+	sc->sc_fb_size = mode->hdisplay*mode->vdisplay*MODE_BPP/8;
 
 	ipu_dc_init(sc);
 	IPU_WRITE4(sc, IPU_CONF, 0x00000660);
@@ -1075,9 +1121,9 @@ ipu_init(struct ipu_softc *sc)
 	sc->sc_fb_info.fb_pbase = sc->sc_fb_phys;
 	sc->sc_fb_info.fb_size = sc->sc_fb_size;
 	sc->sc_fb_info.fb_bpp = sc->sc_fb_info.fb_depth = MODE_BPP;
-	sc->sc_fb_info.fb_stride = MODE_WIDTH*MODE_BPP / 8;
-	sc->sc_fb_info.fb_width = MODE_WIDTH;
-	sc->sc_fb_info.fb_height = MODE_HEIGHT;
+	sc->sc_fb_info.fb_stride = mode->hdisplay*MODE_BPP / 8;
+	sc->sc_fb_info.fb_width = mode->hdisplay;
+	sc->sc_fb_info.fb_height = mode->vdisplay;
 
 	device_t fbd = device_add_child(sc->sc_dev, "fbd",
 	    device_get_unit(sc->sc_dev));

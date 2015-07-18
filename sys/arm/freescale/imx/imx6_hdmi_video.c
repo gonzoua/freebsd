@@ -78,6 +78,7 @@ struct hdmi_video_softc {
 static struct hdmi_video_softc *hdmi_video_sc;
 struct videomode mode1024x768 = M("1024x768x60",1024,768,65000,1048,1184,1344,771,777,806,HN|VN);
 struct videomode mode640x480 = M("640x480x60",640,480,25175,656,752,800,490,492,525,HN|VN);
+struct videomode mode640x480_2 = M("640x480x85",640,480,36000,696,752,832,481,484,509,HN|VN);
 
 static void
 hdmi_video_phy_wait_i2c_done(struct hdmi_video_softc *sc, int msec)
@@ -631,7 +632,7 @@ hdmi_video_detect_mode(void *arg)
 	imx_iomux_gpr_set(12, gpr3);
 
 	hdmi_edid_read();
-	sc->mode = &mode1024x768;
+	sc->mode = &mode640x480_2;
 	sc->phy_reg_vlev = 0x294;
 	sc->phy_reg_cksymtx = 0x800d;
 
