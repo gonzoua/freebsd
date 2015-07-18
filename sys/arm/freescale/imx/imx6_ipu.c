@@ -73,65 +73,8 @@ imx_ccm_ipu_ctrl(int enable);
 #define	MODE_VFP(mode)	((mode)->vsync_start - (mode)->vdisplay)
 #define	MODE_VSW(mode)	((mode)->vsync_end - (mode)->vsync_start)
 
-#define IPU_RESET
-
-#if 0
-        .xres           = 1024,
-        .yres           = 768,
-        .pixclock       = 15385,
-        .left_margin    = 220,
-        .right_margin   = 40,
-        .upper_margin   = 21,
-        .lower_margin   = 7,
-        .hsync_len      = 60,
-        .vsync_len      = 10,
-        .sync           = FB_SYNC_EXT | FB_SYNC_CLK_LAT_FALL,
-#endif
-
-#if 0
-#if 0
-#define	MODE_WIDTH	1024
-#define	MODE_HEIGHT	768
-#define MODE_HFP	220
-#define MODE_HBP	40
-#define MODE_HSYNC	60
-#define	MODE_VFP	21
-#define	MODE_VBP	7
-#define	MODE_VSYNC	10
-#define	MODE_PIXEL_CLOCK	15385
-#else
-
-#if 0
-#define	MODE_WIDTH	640
-#define	MODE_HEIGHT	480
-#define MODE_HFP	16
-#define MODE_HBP	48
-#define MODE_HSYNC	96
-#define	MODE_VFP	10
-#define	MODE_VBP	33
-#define	MODE_VSYNC	2
-#else
-#define	MODE_WIDTH	640
-#define	MODE_HEIGHT	480
-#define MODE_HFP	56
-#define MODE_HBP	80
-#define MODE_HSYNC	56
-#define	MODE_VFP	1
-#define	MODE_VBP	25
-#define	MODE_VSYNC	3
-#endif
-
-
-#define	MODE_PIXEL_CLOCK	25175
-#define	MODE_HSYNC_INVERT	1
-#define	MODE_VSYNC_INVERT	1
-#endif
-
-
-#endif
-
 #define	MODE_BPP	16
-#define	MODE_PIXEL_CLOCK_INVERT	0
+#define	MODE_PIXEL_CLOCK_INVERT	1
 
 /*
  * These macros help the modelines below fit on one line.
@@ -146,8 +89,6 @@ imx_ccm_ipu_ctrl(int enable);
 #define M(nm,hr,vr,clk,hs,he,ht,vs,ve,vt,f) \
 	{ clk, hr, hs, he, ht, vr, vs, ve, vt, f, nm } 
 
-//static struct videomode mode1024x768 = M("1024x768x60",1024,768,65000,1048,1184,1344,771,777,806,HN|VN);
-// static struct videomode mode640x480 = M("640x480x60",640,480,25175,656,752,800,490,492,525,HN|VN);
 static struct videomode mode640x480_2 = M("640x480x85",640,480,36000,696,752,832,481,484,509,HN|VN);
 static struct videomode *mode = &mode640x480_2;
 
@@ -375,7 +316,9 @@ struct ipu_softc {
 	uint8_t			*sc_fb_base;
 };
 
-static void dump_registers(struct ipu_softc *sc, uint32_t addr, int size)
+#if 0
+static void 
+dump_registers(struct ipu_softc *sc, uint32_t addr, int size)
 {
 	int i, zero;
 	zero = 0;
@@ -401,6 +344,7 @@ static void dump_registers(struct ipu_softc *sc, uint32_t addr, int size)
 	if (zero)
 		printf("...\n");
 }
+#endif
 
 static void
 ipu_dmamap_cb(void *arg, bus_dma_segment_t *segs, int nseg, int err)
@@ -472,6 +416,7 @@ ipu_ch_param_get_value(struct ipu_cpmem_ch_param *param,
 	return (data);
 }
 
+#ifdef DEBUG
 static void
 ipu_print_channel(struct ipu_cpmem_ch_param *param)
 {
@@ -522,6 +467,7 @@ ipu_print_channel(struct ipu_cpmem_ch_param *param)
 	printf("ALPHA:  %d bits @%d\n", CH_PARAM_GET_ALPHA_WIDTH(param) + 1,
 		CH_PARAM_GET_ALPHA_OFFSET(param));
 }
+#endif
 
 static void
 ipu_di_enable(struct ipu_softc *sc, int di)
@@ -977,7 +923,9 @@ ipu_init_buffer(struct ipu_softc *sc)
 	CH_PARAM_SET_VBO(&param, 0);
 
 	IPU_WRITE_CH_PARAM(sc, DMA_CHANNEL, &param);
-	// ipu_print_channel(&param);
+#ifdef DEBUG
+	ipu_print_channel(&param);
+#endif
 
 	/* init DMFC */
 	IPU_WRITE4(sc, DMFC_IC_CTRL, 0x2);
@@ -1039,25 +987,12 @@ ipu_init(struct ipu_softc *sc)
 		goto fail;
 	}
 
-#ifdef IPU_RESET
 	ipu_dc_reset_map(sc, 0);
 	ipu_dc_setup_map(sc, 0, 0,  7, 0xff);
 	ipu_dc_setup_map(sc, 0, 1, 15, 0xff);
 	ipu_dc_setup_map(sc, 0, 2, 23, 0xff);
-#endif
-	#if 0
-	IPU_WRITE4(sc, IPU_INT_CTRL_5, 0);
-	IPU_WRITE4(sc, IPU_INT_CTRL_6, 0);
-	IPU_WRITE4(sc, IPU_INT_CTRL_9, 0);
-	IPU_WRITE4(sc, IPU_INT_CTRL_10, 0);
 
-	IPU_WRITE4(sc, IPU_IDMAC_CH_PRI_1, 0x18800000);
-
-	IPU_WRITE4(sc, IPU_DISP_GEN, DISP_GEN_MCU_MAX_BURST_STOP |
-	    (8 << DISP_GEN_MCU_T_SHIFT));
-	#endif
-
-	dma_size = round_page(1026*768*4);
+	dma_size = round_page(mode->hdisplay*mode->vdisplay*(MODE_BPP/8));
 
 	/*
 	 * Now allocate framebuffer memory
@@ -1135,8 +1070,6 @@ ipu_init(struct ipu_softc *sc)
 		device_printf(sc->sc_dev, "Failed to attach fbd device\n");
 		goto fail;
 	}
-
-	// hdmi_video_enable();
 		
 	return (0);
 fail:
@@ -1188,25 +1121,22 @@ ipu_attach(device_t dev)
 
 	imx_ccm_ipu_ctrl(1);
 
+#if 0
 	dump_registers(sc, DC_TEMPL_BASE, 16*4);
-	// struct ipu_cpmem_ch_param param;
-	// CH_PARAM_RESET(&param);
-	// IPU_READ_CH_PARAM(sc, DMA_CHANNEL, &param);
-	// ipu_print_channel(&param);
+#endif
 
-	#ifdef IPU_RESET
 	if (src_reset_ipu() != 0) {
 		device_printf(dev, "failed to reset IPU\n");
 		return (ENXIO);
 	}
-	#endif
 
 	imx_ccm_ipu_ctrl(1);
 
 	ipu_init(sc);
 
-	printf("--\n");
-	// dump_registers(sc, DC_TEMPL_BASE, 16*4);
+#if 0
+	dump_registers(sc, DC_TEMPL_BASE, 16*4);
+#endif
 
 #if 0
 	if (bus_setup_intr(dev, sc->sc_irq_res, INTR_TYPE_MISC | INTR_MPSAFE,
