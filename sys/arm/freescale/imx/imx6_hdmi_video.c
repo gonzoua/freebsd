@@ -55,6 +55,7 @@ struct hdmi_video_softc {
 	device_t	dev;
 	struct resource	*irq_res;
 	int		irq_rid;
+	void		*intr_hl;
 	struct intr_config_hook	mode_hook;
 	const struct videomode *mode;
 
@@ -102,49 +103,6 @@ static void hdmi_video_phy_i2c_write(struct hdmi_video_softc *sc, unsigned short
 	hdmi_core_write_1(HDMI_PHY_I2CM_DATAO_0_ADDR, (unsigned char)(data >> 0));
 	hdmi_core_write_1(HDMI_PHY_I2CM_OPERATION_ADDR, HDMI_PHY_I2CM_OPERATION_ADDR_WRITE);
 	hdmi_video_phy_wait_i2c_done(sc, 1000);
-}
-
-
-static void
-hdmi_video_init_ih_mutes(struct hdmi_video_softc *sc)
-{
-	uint8_t r;
-
-	r = hdmi_core_read_1(HDMI_IH_MUTE);
-	r |= (HDMI_IH_MUTE_MUTE_WAKEUP_INTERRUPT | HDMI_IH_MUTE_MUTE_ALL_INTERRUPT);
-	hdmi_core_write_1(HDMI_IH_MUTE, r);
-
-	/* by default mask all interrupts */
-	hdmi_core_write_1(HDMI_VP_MASK, 0xff);
-	hdmi_core_write_1(HDMI_FC_MASK0, 0xff);
-	hdmi_core_write_1(HDMI_FC_MASK1, 0xff);
-	hdmi_core_write_1(HDMI_FC_MASK2, 0xff);
-	hdmi_core_write_1(HDMI_PHY_MASK0, 0xff);
-	hdmi_core_write_1(HDMI_PHY_I2CM_INT_ADDR, 0xff);
-	hdmi_core_write_1(HDMI_PHY_I2CM_CTLINT_ADDR, 0xff);
-	hdmi_core_write_1(HDMI_AUD_INT, 0xff);
-	hdmi_core_write_1(HDMI_AUD_SPDIFINT, 0xff);
-	hdmi_core_write_1(HDMI_AUD_HBR_MASK, 0xff);
-	hdmi_core_write_1(HDMI_GP_MASK, 0xff);
-	hdmi_core_write_1(HDMI_A_APIINTMSK, 0xff);
-	hdmi_core_write_1(HDMI_CEC_MASK, 0xff);
-	hdmi_core_write_1(HDMI_I2CM_INT, 0xff);
-	hdmi_core_write_1(HDMI_I2CM_CTLINT, 0xff);
-
-	/* Disable interrupts in the IH_MUTE_* registers */
-	hdmi_core_write_1(HDMI_IH_MUTE_FC_STAT0, 0xff);
-	hdmi_core_write_1(HDMI_IH_MUTE_FC_STAT1, 0xff);
-	hdmi_core_write_1(HDMI_IH_MUTE_FC_STAT2, 0xff);
-	hdmi_core_write_1(HDMI_IH_MUTE_AS_STAT0, 0xff);
-	hdmi_core_write_1(HDMI_IH_MUTE_PHY_STAT0, 0xff);
-	hdmi_core_write_1(HDMI_IH_MUTE_I2CM_STAT0, 0xff);
-	hdmi_core_write_1(HDMI_IH_MUTE_CEC_STAT0, 0xff);
-	hdmi_core_write_1(HDMI_IH_MUTE_VP_STAT0, 0xff);
-	hdmi_core_write_1(HDMI_IH_MUTE_I2CMPHY_STAT0, 0xff);
-	hdmi_core_write_1(HDMI_IH_MUTE_AHBDMAAUD_STAT0, 0xff);
-
-	r &= ~(HDMI_IH_MUTE_MUTE_WAKEUP_INTERRUPT | HDMI_IH_MUTE_MUTE_ALL_INTERRUPT);
-	hdmi_core_write_1(HDMI_IH_MUTE, r);
 }
 
 static void
@@ -611,12 +569,21 @@ int hdmi_video_enable()
 	return (0);
 }
 
+static void
+hdmi_video_intr(void *arg)
+{
+	panic("INTERRUPT");
+}
+
 static int
 hdmi_video_detach(device_t dev)
 {
 	struct hdmi_video_softc *sc;
 
 	sc = device_get_softc(dev);
+
+	if (sc->intr_hl)
+		bus_teardown_intr(dev, sc->irq_res, sc->intr_hl);
 
 	if (sc->irq_res != NULL)
 		bus_release_resource(dev, SYS_RES_IRQ, sc->irq_rid, sc->irq_res);
@@ -639,11 +606,19 @@ hdmi_video_attach(device_t dev)
 	    RF_ACTIVE);
 	if (sc->irq_res == NULL) {
 		device_printf(dev, "No IRQ\n");
-		// err = ENXIO;
-		// goto out;
+		err = ENXIO;
+		goto out;
 	}
 
-	sc->dev = dev;
+	if (bus_setup_intr(dev, sc->irq_res, INTR_TYPE_MISC | INTR_MPSAFE,
+			NULL, hdmi_video_intr, sc,
+			&sc->intr_hl) != 0) {
+		device_printf(dev, "Unable to setup the irq handler.\n");
+		err = ENXIO;
+		goto out;
+	}
+
+	// hdmi_video_init_ih_mutes(sc);
 	hdmi_video_sc = sc;
 
 	err = 0;
@@ -653,7 +628,7 @@ hdmi_video_attach(device_t dev)
 
 	if (config_intrhook_establish(&sc->mode_hook) != 0)
 		return (ENOMEM);
-
+out:
 	if (err != 0)
 		hdmi_video_detach(dev);
 
