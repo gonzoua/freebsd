@@ -46,6 +46,8 @@ __FBSDID("$FreeBSD$");
 #include <arm/freescale/imx/imx6_hdmi.h>
 #include <arm/freescale/imx/imx6_hdmi_regs.h>
 
+#include <arm/freescale/imx/imx_iomuxvar.h>
+
 struct hdmi_softc {
 	device_t	dev;
 	struct resource	*mem_res;
@@ -143,6 +145,10 @@ hdmi_attach(device_t dev)
 {
 	struct hdmi_softc *sc;
 	int err;
+	uint32_t gpr3;
+	int ipu_id, disp_id;
+	pcell_t prop;
+	phandle_t node;
 
 	sc = device_get_softc(dev);
 	err = 0;
@@ -165,6 +171,23 @@ hdmi_attach(device_t dev)
 	device_printf(sc->dev, "HDMI controller %02x:%02x:%02x:%02x\n", 
 	    RD1(sc, HDMI_DESIGN_ID), RD1(sc, HDMI_REVISION_ID),
 	    RD1(sc, HDMI_PRODUCT_ID0), RD1(sc, HDMI_PRODUCT_ID1));
+
+	ipu_id = 0;
+	disp_id = 0;
+	node = ofw_bus_get_node(dev);
+
+	if (OF_getencprop(node, "ipu_id", &prop, sizeof(prop)) != -1)
+		ipu_id = prop;
+
+	if (OF_getencprop(node, "disp_id", &prop, sizeof(prop)) != -1)
+		disp_id = prop;
+
+	gpr3 = imx_iomux_gpr_get(12);
+	printf("GPR3 %08x -> ", gpr3);
+	gpr3 &= ~0x0d;
+	gpr3 |= ((ipu_id << 1) | disp_id) << 2;
+	printf("%08x\n", gpr3);
+	imx_iomux_gpr_set(12, gpr3);
 
 	// hdmi_init_ih_mutes(sc);
 

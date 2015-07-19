@@ -46,8 +46,6 @@ __FBSDID("$FreeBSD$");
 
 #include <machine/bus.h>
 
-#include <arm/freescale/imx/imx_iomuxvar.h>
-
 #include <arm/freescale/imx/imx6_hdmi.h>
 #include <arm/freescale/imx/imx6_hdmi_regs.h>
 
@@ -65,22 +63,6 @@ struct hdmi_video_softc {
 	uint16_t	phy_reg_vlev;
 	uint16_t	phy_reg_cksymtx;
 };
-
-/*
- * These macros help the modelines below fit on one line.
- */
-#define HP VID_PHSYNC
-#define HN VID_NHSYNC
-#define VP VID_PVSYNC
-#define VN VID_NVSYNC
-#define I VID_INTERLACE
-#define DS VID_DBLSCAN
-
-#define M(nm,hr,vr,clk,hs,he,ht,vs,ve,vt,f) \
-	{ clk, hr, hs, he, ht, vr, vs, ve, vt, f, nm } 
-
-struct videomode mode640x480 = M("640x480x60",640,480,25175,656,752,800,490,492,525,HN|VN);
-struct videomode mode640x480_2 = M("640x480x85",640,480,36000,696,752,832,481,484,509,HN|VN);
 
 static void
 hdmi_video_phy_wait_i2c_done(struct hdmi_video_softc *sc, int msec)
@@ -540,19 +522,6 @@ hdmi_video_setup(struct hdmi_video_softc *sc)
 static void
 hdmi_video_set_mode(struct hdmi_video_softc *sc)
 {
-	uint32_t gpr3;
-	int ipu_id, disp_id;
-
-	ipu_id = 0;
-	disp_id = 0;
-
-	gpr3 = imx_iomux_gpr_get(12);
-	printf("GPR3 %08x -> ", gpr3);
-	gpr3 &= ~0x0d;
-	gpr3 |= ((ipu_id << 1) | disp_id) << 2;
-	printf("%08x\n", gpr3);
-	imx_iomux_gpr_set(12, gpr3);
-
 	hdmi_video_setup(sc);
 
 
