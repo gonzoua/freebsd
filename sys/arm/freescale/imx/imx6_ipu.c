@@ -60,6 +60,7 @@ __FBSDID("$FreeBSD$");
 #include <arm/freescale/imx/imx6_hdmi.h>
 
 #include "fb_if.h"
+#include "hdmi_if.h"
 
 void
 imx_ccm_ipu_ctrl(int enable);
@@ -76,22 +77,10 @@ imx_ccm_ipu_ctrl(int enable);
 #define	MODE_BPP	16
 #define	MODE_PIXEL_CLOCK_INVERT	1
 
-/*
- * These macros help the modelines below fit on one line.
- */
-#define HP VID_PHSYNC
-#define HN VID_NHSYNC
-#define VP VID_PVSYNC
-#define VN VID_NVSYNC
-#define I VID_INTERLACE
-#define DS VID_DBLSCAN
-
 #define M(nm,hr,vr,clk,hs,he,ht,vs,ve,vt,f) \
 	{ clk, hr, hs, he, ht, vr, vs, ve, vt, f, nm } 
 
-static struct videomode mode640x480_2 = M("640x480x85",640,480,36000,696,752,832,481,484,509,HN|VN);
-static struct videomode *mode = &mode640x480_2;
-
+static struct videomode mode640x480_2 = M("640x480x85",640,480,36000,696,752,832,481,484,509,VID_NHSYNC|VID_PHSYNC);
 
 #define	DMA_CHANNEL	23
 #define	DC_CHAN5	5
@@ -307,6 +296,7 @@ struct ipu_softc {
 	void			*sc_intr_hl;
 	struct mtx		sc_mtx;
 	struct fb_info		sc_fb_info;
+	struct videomode 	*sc_mode;
 
 	/* Framebuffer */
 	bus_dma_tag_t		sc_dma_tag;
@@ -314,6 +304,9 @@ struct ipu_softc {
 	size_t			sc_fb_size;
 	bus_addr_t		sc_fb_phys;
 	uint8_t			*sc_fb_base;
+
+	/* HDMI */
+	eventhandler_tag	sc_hdmi_evh;
 };
 
 #if 0
@@ -657,43 +650,43 @@ ipu_config_timing(struct ipu_softc *sc, int di)
 
 	/* DI_COUNTER_INT_HSYNC */
 	ipu_config_wave_gen_0(sc, di, DI_COUNTER_INT_HSYNC,
-	    mode->htotal - 1, DI_SYNC_CLK, 0, DI_SYNC_NONE);
+	    sc->sc_mode->htotal - 1, DI_SYNC_CLK, 0, DI_SYNC_NONE);
 	ipu_config_wave_gen_1(sc, di, DI_COUNTER_INT_HSYNC,
 	    0, DI_SYNC_NONE, 0, DI_SYNC_NONE, DI_SYNC_NONE, 0, 0);
 
 	/* DI_COUNTER_HSYNC */
 	ipu_config_wave_gen_0(sc, di, DI_COUNTER_HSYNC,
-	    mode->htotal - 1, DI_SYNC_CLK, 0, DI_SYNC_CLK);
+	    sc->sc_mode->htotal - 1, DI_SYNC_CLK, 0, DI_SYNC_CLK);
 	ipu_config_wave_gen_1(sc, di, DI_COUNTER_HSYNC,
 	    0, DI_SYNC_NONE, 1, DI_SYNC_NONE, DI_SYNC_CLK,
-	    0, MODE_HSW(mode)*2);
+	    0, MODE_HSW(sc->sc_mode)*2);
 
 	/* DI_COUNTER_VSYNC */
 	ipu_config_wave_gen_0(sc, di, DI_COUNTER_VSYNC,
-	    mode->vtotal - 1, DI_SYNC_COUNTER(DI_COUNTER_INT_HSYNC),
+	    sc->sc_mode->vtotal - 1, DI_SYNC_COUNTER(DI_COUNTER_INT_HSYNC),
 	    0, DI_SYNC_NONE);
 	ipu_config_wave_gen_1(sc, di, DI_COUNTER_VSYNC,
 	    0, DI_SYNC_NONE, 1, DI_SYNC_NONE,
 	    DI_SYNC_COUNTER(DI_COUNTER_INT_HSYNC),
-	    0, MODE_VSW(mode)*2);
+	    0, MODE_VSW(sc->sc_mode)*2);
 
 	di_scr_conf = di ? IPU_DI1_SCR_CONF : IPU_DI0_SCR_CONF;
-	IPU_WRITE4(sc, di_scr_conf, mode->vtotal - 1);
+	IPU_WRITE4(sc, di_scr_conf, sc->sc_mode->vtotal - 1);
 
 	/* TODO: update DI_SCR_CONF */
 
 	/* Active Data 0 */
 	ipu_config_wave_gen_0(sc, di, DI_COUNTER_AD_0,
 	    0, DI_SYNC_COUNTER(DI_COUNTER_HSYNC),
-	    MODE_VSW(mode) + MODE_VFP(mode), DI_SYNC_COUNTER(DI_COUNTER_HSYNC));
+	    MODE_VSW(sc->sc_mode) + MODE_VFP(sc->sc_mode), DI_SYNC_COUNTER(DI_COUNTER_HSYNC));
 	ipu_config_wave_gen_1(sc, di, DI_COUNTER_AD_0,
-	    mode->vdisplay, DI_SYNC_COUNTER(DI_COUNTER_VSYNC),
+	    sc->sc_mode->vdisplay, DI_SYNC_COUNTER(DI_COUNTER_VSYNC),
 	    0, DI_SYNC_NONE, DI_SYNC_NONE, 0, 0);
 
 	ipu_config_wave_gen_0(sc, di, DI_COUNTER_AD_1,
-	    0, DI_SYNC_CLK, MODE_HSW(mode) + MODE_HFP(mode), DI_SYNC_CLK);
+	    0, DI_SYNC_CLK, MODE_HSW(sc->sc_mode) + MODE_HFP(sc->sc_mode), DI_SYNC_CLK);
 	ipu_config_wave_gen_1(sc, di, DI_COUNTER_AD_1,
-	    mode->hdisplay, DI_SYNC_COUNTER(DI_COUNTER_AD_0),
+	    sc->sc_mode->hdisplay, DI_SYNC_COUNTER(DI_COUNTER_AD_0),
 	    0, DI_SYNC_NONE, DI_SYNC_NONE, 0, 0);
 
 	ipu_reset_wave_gen(sc, di, 6);
@@ -707,12 +700,12 @@ ipu_config_timing(struct ipu_softc *sc, int di)
 	gen = IPU_READ4(sc, gen_offset);
 	printf("DI_GENERAL: %08x -> ", gen);
 
-	if (mode->flags & VID_NHSYNC)
+	if (sc->sc_mode->flags & VID_NHSYNC)
 		gen &= ~DI_GENERAL_POLARITY_2;
 	else /* active high */
 		gen |= DI_GENERAL_POLARITY_2;
 
-	if (mode->flags & VID_NVSYNC)
+	if (sc->sc_mode->flags & VID_NVSYNC)
 		gen &= ~DI_GENERAL_POLARITY_3;
 	else /* active high */
 		gen |= DI_GENERAL_POLARITY_3;
@@ -738,7 +731,7 @@ ipu_config_timing(struct ipu_softc *sc, int di)
 
 	IPU_WRITE4(sc, (di ? IPU_DI1_POL : IPU_DI0_POL), 0x10);
 
-	IPU_WRITE4(sc, DC_DISP_CONF2(di), mode->hdisplay);
+	IPU_WRITE4(sc, DC_DISP_CONF2(di), sc->sc_mode->hdisplay);
 }
 
 static void
@@ -894,13 +887,13 @@ ipu_init_buffer(struct ipu_softc *sc)
 	uint32_t stride;
 	uint32_t reg, db_mode_sel, cur_buf;
 
-	stride = mode->hdisplay*MODE_BPP/8;
+	stride = sc->sc_mode->hdisplay*MODE_BPP/8;
 
 	/* init channel paramters */
 	CH_PARAM_RESET(&param);
 	/* XXX: interlaced modes are not supported yet */
-	CH_PARAM_SET_FW(&param, mode->hdisplay - 1);
-	CH_PARAM_SET_FH(&param, mode->vdisplay - 1);
+	CH_PARAM_SET_FW(&param, sc->sc_mode->hdisplay - 1);
+	CH_PARAM_SET_FH(&param, sc->sc_mode->vdisplay - 1);
 	CH_PARAM_SET_SLY(&param, stride - 1);
 
 	CH_PARAM_SET_EBA0(&param, (sc->sc_fb_phys >> 3));
@@ -992,7 +985,7 @@ ipu_init(struct ipu_softc *sc)
 	ipu_dc_setup_map(sc, 0, 1, 15, 0xff);
 	ipu_dc_setup_map(sc, 0, 2, 23, 0xff);
 
-	dma_size = round_page(mode->hdisplay*mode->vdisplay*(MODE_BPP/8));
+	dma_size = round_page(sc->sc_mode->hdisplay*sc->sc_mode->vdisplay*(MODE_BPP/8));
 
 	/*
 	 * Now allocate framebuffer memory
@@ -1030,7 +1023,7 @@ ipu_init(struct ipu_softc *sc)
 	memset(sc->sc_fb_base, 0x00, dma_size);
 
 	/* Calculate actual FB Size */
-	sc->sc_fb_size = mode->hdisplay*mode->vdisplay*MODE_BPP/8;
+	sc->sc_fb_size = sc->sc_mode->hdisplay*sc->sc_mode->vdisplay*MODE_BPP/8;
 
 	ipu_dc_init(sc);
 	IPU_WRITE4(sc, IPU_CONF, 0x00000660);
@@ -1056,9 +1049,9 @@ ipu_init(struct ipu_softc *sc)
 	sc->sc_fb_info.fb_pbase = sc->sc_fb_phys;
 	sc->sc_fb_info.fb_size = sc->sc_fb_size;
 	sc->sc_fb_info.fb_bpp = sc->sc_fb_info.fb_depth = MODE_BPP;
-	sc->sc_fb_info.fb_stride = mode->hdisplay*MODE_BPP / 8;
-	sc->sc_fb_info.fb_width = mode->hdisplay;
-	sc->sc_fb_info.fb_height = mode->vdisplay;
+	sc->sc_fb_info.fb_stride = sc->sc_mode->hdisplay*MODE_BPP / 8;
+	sc->sc_fb_info.fb_width = sc->sc_mode->hdisplay;
+	sc->sc_fb_info.fb_height = sc->sc_mode->vdisplay;
 
 	device_t fbd = device_add_child(sc->sc_dev, "fbd",
 	    device_get_unit(sc->sc_dev));
@@ -1075,6 +1068,36 @@ ipu_init(struct ipu_softc *sc)
 fail:
 
 	return (err);
+}
+
+static void
+ipu_hdmi_event(void *arg, device_t hdmi_dev)
+{
+	struct ipu_softc *sc;
+	uint8_t *edid;
+	uint32_t edid_len;
+	struct edid_info ei;
+	const struct videomode *videomode;
+
+	sc = arg;
+
+	edid = NULL;
+	edid_len = 0;
+	if (HDMI_GET_EDID(hdmi_dev, &edid, &edid_len) != 0) {
+		device_printf(sc->sc_dev, "failed to get EDID info from HDMI framer\n");
+	}
+
+	videomode = NULL;
+
+	if ( edid && (edid_parse(edid, &ei) == 0)) {
+		edid_print(&ei);
+		sc->sc_mode = &mode640x480_2;
+	} else
+		device_printf(sc->sc_dev, "failed to parse EDID\n");
+
+	ipu_init(sc);
+
+	HDMI_SET_VIDEOMODE(hdmi_dev, sc->sc_mode);
 }
 
 static int
@@ -1132,8 +1155,6 @@ ipu_attach(device_t dev)
 
 	imx_ccm_ipu_ctrl(1);
 
-	ipu_init(sc);
-
 #if 0
 	dump_registers(sc, DC_TEMPL_BASE, 16*4);
 #endif
@@ -1152,6 +1173,9 @@ ipu_attach(device_t dev)
 #endif
 
 	IPU_LOCK_INIT(sc);
+
+	sc->sc_hdmi_evh = EVENTHANDLER_REGISTER(hdmi_event,
+	    ipu_hdmi_event, sc, 0);
 
 	return (0);
 }

@@ -51,13 +51,16 @@ __FBSDID("$FreeBSD$");
 #include <arm/freescale/imx/imx6_hdmi.h>
 #include <arm/freescale/imx/imx6_hdmi_regs.h>
 
+#include <arm/ti/am335x/hdmi.h>
+#include "hdmi_if.h"
+
 struct hdmi_video_softc {
 	device_t	dev;
 	struct resource	*irq_res;
 	int		irq_rid;
 	void		*intr_hl;
 	struct intr_config_hook	mode_hook;
-	const struct videomode *mode;
+	struct videomode mode;
 
 	uint16_t	phy_reg_vlev;
 	uint16_t	phy_reg_cksymtx;
@@ -119,21 +122,21 @@ hdmi_video_av_composer(struct hdmi_video_softc *sc)
 	int hblank, vblank, hsync_len, hbp, vbp;
 
 	/* Set up HDMI_FC_INVIDCONF */
-	inv_val = ((sc->mode->flags & VID_NVSYNC) ?
+	inv_val = ((sc->mode.flags & VID_NVSYNC) ?
 		HDMI_FC_INVIDCONF_VSYNC_IN_POLARITY_ACTIVE_LOW :
 		HDMI_FC_INVIDCONF_VSYNC_IN_POLARITY_ACTIVE_HIGH);
 
-	inv_val |= ((sc->mode->flags & VID_NHSYNC) ?
+	inv_val |= ((sc->mode.flags & VID_NHSYNC) ?
 		HDMI_FC_INVIDCONF_HSYNC_IN_POLARITY_ACTIVE_LOW :
 		HDMI_FC_INVIDCONF_HSYNC_IN_POLARITY_ACTIVE_HIGH);
 
 	inv_val |= HDMI_FC_INVIDCONF_DE_IN_POLARITY_ACTIVE_HIGH;
 
-	inv_val |= ((sc->mode->flags & VID_INTERLACE) ?
+	inv_val |= ((sc->mode.flags & VID_INTERLACE) ?
 			HDMI_FC_INVIDCONF_R_V_BLANK_IN_OSC_ACTIVE_HIGH :
 			HDMI_FC_INVIDCONF_R_V_BLANK_IN_OSC_ACTIVE_LOW);
 
-	inv_val |= ((sc->mode->flags & VID_INTERLACE) ?
+	inv_val |= ((sc->mode.flags & VID_INTERLACE) ?
 		HDMI_FC_INVIDCONF_IN_I_P_INTERLACED :
 		HDMI_FC_INVIDCONF_IN_I_P_PROGRESSIVE);
 
@@ -144,38 +147,38 @@ hdmi_video_av_composer(struct hdmi_video_softc *sc)
 	hdmi_core_write_1(HDMI_FC_INVIDCONF, inv_val);
 
 	/* Set up horizontal active pixel region width */
-	hdmi_core_write_1(HDMI_FC_INHACTV1, sc->mode->hdisplay >> 8);
-	hdmi_core_write_1(HDMI_FC_INHACTV0, sc->mode->hdisplay);
+	hdmi_core_write_1(HDMI_FC_INHACTV1, sc->mode.hdisplay >> 8);
+	hdmi_core_write_1(HDMI_FC_INHACTV0, sc->mode.hdisplay);
 
 	/* Set up vertical blanking pixel region width */
-	hdmi_core_write_1(HDMI_FC_INVACTV1, sc->mode->vdisplay >> 8);
-	hdmi_core_write_1(HDMI_FC_INVACTV0, sc->mode->vdisplay);
+	hdmi_core_write_1(HDMI_FC_INVACTV1, sc->mode.vdisplay >> 8);
+	hdmi_core_write_1(HDMI_FC_INVACTV0, sc->mode.vdisplay);
 
 	/* Set up horizontal blanking pixel region width */
-	hblank = sc->mode->htotal - sc->mode->hdisplay;
+	hblank = sc->mode.htotal - sc->mode.hdisplay;
 	hdmi_core_write_1(HDMI_FC_INHBLANK1, hblank >> 8);
 	hdmi_core_write_1(HDMI_FC_INHBLANK0, hblank);
 
 	/* Set up vertical blanking pixel region width */
-	vblank = sc->mode->vtotal - sc->mode->vdisplay;
+	vblank = sc->mode.vtotal - sc->mode.vdisplay;
 	hdmi_core_write_1(HDMI_FC_INVBLANK, vblank);
 
 	/* Set up HSYNC active edge delay width (in pixel clks) */
-	hbp = sc->mode->htotal - sc->mode->hsync_end;
+	hbp = sc->mode.htotal - sc->mode.hsync_end;
 	hdmi_core_write_1(HDMI_FC_HSYNCINDELAY1, hbp >> 8);
 	hdmi_core_write_1(HDMI_FC_HSYNCINDELAY0, hbp);
 
 	/* Set up VSYNC active edge delay (in pixel clks) */
-	vbp = sc->mode->vtotal - sc->mode->vsync_end;
+	vbp = sc->mode.vtotal - sc->mode.vsync_end;
 	hdmi_core_write_1(HDMI_FC_VSYNCINDELAY, vbp);
 
-	hsync_len = (sc->mode->hsync_end - sc->mode->hsync_start);
+	hsync_len = (sc->mode.hsync_end - sc->mode.hsync_start);
 	/* Set up HSYNC active pulse width (in pixel clks) */
 	hdmi_core_write_1(HDMI_FC_HSYNCINWIDTH1, hsync_len >> 8);
 	hdmi_core_write_1(HDMI_FC_HSYNCINWIDTH0, hsync_len);
 
 	/* Set up VSYNC active edge delay (in pixel clks) */
-	hdmi_core_write_1(HDMI_FC_VSYNCINWIDTH, (sc->mode->vsync_end - sc->mode->vsync_start));
+	hdmi_core_write_1(HDMI_FC_VSYNCINWIDTH, (sc->mode.vsync_end - sc->mode.vsync_start));
 }
 
 static void
@@ -295,14 +298,14 @@ static int hdmi_video_phy_configure(struct hdmi_video_softc *sc)
 	hdmi_core_write_1(HDMI_PHY_I2CM_SLAVE_ADDR, HDMI_PHY_I2CM_SLAVE_ADDR_PHY_GEN2);
 	hdmi_video_phy_test_clear(sc, 0);
 
-	if (sc->mode->dot_clock*1000 <= 45250000) {
+	if (sc->mode.dot_clock*1000 <= 45250000) {
 		/* PLL/MPLL Cfg */
 		hdmi_video_phy_i2c_write(sc, 0x01e0, 0x06);
 		hdmi_video_phy_i2c_write(sc, 0x0000, 0x15);  /* GMPCTRL */
-	} else if (sc->mode->dot_clock*1000 <= 92500000) {
+	} else if (sc->mode.dot_clock*1000 <= 92500000) {
 		hdmi_video_phy_i2c_write(sc, 0x0140, 0x06);
 		hdmi_video_phy_i2c_write(sc, 0x0005, 0x15);
-	} else if (sc->mode->dot_clock*1000 <= 148500000) {
+	} else if (sc->mode.dot_clock*1000 <= 148500000) {
 		hdmi_video_phy_i2c_write(sc, 0x00a0, 0x06);
 		hdmi_video_phy_i2c_write(sc, 0x000a, 0x15);
 	} else {
@@ -310,17 +313,17 @@ static int hdmi_video_phy_configure(struct hdmi_video_softc *sc)
 		hdmi_video_phy_i2c_write(sc, 0x000a, 0x15);
 	}
 
-	if (sc->mode->dot_clock*1000 <= 54000000) {
+	if (sc->mode.dot_clock*1000 <= 54000000) {
 		hdmi_video_phy_i2c_write(sc, 0x091c, 0x10);  /* CURRCTRL */
-	} else if (sc->mode->dot_clock*1000 <= 58400000) {
+	} else if (sc->mode.dot_clock*1000 <= 58400000) {
 		hdmi_video_phy_i2c_write(sc, 0x091c, 0x10);
-	} else if (sc->mode->dot_clock*1000 <= 72000000) {
+	} else if (sc->mode.dot_clock*1000 <= 72000000) {
 		hdmi_video_phy_i2c_write(sc, 0x06dc, 0x10);
-	} else if (sc->mode->dot_clock*1000 <= 74250000) {
+	} else if (sc->mode.dot_clock*1000 <= 74250000) {
 		hdmi_video_phy_i2c_write(sc, 0x06dc, 0x10);
-	} else if (sc->mode->dot_clock*1000 <= 118800000) {
+	} else if (sc->mode.dot_clock*1000 <= 118800000) {
 		hdmi_video_phy_i2c_write(sc, 0x091c, 0x10);
-	} else if (sc->mode->dot_clock*1000 <= 216000000) {
+	} else if (sc->mode.dot_clock*1000 <= 216000000) {
 		hdmi_video_phy_i2c_write(sc, 0x06dc, 0x10);
 	} else {
 		panic("Unsupported mode\n");
@@ -345,7 +348,7 @@ static int hdmi_video_phy_configure(struct hdmi_video_softc *sc)
 	/* REMOVE CLK TERM */
 	hdmi_video_phy_i2c_write(sc, 0x8000, 0x05);  /* CKCALCTRL */
 
-	if (sc->mode->dot_clock*1000 > 148500000) {
+	if (sc->mode.dot_clock*1000 > 148500000) {
 		hdmi_video_phy_i2c_write(sc, 0x800b, 0x09);
 		hdmi_video_phy_i2c_write(sc, 0x0129, 0x0E);
 	}
@@ -537,9 +540,8 @@ hdmi_video_setup(struct hdmi_video_softc *sc)
 }
 
 static void
-hdmi_video_detect_mode(void *arg)
+hdmi_video_set_mode(struct hdmi_video_softc *sc)
 {
-	struct hdmi_video_softc *sc = arg;
 	uint32_t gpr3;
 	int ipu_id, disp_id;
 
@@ -553,13 +555,21 @@ hdmi_video_detect_mode(void *arg)
 	printf("%08x\n", gpr3);
 	imx_iomux_gpr_set(12, gpr3);
 
-	hdmi_edid_read();
-	sc->mode = &mode640x480_2;
 	sc->phy_reg_vlev = 0x294;
 	sc->phy_reg_cksymtx = 0x800d;
 
 	hdmi_video_setup(sc);
 
+
+}
+
+static void
+hdmi_video_detect_mode(void *arg)
+{
+	struct hdmi_video_softc *sc;
+
+	sc = arg;
+	EVENTHANDLER_INVOKE(hdmi_event, sc->dev);
 	/* Finished with the interrupt hook */
 	config_intrhook_disestablish(&sc->mode_hook);
 }
@@ -598,6 +608,7 @@ hdmi_video_attach(device_t dev)
 	int err;
 
 	sc = device_get_softc(dev);
+	sc->dev = dev;
 	err = 0;
 
 	/* Allocate bus_space resources. */
@@ -647,12 +658,38 @@ hdmi_video_probe(device_t dev)
 	return (BUS_PROBE_DEFAULT);
 }
 
+static int
+hdmi_video_get_edid(device_t dev, uint8_t **edid, uint32_t *edid_len)
+{
+	struct hdmi_video_softc *sc;
+
+	sc = device_get_softc(dev);
+
+	printf("%s:%d\n", __FILE__, __LINE__);
+	return hdmi_edid_read(edid, edid_len);
+}
+
+static int
+hdmi_video_set_videomode(device_t dev, const struct videomode *mode)
+{
+	struct hdmi_video_softc *sc;
+
+	sc = device_get_softc(dev);
+	memcpy(&sc->mode, mode, sizeof(*mode));
+	hdmi_video_set_mode(sc);
+
+	return (0);
+}
 
 static device_method_t hdmi_video_methods[] = {
 	/* Device interface */
 	DEVMETHOD(device_probe,  hdmi_video_probe),
 	DEVMETHOD(device_attach, hdmi_video_attach),
 	DEVMETHOD(device_detach, hdmi_video_detach),
+
+	/* HDMI methods */
+	DEVMETHOD(hdmi_get_edid,	hdmi_video_get_edid),
+	DEVMETHOD(hdmi_set_videomode,	hdmi_video_set_videomode),
 
 	DEVMETHOD_END
 };

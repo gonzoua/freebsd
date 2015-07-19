@@ -61,20 +61,20 @@ struct hdmi_edid_softc {
 	int			sc_current_page;
 	uint8_t			*sc_edid;
 	uint32_t		sc_edid_len;
+
 };
 
 struct hdmi_edid_softc *hdmi_edid_sc = NULL;
 
 int
-hdmi_edid_read(void)
+hdmi_edid_read(uint8_t **edid, uint32_t *edid_len)
 {
 	struct hdmi_edid_softc *sc;
-	uint8_t edid[1024];
-	int result, i;
+	int result;
 	uint8_t addr = 0;
 	struct iic_msg msg[] = {
 		{ 0, IIC_M_WR, 1, &addr },
-		{ 0, IIC_M_RD, EDID_LENGTH, edid },
+		{ 0, IIC_M_RD, EDID_LENGTH, NULL}
 	};
 
 	if (!hdmi_edid_sc)
@@ -82,10 +82,18 @@ hdmi_edid_read(void)
 	sc = hdmi_edid_sc;
 	msg[0].slave = sc->sc_addr;
 	msg[1].slave = sc->sc_addr;
+	msg[1].buf = sc->sc_edid;
 
 	result =  iicbus_transfer(sc->sc_dev, msg, 2);
-	if (result)
-		printf("hdmi_edid_read failed: %d\n", result);
+	if (result) {
+		device_printf(sc->sc_dev, "hdmi_edid_read failed: %d\n", result);
+		*edid = NULL;
+		*edid_len = 0;
+	}
+	else {
+		*edid_len = sc->sc_edid_len;
+		*edid = sc->sc_edid;
+	}
 #if 0
 	for (i = 0; i < EDID_LENGTH; i++) {
 		printf("%02x ", edid[i]);
@@ -96,9 +104,6 @@ hdmi_edid_read(void)
 	printf("\n");
 #endif
 
-	struct edid_info ei;
-	edid_parse(edid, &ei);
-	edid_print(&ei);
 	return (result);
 }
 
