@@ -29,10 +29,12 @@ arm/freescale/imx/imx6_sdma.c		optional sdma
 arm/freescale/imx/imx6_audmux.c		optional sound
 arm/freescale/imx/imx6_ssi.c		optional sound
 
-arm/freescale/imx/imx6_ipu.c		standard
-arm/freescale/imx/imx6_hdmi.c		standard
-arm/freescale/imx/imx6_hdmi_video.c	standard
-arm/freescale/imx/imx6_hdmi_edid.c	standard
+arm/freescale/imx/imx6_ipu.c		optional	vt
+
+arm/ti/am335x/hdmi_if.m			optional	hdmi
+arm/freescale/imx/imx6_hdmi.c		optional	hdmi
+arm/freescale/imx/imx6_hdmi_video.c	optional	hdmi
+arm/freescale/imx/imx6_hdmi_edid.c	optional	hdmi
 
 #
 # Optional devices.

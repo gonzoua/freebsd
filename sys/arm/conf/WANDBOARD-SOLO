@@ -30,3 +30,4 @@ device		vt
 device		kbdmux
 device		ukbd
 device		videomode
+device		hdmi
