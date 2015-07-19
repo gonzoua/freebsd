@@ -86,6 +86,7 @@ hdmi_edid_read(void)
 	result =  iicbus_transfer(sc->sc_dev, msg, 2);
 	if (result)
 		printf("hdmi_edid_read failed: %d\n", result);
+#if 0
 	for (i = 0; i < EDID_LENGTH; i++) {
 		printf("%02x ", edid[i]);
 		if ((i % 0x10) == 0xf) {
@@ -93,6 +94,8 @@ hdmi_edid_read(void)
 		}
 	}
 	printf("\n");
+#endif
+
 	struct edid_info ei;
 	edid_parse(edid, &ei);
 	edid_print(&ei);
