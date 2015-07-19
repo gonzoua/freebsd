@@ -504,7 +504,7 @@ static void hdmi_video_video_sample(struct hdmi_video_softc *sc)
 }
 
 static int
-hdmi_video_setup(struct hdmi_video_softc *sc)
+hdmi_video_set_mode(struct hdmi_video_softc *sc)
 {
 	hdmi_video_disable_overflow_interrupts(sc);
 	hdmi_video_av_composer(sc);
@@ -520,15 +520,7 @@ hdmi_video_setup(struct hdmi_video_softc *sc)
 }
 
 static void
-hdmi_video_set_mode(struct hdmi_video_softc *sc)
-{
-	hdmi_video_setup(sc);
-
-
-}
-
-static void
-hdmi_video_detect_mode(void *arg)
+hdmi_video_detect_cable(void *arg)
 {
 	struct hdmi_video_softc *sc;
 
@@ -612,7 +604,7 @@ hdmi_video_attach(device_t dev)
 
 	err = 0;
 
-	sc->mode_hook.ich_func = hdmi_video_detect_mode;
+	sc->mode_hook.ich_func = hdmi_video_detect_cable;
 	sc->mode_hook.ich_arg = sc;
 
 	if (config_intrhook_establish(&sc->mode_hook) != 0)
@@ -681,3 +673,5 @@ static driver_t hdmi_video_driver = {
 static devclass_t hdmi_video_devclass;
 
 DRIVER_MODULE(hdmi_video, simplebus, hdmi_video_driver, hdmi_video_devclass, 0, 0);
+MODULE_DEPEND(hdmi_video, hdmi, 1, 1, 1);
+MODULE_DEPEND(hdmi_video, hdmi_edid, 1, 1, 1);
