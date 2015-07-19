@@ -79,7 +79,6 @@ struct hdmi_video_softc {
 #define M(nm,hr,vr,clk,hs,he,ht,vs,ve,vt,f) \
 	{ clk, hr, hs, he, ht, vr, vs, ve, vt, f, nm } 
 
-static struct hdmi_video_softc *hdmi_video_sc;
 struct videomode mode1024x768 = M("1024x768x60",1024,768,65000,1048,1184,1344,771,777,806,HN|VN);
 struct videomode mode640x480 = M("640x480x60",640,480,25175,656,752,800,490,492,525,HN|VN);
 struct videomode mode640x480_2 = M("640x480x85",640,480,36000,696,752,832,481,484,509,HN|VN);
@@ -555,9 +554,6 @@ hdmi_video_set_mode(struct hdmi_video_softc *sc)
 	printf("%08x\n", gpr3);
 	imx_iomux_gpr_set(12, gpr3);
 
-	sc->phy_reg_vlev = 0x294;
-	sc->phy_reg_cksymtx = 0x800d;
-
 	hdmi_video_setup(sc);
 
 
@@ -606,6 +602,8 @@ hdmi_video_attach(device_t dev)
 {
 	struct hdmi_video_softc *sc;
 	int err;
+	pcell_t prop;
+	phandle_t node;
 
 	sc = device_get_softc(dev);
 	sc->dev = dev;
@@ -629,8 +627,20 @@ hdmi_video_attach(device_t dev)
 		goto out;
 	}
 
+
+	node = ofw_bus_get_node(dev);
+
+	if (OF_getencprop(node, "fsl,phy_reg_vlev", &prop, sizeof(prop)) == -1)
+		sc->phy_reg_vlev = 0;
+	else
+		sc->phy_reg_vlev = prop;
+
+	if (OF_getencprop(node, "fsl,phy_reg_cksymtx", &prop, sizeof(prop)) == -1)
+		sc->phy_reg_cksymtx = 0;
+	else
+		sc->phy_reg_cksymtx = prop;
+
 	// hdmi_video_init_ih_mutes(sc);
-	hdmi_video_sc = sc;
 
 	err = 0;
 
