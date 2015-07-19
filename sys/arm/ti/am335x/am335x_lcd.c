@@ -801,7 +801,7 @@ done:
 }
 
 static void
-am335x_lcd_hdmi_event(void *arg)
+am335x_lcd_hdmi_event(void *arg, device_t event_dev)
 {
 	struct am335x_lcd_softc *sc;
 	const struct videomode *videomode;
