@@ -623,8 +623,8 @@ ipu_config_timing(struct ipu_softc *sc, int di)
 	bs_clkgen_offset = di ? IPU_DI1_BS_CLKGEN0 : IPU_DI0_BS_CLKGEN0;
 	printf("DI_BS_CLKGEN0: %08x\n", IPU_READ4(sc, bs_clkgen_offset));
 	printf("DI_BS_CLKGEN1: %08x\n", IPU_READ4(sc, bs_clkgen_offset + 4));
-	IPU_WRITE4(sc, bs_clkgen_offset, 0x00000020);
-	IPU_WRITE4(sc, bs_clkgen_offset + 4, 0x00020000);
+	IPU_WRITE4(sc, bs_clkgen_offset, (div * 16));
+	IPU_WRITE4(sc, bs_clkgen_offset + 4, (div << 16));
 
 	imx_ccm_ldb_configure(0);
 
