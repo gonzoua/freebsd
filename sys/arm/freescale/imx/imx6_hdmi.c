@@ -46,6 +46,9 @@ __FBSDID("$FreeBSD$");
 #include <dev/videomode/videomode.h>
 #include <dev/videomode/edidvar.h>
 
+#include <dev/iicbus/iicbus.h>
+#include <dev/iicbus/iiconf.h>
+
 #include <arm/freescale/imx/imx6_hdmi.h>
 #include <arm/freescale/imx/imx6_hdmi_regs.h>
 
@@ -53,6 +56,9 @@ __FBSDID("$FreeBSD$");
 
 #include <arm/ti/am335x/hdmi.h>
 #include "hdmi_if.h"
+
+#define	I2C_DDC_ADDR	(0x50 << 1)
+#define	EDID_LENGTH	0x80
 
 struct imx_hdmi_softc {
 	device_t		sc_dev;
@@ -63,6 +69,9 @@ struct imx_hdmi_softc {
 	void			*sc_intr_hl;
 	struct intr_config_hook	sc_mode_hook;
 	struct videomode	sc_mode;
+	uint8_t			*sc_edid;
+	uint8_t			sc_edid_len;
+	phandle_t		sc_i2c_xref;
 };
 
 static struct ofw_compat_data compat_data[] = {
@@ -549,11 +558,12 @@ imx_hdmi_set_mode(struct imx_hdmi_softc *sc)
 	return (0);
 }
 
-int
-hdmi_edid_read(uint8_t **edid, uint32_t *edid_len)
+static int
+hdmi_edid_read(struct imx_hdmi_softc *sc, uint8_t **edid, uint32_t *edid_len)
 {
-#if 0
-	struct hdmi_edid_softc *sc;
+	device_t i2c_hc;
+	device_t i2c_bus;
+	device_t i2c_dev;
 	int result;
 	uint8_t addr = 0;
 	struct iic_msg msg[] = {
@@ -561,22 +571,41 @@ hdmi_edid_read(uint8_t **edid, uint32_t *edid_len)
 		{ 0, IIC_M_RD, EDID_LENGTH, NULL}
 	};
 
-	if (!hdmi_edid_sc)
-		return (ENXIO);
-	sc = hdmi_edid_sc;
-	msg[0].slave = sc->sc_sc_addr;
-	msg[1].slave = sc->sc_sc_addr;
-	msg[1].buf = sc->sc_sc_edid;
+	*edid = NULL;
+	*edid_len = 0;
 
-	result =  iicbus_transfer(sc->sc_sc_dev, msg, 2);
+	if (sc->sc_i2c_xref == 0)
+		return (ENXIO);
+
+	/* XXX: HACK! HACK! HACK! */
+	i2c_dev = NULL;
+	i2c_bus = NULL;
+	i2c_hc = OF_device_from_xref(sc->sc_i2c_xref);
+	if (i2c_hc)
+		i2c_bus = device_find_child(i2c_hc, "iicbus", 0);
+	if (i2c_bus)
+		i2c_dev = device_find_child(i2c_bus, "iic", 0);
+
+	if (!i2c_dev) {
+		device_printf(sc->sc_dev,
+		    "no actual device for \"ddc-i2c-bus\" property (handle=%x)\n", sc->sc_i2c_xref);
+		return (ENXIO);
+	}
+
+
+
+	msg[0].slave = I2C_DDC_ADDR;
+	msg[1].slave = I2C_DDC_ADDR;
+	msg[1].buf = sc->sc_edid;
+
+	result =  iicbus_transfer(i2c_dev, msg, 2);
 	if (result) {
-		device_printf(sc->sc_sc_dev, "hdmi_edid_read failed: %d\n", result);
-		*edid = NULL;
-		*edid_len = 0;
+		device_printf(sc->sc_dev, "i2c transfer failed: %d\n", result);
+		return (result);
 	}
 	else {
-		*edid_len = sc->sc_sc_edid_len;
-		*edid = sc->sc_sc_edid;
+		*edid_len = sc->sc_edid_len;
+		*edid = sc->sc_edid;
 	}
 #if 0
 	for (i = 0; i < EDID_LENGTH; i++) {
@@ -589,13 +618,7 @@ hdmi_edid_read(uint8_t **edid, uint32_t *edid_len)
 #endif
 
 	return (result);
-#endif
-	*edid = NULL;
-	*edid_len = 0;
-	return (ENXIO);
 }
-
-
 
 static void
 imx_hdmi_detect_cable(void *arg)
@@ -642,6 +665,7 @@ imx_hdmi_attach(device_t dev)
 	int err;
 	uint32_t gpr3;
 	int ipu_id, disp_id;
+	phandle_t node, i2c_xref;
 
 	sc = device_get_softc(dev);
 	sc->sc_dev = dev;
@@ -683,7 +707,16 @@ imx_hdmi_attach(device_t dev)
 		goto out;
 	}
 
+	node = ofw_bus_get_node(dev);
+	if (OF_getencprop(node, "ddc-i2c-bus", &i2c_xref, sizeof(i2c_xref)) == -1)
+		sc->sc_i2c_xref = 0;
+	else
+		sc->sc_i2c_xref = i2c_xref; 
+
 	err = 0;
+
+	sc->sc_edid = malloc(EDID_LENGTH, M_DEVBUF, M_WAITOK | M_ZERO);
+	sc->sc_edid_len = EDID_LENGTH;
 
 	device_printf(sc->sc_dev, "HDMI controller %02x:%02x:%02x:%02x\n", 
 	    RD1(sc, HDMI_DESIGN_ID), RD1(sc, HDMI_REVISION_ID),
@@ -730,7 +763,7 @@ imx_hdmi_get_edid(device_t dev, uint8_t **edid, uint32_t *edid_len)
 
 	sc = device_get_softc(dev);
 
-	return hdmi_edid_read(edid, edid_len);
+	return hdmi_edid_read(sc, edid, edid_len);
 }
 
 static int
