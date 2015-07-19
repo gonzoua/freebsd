@@ -364,7 +364,6 @@ imx_ccm_ipu_ctrl(int enable)
 
 	sc = ccm_sc;
 	reg = RD4(sc, CCM_CCGR3);
-	printf("-----> %08x\n", reg);
 }
 
 uint32_t
