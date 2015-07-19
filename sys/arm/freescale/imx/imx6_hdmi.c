@@ -84,49 +84,6 @@ hdmi_core_write_1(bus_size_t off, uint8_t val)
 	WR1(hdmi_sc, off, val);
 }
 
-static void
-hdmi_init_ih_mutes(struct hdmi_softc *sc)
-{
-	uint8_t r;
-
-	r = RD1(sc, HDMI_IH_MUTE);
-	r |= (HDMI_IH_MUTE_MUTE_WAKEUP_INTERRUPT | HDMI_IH_MUTE_MUTE_ALL_INTERRUPT);
-	WR1(sc, HDMI_IH_MUTE, r);
-
-	/* by default mask all interrupts */
-	WR1(sc, HDMI_VP_MASK, 0xff);
-	WR1(sc, HDMI_FC_MASK0, 0xff);
-	WR1(sc, HDMI_FC_MASK1, 0xff);
-	WR1(sc, HDMI_FC_MASK2, 0xff);
-	WR1(sc, HDMI_PHY_MASK0, 0xff);
-	WR1(sc, HDMI_PHY_I2CM_INT_ADDR, 0xff);
-	WR1(sc, HDMI_PHY_I2CM_CTLINT_ADDR, 0xff);
-	WR1(sc, HDMI_AUD_INT, 0xff);
-	WR1(sc, HDMI_AUD_SPDIFINT, 0xff);
-	WR1(sc, HDMI_AUD_HBR_MASK, 0xff);
-	WR1(sc, HDMI_GP_MASK, 0xff);
-	WR1(sc, HDMI_A_APIINTMSK, 0xff);
-	WR1(sc, HDMI_CEC_MASK, 0xff);
-	WR1(sc, HDMI_I2CM_INT, 0xff);
-	WR1(sc, HDMI_I2CM_CTLINT, 0xff);
-
-	/* Disable interrupts in the IH_MUTE_* registers */
-	WR1(sc, HDMI_IH_MUTE_FC_STAT0, 0xff);
-	WR1(sc, HDMI_IH_MUTE_FC_STAT1, 0xff);
-	WR1(sc, HDMI_IH_MUTE_FC_STAT2, 0xff);
-	WR1(sc, HDMI_IH_MUTE_AS_STAT0, 0xff);
-	WR1(sc, HDMI_IH_MUTE_PHY_STAT0, 0xff);
-	WR1(sc, HDMI_IH_MUTE_I2CM_STAT0, 0xff);
-	WR1(sc, HDMI_IH_MUTE_CEC_STAT0, 0xff);
-	WR1(sc, HDMI_IH_MUTE_VP_STAT0, 0xff);
-	WR1(sc, HDMI_IH_MUTE_I2CMPHY_STAT0, 0xff);
-	WR1(sc, HDMI_IH_MUTE_AHBDMAAUD_STAT0, 0xff);
-
-	r &= ~(HDMI_IH_MUTE_MUTE_WAKEUP_INTERRUPT | HDMI_IH_MUTE_MUTE_ALL_INTERRUPT);
-	WR1(sc, HDMI_IH_MUTE, r);
-}
-
-
 static int
 hdmi_detach(device_t dev)
 {
@@ -188,8 +145,6 @@ hdmi_attach(device_t dev)
 	gpr3 |= ((ipu_id << 1) | disp_id) << 2;
 	printf("%08x\n", gpr3);
 	imx_iomux_gpr_set(12, gpr3);
-
-	// hdmi_init_ih_mutes(sc);
 
 	WR1(sc, HDMI_PHY_POL0, HDMI_PHY_HPD);
 	WR1(sc, HDMI_IH_PHY_STAT0, HDMI_IH_PHY_STAT0_HPD);
