@@ -33,8 +33,6 @@ arm/freescale/imx/imx6_ipu.c		optional	vt
 
 arm/ti/am335x/hdmi_if.m			optional	hdmi
 arm/freescale/imx/imx6_hdmi.c		optional	hdmi
-arm/freescale/imx/imx6_hdmi_video.c	optional	hdmi
-arm/freescale/imx/imx6_hdmi_edid.c	optional	hdmi
 
 #
 # Optional devices.
