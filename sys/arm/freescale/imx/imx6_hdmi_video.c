@@ -79,7 +79,6 @@ struct hdmi_video_softc {
 #define M(nm,hr,vr,clk,hs,he,ht,vs,ve,vt,f) \
 	{ clk, hr, hs, he, ht, vr, vs, ve, vt, f, nm } 
 
-struct videomode mode1024x768 = M("1024x768x60",1024,768,65000,1048,1184,1344,771,777,806,HN|VN);
 struct videomode mode640x480 = M("640x480x60",640,480,25175,656,752,800,490,492,525,HN|VN);
 struct videomode mode640x480_2 = M("640x480x85",640,480,36000,696,752,832,481,484,509,HN|VN);
 
