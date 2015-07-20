@@ -560,8 +560,6 @@ imx_hdmi_set_mode(struct imx_hdmi_softc *sc)
 static int
 hdmi_edid_read(struct imx_hdmi_softc *sc, uint8_t **edid, uint32_t *edid_len)
 {
-	device_t i2c_hc;
-	device_t i2c_bus;
 	device_t i2c_dev;
 	int result;
 	uint8_t addr = 0;
@@ -576,22 +574,12 @@ hdmi_edid_read(struct imx_hdmi_softc *sc, uint8_t **edid, uint32_t *edid_len)
 	if (sc->sc_i2c_xref == 0)
 		return (ENXIO);
 
-	/* XXX: HACK! HACK! HACK! */
-	i2c_dev = NULL;
-	i2c_bus = NULL;
-	i2c_hc = OF_device_from_xref(sc->sc_i2c_xref);
-	if (i2c_hc)
-		i2c_bus = device_find_child(i2c_hc, "iicbus", 0);
-	if (i2c_bus)
-		i2c_dev = device_find_child(i2c_bus, "iic", 0);
-
+	i2c_dev = OF_device_from_xref(sc->sc_i2c_xref);
 	if (!i2c_dev) {
 		device_printf(sc->sc_dev,
 		    "no actual device for \"ddc-i2c-bus\" property (handle=%x)\n", sc->sc_i2c_xref);
 		return (ENXIO);
 	}
-
-
 
 	msg[0].slave = I2C_DDC_ADDR;
 	msg[1].slave = I2C_DDC_ADDR;
