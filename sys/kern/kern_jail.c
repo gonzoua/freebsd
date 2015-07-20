@@ -1331,7 +1331,7 @@ kern_jail_set(struct thread *td, struct uio *optuio, int flags)
 
 		pr->pr_securelevel = ppr->pr_securelevel;
 		pr->pr_allow = JAIL_DEFAULT_ALLOW & ppr->pr_allow;
-		pr->pr_enforce_statfs = JAIL_DEFAULT_ENFORCE_STATFS;
+		pr->pr_enforce_statfs = jail_default_enforce_statfs;
 		pr->pr_devfs_rsnum = ppr->pr_devfs_rsnum;
 
 		pr->pr_osreldate = osreldt ? osreldt : ppr->pr_osreldate;
@@ -2432,7 +2432,7 @@ do_jail_attach(struct thread *td, struct prison *pr)
 		goto e_unlock;
 #endif
 	VOP_UNLOCK(pr->pr_root, 0);
-	if ((error = change_root(pr->pr_root, td)))
+	if ((error = pwd_chroot(td, pr->pr_root)))
 		goto e_revert_osd;
 
 	newcred = crget();

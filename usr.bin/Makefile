@@ -117,6 +117,7 @@ SUBDIR=	${_addr2line} \
 	nice \
 	nl \
 	${_nm} \
+	numactl \
 	nohup \
 	opieinfo \
 	opiekey \
@@ -251,10 +252,6 @@ SUBDIR+=	file
 
 .if ${MK_FINGER} != "no"
 SUBDIR+=	finger
-.endif
-
-.if ${MK_FMAKE} != "no"
-SUBDIR+=	make
 .endif
 
 .if ${MK_FTP} != "no"

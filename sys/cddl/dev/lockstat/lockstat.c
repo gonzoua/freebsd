@@ -43,9 +43,8 @@
 #include <sys/dtrace.h>
 #include <sys/lockstat.h>
 
-#if defined(__i386__) || defined(__amd64__) || \
-	defined(__mips__) || defined(__powerpc__) || \
-	defined(__arm__)
+#if defined(__aarch64__) || defined(__amd64__) || defined(__arm__) || \
+    defined(__i386__) || defined(__mips__) || defined(__powerpc__)
 #define LOCKSTAT_AFRAMES 1
 #else
 #error "architecture not supported"
@@ -160,6 +159,8 @@ lockstat_enable(void *arg, dtrace_id_t id, void *parg)
 
 	ASSERT(!lockstat_probemap[probe->lsp_probe]);
 
+	lockstat_enabled++;
+
 	lockstat_probemap[probe->lsp_probe] = id;
 #ifdef DOODAD
 	membar_producer();
@@ -182,6 +183,8 @@ lockstat_disable(void *arg, dtrace_id_t id, void *parg)
 	int i;
 
 	ASSERT(lockstat_probemap[probe->lsp_probe]);
+
+	lockstat_enabled--;
 
 	lockstat_probemap[probe->lsp_probe] = 0;
 #ifdef DOODAD

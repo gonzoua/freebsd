@@ -994,21 +994,23 @@ binsfree(struct buf *bp, int qindex)
 
 	BUF_ASSERT_XLOCKED(bp);
 
-	olock = bqlock(bp->b_qindex);
 	nlock = bqlock(qindex);
-	mtx_lock(olock);
 	/* Handle delayed bremfree() processing. */
-	if (bp->b_flags & B_REMFREE)
+	if (bp->b_flags & B_REMFREE) {
+		olock = bqlock(bp->b_qindex);
+		mtx_lock(olock);
 		bremfreel(bp);
+		if (olock != nlock) {
+			mtx_unlock(olock);
+			mtx_lock(nlock);
+		}
+	} else
+		mtx_lock(nlock);
 
 	if (bp->b_qindex != QUEUE_NONE)
 		panic("binsfree: free buffer onto another queue???");
 
 	bp->b_qindex = qindex;
-	if (olock != nlock) {
-		mtx_unlock(olock);
-		mtx_lock(nlock);
-	}
 	if (bp->b_flags & B_AGE)
 		TAILQ_INSERT_HEAD(&bufqueues[bp->b_qindex], bp, b_freelist);
 	else
@@ -1203,6 +1205,12 @@ bufwrite(struct buf *bp)
 	int vp_md;
 
 	CTR3(KTR_BUF, "bufwrite(%p) vp %p flags %X", bp, bp->b_vp, bp->b_flags);
+	if ((bp->b_bufobj->bo_flag & BO_DEAD) != 0) {
+		bp->b_flags |= B_INVAL | B_RELBUF;
+		bp->b_flags &= ~B_CACHE;
+		brelse(bp);
+		return (ENXIO);
+	}
 	if (bp->b_flags & B_INVAL) {
 		brelse(bp);
 		return (0);
@@ -1595,6 +1603,12 @@ brelse(struct buf *bp)
 		return;
 	}
 
+	if ((bp->b_vflags & (BV_BKGRDINPROG | BV_BKGRDERR)) == BV_BKGRDERR) {
+		BO_LOCK(bp->b_bufobj);
+		bp->b_vflags &= ~BV_BKGRDERR;
+		BO_UNLOCK(bp->b_bufobj);
+		bdirty(bp);
+	}
 	if (bp->b_iocmd == BIO_WRITE && (bp->b_ioflags & BIO_ERROR) &&
 	    bp->b_error == EIO && !(bp->b_flags & B_INVAL)) {
 		/*
@@ -1851,7 +1865,11 @@ bqrelse(struct buf *bp)
 	}
 
 	/* buffers with stale but valid contents */
-	if (bp->b_flags & B_DELWRI) {
+	if ((bp->b_flags & B_DELWRI) != 0 || (bp->b_vflags & (BV_BKGRDINPROG |
+	    BV_BKGRDERR)) == BV_BKGRDERR) {
+		BO_LOCK(bp->b_bufobj);
+		bp->b_vflags &= ~BV_BKGRDERR;
+		BO_UNLOCK(bp->b_bufobj);
 		qindex = QUEUE_DIRTY;
 	} else {
 		if ((bp->b_flags & B_DELWRI) == 0 &&
@@ -2367,6 +2385,16 @@ restart:
 		 */
 		if (bp->b_vflags & BV_BKGRDINPROG) {
 			BUF_UNLOCK(bp);
+			continue;
+		}
+
+		/*
+		 * Requeue the background write buffer with error.
+		 */
+		if ((bp->b_vflags & BV_BKGRDERR) != 0) {
+			bremfreel(bp);
+			mtx_unlock(&bqclean);
+			bqrelse(bp);
 			continue;
 		}
 
