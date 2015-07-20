@@ -57,7 +57,6 @@ __FBSDID("$FreeBSD$");
 
 #include <arm/freescale/imx/imx6_src.h>
 #include <arm/freescale/imx/imx_ccmvar.h>
-#include <arm/freescale/imx/imx6_hdmi.h>
 
 #include "fb_if.h"
 #include "hdmi_if.h"

@@ -49,7 +49,6 @@ __FBSDID("$FreeBSD$");
 #include <dev/iicbus/iicbus.h>
 #include <dev/iicbus/iiconf.h>
 
-#include <arm/freescale/imx/imx6_hdmi.h>
 #include <arm/freescale/imx/imx6_hdmi_regs.h>
 
 #include <arm/freescale/imx/imx_iomuxvar.h>
