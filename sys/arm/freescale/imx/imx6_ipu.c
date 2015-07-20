@@ -64,6 +64,8 @@ __FBSDID("$FreeBSD$");
 void
 imx_ccm_ipu_ctrl(int enable);
 
+static int have_ipu = 0;
+
 #define	LDB_CLOCK_RATE	280000000
 
 #define	MODE_HBP(mode)	((mode)->htotal - (mode)->hsync_end)
@@ -1103,6 +1105,9 @@ static int
 ipu_probe(device_t dev)
 {
 
+	if (have_ipu)
+		return (ENXIO);
+
 	if (!ofw_bus_status_okay(dev))
 		return (ENXIO);
 
@@ -1119,9 +1124,12 @@ ipu_attach(device_t dev)
 {
 	struct ipu_softc *sc;
 
+
+	if (have_ipu)
+		return (ENXIO);
+
 	sc = device_get_softc(dev);
 	sc->sc_dev = dev;
-
 
 	sc->sc_mem_rid = 0;
 	sc->sc_mem_res = bus_alloc_resource_any(dev, SYS_RES_MEMORY,
@@ -1175,6 +1183,8 @@ ipu_attach(device_t dev)
 
 	sc->sc_hdmi_evh = EVENTHANDLER_REGISTER(hdmi_event,
 	    ipu_hdmi_event, sc, 0);
+
+	have_ipu = 1;
 
 	return (0);
 }
