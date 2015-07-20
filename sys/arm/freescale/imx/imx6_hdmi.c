@@ -581,6 +581,9 @@ hdmi_edid_read(struct imx_hdmi_softc *sc, uint8_t **edid, uint32_t *edid_len)
 		return (ENXIO);
 	}
 
+	device_printf(sc->sc_dev, "reading EDID from %s, addr %02x\n",
+	    device_get_nameunit(i2c_dev), I2C_DDC_ADDR/2);
+
 	msg[0].slave = I2C_DDC_ADDR;
 	msg[1].slave = I2C_DDC_ADDR;
 	msg[1].buf = sc->sc_edid;
