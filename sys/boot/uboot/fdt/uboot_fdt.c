@@ -45,6 +45,7 @@ fdt_platform_load_dtb(void)
 	struct fdt_header *hdr;
 	const char *s;
 	char *p;
+	int rv;
 
 	/*
 	 * If the U-boot environment contains a variable giving the address of a
@@ -68,6 +69,8 @@ fdt_platform_load_dtb(void)
 		}
 	}
 
+	rv = 1;
+
 	/*
 	 * If the U-boot environment contains a variable giving the name of a
 	 * file, use it if we can load and validate it.
@@ -78,11 +81,19 @@ fdt_platform_load_dtb(void)
 	if (s != NULL && *s != '\0') {
 		if (fdt_load_dtb_file(s) == 0) {
 			printf("Loaded DTB from file '%s'.\n", s);
-			return (0);
+			rv = 0;
 		}
 	}
 
-	return (1);
+	if (rv == 0) {
+		s = ub_env_get("fdt_overlays");
+		if (s != NULL && *s != '\0') {
+			printf("Loading DTB overlays: '%s'\n", s);
+			fdt_load_dtb_overlays(s);
+		}
+	}
+
+	return (rv);
 }
 
 void
@@ -176,4 +187,6 @@ fdt_platform_fixups(void)
 
 	/* Fixup memory regions */
 	fdt_fixup_memory(regions, n);
+
+	fdt_apply_overlays();
 }

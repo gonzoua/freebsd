@@ -277,6 +277,62 @@ fdt_load_dtb_file(const char * filename)
 }
 
 int
+_fdt_load_dtb_overlay(const char * filename)
+{
+	struct preloaded_file *bfp, *oldbfp;
+
+	debugf("_fdt_load_dtb_overlay(%s)\n", filename);
+
+	oldbfp = file_findfile(filename, "dtbo");
+
+	/* Attempt to load and validate a new dtb from a file. */
+	if ((bfp = file_loadraw(filename, "dtbo", 1)) == NULL) {
+		printf("failed to load file '%s'\n", filename);
+		return (1);
+	}
+
+	/* A new dtb was validated, discard any previous file. */
+	if (oldbfp)
+		file_discard(oldbfp);
+
+	return (0);
+}
+
+int
+fdt_load_dtb_overlays(const char * filenames)
+{
+	char *names;
+	char *name;
+	char *comaptr;
+
+	debugf("fdt_load_dtb_overlay(%s)\n", filenames);
+
+	names = strdup(filenames);
+	if (names == NULL)
+		return (1);
+	name = names;
+	do {
+		comaptr = strchr(name, ',');
+		if (comaptr)
+			*comaptr = '\0';
+		_fdt_load_dtb_overlay(name);
+		name = comaptr + 1;
+	} while(comaptr);
+
+	free(names);
+	return (0);
+}
+
+void fdt_apply_overlays()
+{
+	struct preloaded_file *fp;
+
+	for (fp = file_findfile(NULL, "dtbo"); fp != NULL; fp = fp->f_next) {
+		printf("applying DTB overlay '%s'\n", fp->f_name);
+	}
+}
+
+int
 fdt_setup_fdtp()
 {
 	struct preloaded_file *bfp;
