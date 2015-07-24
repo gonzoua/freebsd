@@ -86,7 +86,9 @@ fdt_platform_load_dtb(void)
 	}
 
 	if (rv == 0) {
-		s = ub_env_get("fdt_overlays");
+		s = getenv("fdt_overlays");
+		if (s == NULL)
+			s = ub_env_get("fdt_overlays");
 		if (s != NULL && *s != '\0') {
 			printf("Loading DTB overlays: '%s'\n", s);
 			fdt_load_dtb_overlays(s);
