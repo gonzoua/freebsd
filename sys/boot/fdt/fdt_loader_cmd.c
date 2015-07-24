@@ -323,13 +323,48 @@ fdt_load_dtb_overlays(const char * filenames)
 	return (0);
 }
 
-void fdt_apply_overlays()
+void
+fdt_apply_overlays()
 {
 	struct preloaded_file *fp;
+	size_t overlays_size, new_fdtp_size;
+	void *new_fdtp;
+	int rv;
+
+	if ((fdtp == NULL) || (fdtp_size == 0))
+		return;
+
+	overlays_size = 0;
+	for (fp = file_findfile(NULL, "dtbo"); fp != NULL; fp = fp->f_next)
+		overlays_size += fp->f_size;
+
+	/* Nothing to apply */
+	if (overlays_size == 0)
+		return;
+
+	/* It's actually more than enough */
+	new_fdtp_size = fdtp_size + overlays_size;
+	new_fdtp = malloc(new_fdtp_size);
+	if (new_fdtp == NULL) {
+		printf("failed to allocate memory for DTB blob with overlays\n");
+		return;
+	}
+
+	rv = fdt_open_into(fdtp, new_fdtp, new_fdtp_size);
+	if (rv != 0) {
+		printf("failed to open DTB blob for applying overlays\n");
+		return;
+	}
 
 	for (fp = file_findfile(NULL, "dtbo"); fp != NULL; fp = fp->f_next) {
 		printf("applying DTB overlay '%s'\n", fp->f_name);
+
+		fdt_overlay_do_fixups(new_fdtp, fp->f_addr);
+		fdt_overlay_apply_fragments(new_fdtp, fp->f_addr);
 	}
+
+	fdtp = new_fdtp;
+	fdtp_size = new_fdtp_size;
 }
 
 int
