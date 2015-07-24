@@ -39,6 +39,7 @@ __FBSDID("$FreeBSD$");
 
 #include "bootstrap.h"
 #include "fdt_platform.h"
+#include "fdt_overlay.h"
 
 #ifdef DEBUG
 #define debugf(fmt, args...) do { printf("%s(): ", __func__);	\
@@ -358,9 +359,8 @@ fdt_apply_overlays()
 
 	for (fp = file_findfile(NULL, "dtbo"); fp != NULL; fp = fp->f_next) {
 		printf("applying DTB overlay '%s'\n", fp->f_name);
+		fdt_overlay_apply(new_fdtp, fp->f_addr, fp->f_size);
 
-		fdt_overlay_do_fixups(new_fdtp, fp->f_addr);
-		fdt_overlay_apply_fragments(new_fdtp, fp->f_addr);
 	}
 
 	fdtp = new_fdtp;

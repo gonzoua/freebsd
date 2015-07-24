@@ -33,6 +33,11 @@ __FBSDID("$FreeBSD$");
 #include <stand.h>
 #include <libfdt.h>
 
+#include "fdt_overlay.h"
+
+/*
+ * Get max phandle
+ */
 static uint32_t
 fdt_max_phandle(void *fdtp)
 {
@@ -51,8 +56,12 @@ fdt_max_phandle(void *fdtp)
 	return max_phandle;
 }
 
+/*
+ * Returns exact memory location specified by fixup in format
+ * /path/to/node:property:offset
+ */
 static void *
-_fdt_get_fixup_offset(void *fdtp, const char *fixup)
+fdt_get_fixup_location(void *fdtp, const char *fixup)
 {
 	char *path, *prop, *offsetp, *endp;
 	int prop_offset, o, proplen;
@@ -115,8 +124,15 @@ out:
 	return (result);
 }
 
+/*
+ * Process one entry in __fixups__ { } node
+ * @fixups is property value, array of NUL-terminated strings
+ *   with fixup locations
+ * @fixups_len length of the fixups array in bytes
+ * @phandle is value for these locations
+ */
 static int
-_fdt_do_one_fixup(void *fdtp, const char *fixups, int fixups_len, int phandle)
+fdt_do_one_fixup(void *fdtp, const char *fixups, int fixups_len, int phandle)
 {
 	void *fixup_pos;
 	uint32_t val;
@@ -124,7 +140,7 @@ _fdt_do_one_fixup(void *fdtp, const char *fixups, int fixups_len, int phandle)
 	val = cpu_to_fdt32(phandle);
 
 	while (fixups_len > 0) {
-		fixup_pos = _fdt_get_fixup_offset(fdtp, fixups);
+		fixup_pos = fdt_get_fixup_location(fdtp, fixups);
 		if (fixup_pos != NULL)
 			memcpy(fixup_pos, &val, sizeof(val));
 
@@ -135,30 +151,11 @@ _fdt_do_one_fixup(void *fdtp, const char *fixups, int fixups_len, int phandle)
 	return (0);
 }
 
-static int
-_fdt_do_local_fixup(void *fdtp, const char *fixups, int fixups_len, int offset)
-{
-	void *fixup_pos;
-	uint32_t phandle, val;
-
-	while (fixups_len > 0) {
-		fixup_pos = _fdt_get_fixup_offset(fdtp, fixups);
-		if (fixup_pos != NULL) {
-			memcpy(&val, fixup_pos,  sizeof(val));
-			phandle = fdt32_to_cpu(val) + offset;
-			val = cpu_to_fdt32(phandle);
-			memcpy(fixup_pos, &val, sizeof(val));
-		}
-
-		fixups_len -= strlen(fixups) + 1;
-		fixups += strlen(fixups) + 1;
-	}
-
-	return (0);
-}
-
+/*
+ * Increase u32 value at pos by offset
+ */
 static void
-_fdt_offset_u32(void *pos, uint32_t offset)
+fdt_increase_u32(void *pos, uint32_t offset)
 {
 	uint32_t val;
 
@@ -167,8 +164,35 @@ _fdt_offset_u32(void *pos, uint32_t offset)
 	memcpy(pos, &val, sizeof(val));
 }
 
+/*
+ * Process local fixups
+ * @fixups is property value, array of NUL-terminated strings
+ *   with fixup locations
+ * @fixups_len length of the fixups array in bytes
+ * @offset value these locations should be increased by
+ */
+static int
+fdt_do_local_fixup(void *fdtp, const char *fixups, int fixups_len, int offset)
+{
+	void *fixup_pos;
+
+	while (fixups_len > 0) {
+		fixup_pos = fdt_get_fixup_location(fdtp, fixups);
+		if (fixup_pos != NULL)
+			fdt_increase_u32(fixup_pos, offset);
+
+		fixups_len -= strlen(fixups) + 1;
+		fixups += strlen(fixups) + 1;
+	}
+
+	return (0);
+}
+
+/*
+ * Increase node phandle by phandle_offset
+ */
 static void
-_fdt_offset_phandle(void *fdtp, int node_offset, uint32_t phandle_offset)
+fdt_increase_phandle(void *fdtp, int node_offset, uint32_t phandle_offset)
 {
 	int proplen;
 	void *phandle_pos, *node_pos;
@@ -177,26 +201,31 @@ _fdt_offset_phandle(void *fdtp, int node_offset, uint32_t phandle_offset)
 
 	phandle_pos = fdt_getprop_w(fdtp, node_offset, "phandle", &proplen);
 	if (phandle_pos)
-		_fdt_offset_u32(phandle_pos, phandle_offset);
+		fdt_increase_u32(phandle_pos, phandle_offset);
 	phandle_pos = fdt_getprop_w(fdtp, node_offset, "linux,phandle", &proplen);
 	if (phandle_pos)
-		_fdt_offset_u32(phandle_pos, phandle_offset);
+		fdt_increase_u32(phandle_pos, phandle_offset);
 }
 
-void
-fdt_offset_local_phandles(void *fdtp, uint32_t offset)
+/*
+ * Increase all phandles by offset
+ */
+static void
+fdt_increase_phandles(void *fdtp, uint32_t offset)
 {
 	int o, depth;
 
 	o = fdt_path_offset(fdtp, "/");
 	for (depth = 0; (o >= 0) && (depth >= 0); o = fdt_next_node(fdtp, o, &depth)) {
-		_fdt_offset_phandle(fdtp, o, offset);
+		fdt_increase_phandle(fdtp, o, offset);
 	}
 }
 
-
+/*
+ * Overlay one node deviced by <overlay_fdtp, overlay_o> over <main_fdtp, target_o>
+ */
 static void
-_fdt_merge_nodes(void *main_fdtp, int target_o, void *overlay_fdtp, int overlay_o)
+fdt_overlay_node(void *main_fdtp, int target_o, void *overlay_fdtp, int overlay_o)
 {
 	int len, o, depth;
 	const char *name;
@@ -230,15 +259,16 @@ _fdt_merge_nodes(void *main_fdtp, int target_o, void *overlay_fdtp, int overlay_
 			}
 		}
 
-		printf("merging %s\n", name);
-
-		_fdt_merge_nodes(main_fdtp, target_subnode_o,
+		fdt_overlay_node(main_fdtp, target_subnode_o,
 		    overlay_fdtp, o);
 	}
 }
 
+/*
+ * Apply one overlay fragment 
+ */
 static void
-_fdt_merge_fragment(void *main_fdtp, void *overlay_fdtp, int fragment_o)
+fdt_apply_fragment(void *main_fdtp, void *overlay_fdtp, int fragment_o)
 {
 	uint32_t target;
 	const char *target_path;
@@ -278,23 +308,24 @@ _fdt_merge_fragment(void *main_fdtp, void *overlay_fdtp, int fragment_o)
 		return;
 	}
 
-	_fdt_merge_nodes(main_fdtp, target_node_o, overlay_fdtp, overlay_node_o);
+	fdt_overlay_node(main_fdtp, target_node_o, overlay_fdtp, overlay_node_o);
 }
 
-int
+/*
+ * Handle __fixups__ node in overlay DTB
+ */
+static int
 fdt_overlay_do_fixups(void *main_fdtp, void *overlay_fdtp)
 {
 	int main_symbols_o, symbol_o, overlay_fixups_o;
-	int overlay_local_fixups_o;
 	int fixup_prop_o;
 	int len;
 	const char *fixups, *name;
 	const char *symbol_path;
-	uint32_t phandle, phandle_offset;
+	uint32_t phandle;
 
 	main_symbols_o = fdt_path_offset(main_fdtp, "/__symbols__");
 	overlay_fixups_o = fdt_path_offset(overlay_fdtp, "/__fixups__");
-	overlay_local_fixups_o = fdt_path_offset(overlay_fdtp, "/__local_fixups__");
 
 	if (main_symbols_o < 0)
 		return (-1);
@@ -316,22 +347,44 @@ fdt_overlay_do_fixups(void *main_fdtp, void *overlay_fdtp)
 			return (-1);
 		}
 		phandle = fdt_get_phandle(main_fdtp, symbol_o);
-		if (_fdt_do_one_fixup(overlay_fdtp, fixups, len, phandle) < 0)
-			return (-1);
-	}
-
-	phandle_offset = fdt_max_phandle(main_fdtp);
-	fdt_offset_local_phandles(overlay_fdtp, phandle_offset);
-	fixups = fdt_getprop_w(overlay_fdtp, overlay_local_fixups_o, "fixup", &len);
-	if (fixups) {
-		if (_fdt_do_local_fixup(overlay_fdtp, fixups, len, phandle_offset) < 0)
+		if (fdt_do_one_fixup(overlay_fdtp, fixups, len, phandle) < 0)
 			return (-1);
 	}
 
 	return (0);
 }
 
-int
+/*
+ * Handle __local_fixups__ node in overlay DTB
+ */
+static int
+fdt_overlay_do_local_fixups(void *main_fdtp, void *overlay_fdtp)
+{
+	int overlay_local_fixups_o;
+	int len;
+	const char *fixups;
+	uint32_t phandle_offset;
+
+	overlay_local_fixups_o = fdt_path_offset(overlay_fdtp, "/__local_fixups__");
+
+	if (overlay_local_fixups_o < 0)
+		return (-1);
+
+	phandle_offset = fdt_max_phandle(main_fdtp);
+	fdt_increase_phandles(overlay_fdtp, phandle_offset);
+	fixups = fdt_getprop_w(overlay_fdtp, overlay_local_fixups_o, "fixup", &len);
+	if (fixups) {
+		if (fdt_do_local_fixup(overlay_fdtp, fixups, len, phandle_offset) < 0)
+			return (-1);
+	}
+
+	return (0);
+}
+
+/*
+ * Apply all fragments to main DTB
+ */
+static int
 fdt_overlay_apply_fragments(void *main_fdtp, void *overlay_fdtp)
 {
 	int o, depth;
@@ -341,8 +394,48 @@ fdt_overlay_apply_fragments(void *main_fdtp, void *overlay_fdtp)
 		if (depth != 1)
 			continue;
 		
-		_fdt_merge_fragment(main_fdtp, overlay_fdtp, o);
+		fdt_apply_fragment(main_fdtp, overlay_fdtp, o);
 	}
 
 	return (0);
+}
+
+int
+fdt_overlay_apply(void *main_fdtp, void *overlay_fdtp, size_t overlay_length)
+{
+	void *overlay_copy;
+	int rv;
+
+	rv = 0;
+
+	/* We modify overlay in-place, so we need writable copy */
+	overlay_copy = malloc(overlay_length);
+	if (overlay_copy == NULL) {
+		printf("failed to allocate memory for overlay copy\n");
+		return (-1);
+	}
+
+	memcpy(overlay_copy, overlay_fdtp, overlay_length);
+
+	if (fdt_overlay_do_fixups(main_fdtp, overlay_copy) < 0) {
+		printf("failed to perform fixups in overlay\n");
+		rv = -1;
+		goto out;
+	}
+
+	if (fdt_overlay_do_local_fixups(main_fdtp, overlay_copy) < 0) {
+		printf("failed to perform local fixups in overlay\n");
+		rv = -1;
+		goto out;
+	}
+
+	if (fdt_overlay_apply_fragments(main_fdtp, overlay_copy) < 0) {
+		printf("failed to apply fragments\n");
+		rv = -1;
+	}
+
+out:
+	free(overlay_copy);
+
+	return (rv);
 }
