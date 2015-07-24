@@ -265,7 +265,7 @@ fdt_overlay_node(void *main_fdtp, int target_o, void *overlay_fdtp, int overlay_
 }
 
 /*
- * Apply one overlay fragment 
+ * Apply one overlay fragment
  */
 static void
 fdt_apply_fragment(void *main_fdtp, void *overlay_fdtp, int fragment_o)
@@ -274,7 +274,7 @@ fdt_apply_fragment(void *main_fdtp, void *overlay_fdtp, int fragment_o)
 	const char *target_path;
 	const void *val;
 	int target_node_o, overlay_node_o;
-	
+
 	target_node_o = -1;
 	val = fdt_getprop(overlay_fdtp, fragment_o, "target", NULL);
 	if (val) {
@@ -393,7 +393,7 @@ fdt_overlay_apply_fragments(void *main_fdtp, void *overlay_fdtp)
 	for (depth = 0; (o >= 0) && (depth >= 0); o = fdt_next_node(overlay_fdtp, o, &depth)) {
 		if (depth != 1)
 			continue;
-		
+
 		fdt_apply_fragment(main_fdtp, overlay_fdtp, o);
 	}
 
