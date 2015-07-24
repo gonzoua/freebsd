@@ -109,6 +109,9 @@ fdt_platform_fixups(void)
 	eth_no = 0;
 	ethstr = NULL;
 
+	/* Apply overlays before anything else */
+	fdt_apply_overlays();
+
 	/* Acquire sys_info */
 	si = ub_get_sys_info();
 
@@ -187,6 +190,4 @@ fdt_platform_fixups(void)
 
 	/* Fixup memory regions */
 	fdt_fixup_memory(regions, n);
-
-	fdt_apply_overlays();
 }
