@@ -690,7 +690,7 @@ ti_gpio_attach(device_t dev)
 	    sizeof(*sc->sc_irq_polarity) * sc->sc_maxpin,
 	    M_DEVBUF, M_WAITOK | M_ZERO);
 	for (i = 0; i < sc->sc_maxpin; i++) {
-		sc->sc_irq_trigger[i] = INTR_TRIGGER_LEVEL;
+		sc->sc_irq_trigger[i] = INTR_TRIGGER_EDGE;
 		sc->sc_irq_polarity[i] = INTR_POLARITY_LOW;
 	}
 

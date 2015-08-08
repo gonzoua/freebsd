@@ -496,6 +496,7 @@ gpiobus_alloc_resource(device_t bus, device_t child, int type, int *rid,
 	struct resource *rv;
 	struct resource_list *rl;
 	struct resource_list_entry *rle;
+	struct gpiobus_ivar *devi;
 	int isdefault;
 
 	if (type != SYS_RES_IRQ)
@@ -504,16 +505,23 @@ gpiobus_alloc_resource(device_t bus, device_t child, int type, int *rid,
 	rle = NULL;
 	if (isdefault) {
 		rl = BUS_GET_RESOURCE_LIST(bus, child);
-		if (rl == NULL)
-			return (NULL);
-		rle = resource_list_find(rl, type, *rid);
-		if (rle == NULL)
-			return (NULL);
-		if (rle->res != NULL)
-			panic("%s: resource entry is busy", __func__);
-		start = rle->start;
-		count = rle->count;
-		end = rle->end;
+		if (rl != NULL)
+			rle = resource_list_find(rl, type, *rid);
+		if (rle != NULL) {
+			if (rle->res != NULL)
+				panic("%s: resource entry is busy", __func__);
+			start = rle->start;
+			count = rle->count;
+			end = rle->end;
+		}
+		else
+		{
+			devi = GPIOBUS_IVAR(child);
+			if (*rid >= devi->npins)
+				return (NULL);
+			end = start = devi->pins[*rid];
+			count = 1;
+		}
 	}
 	sc = device_get_softc(bus);
 	rv = rman_reserve_resource(&sc->sc_intr_rman, start, end, count, flags,

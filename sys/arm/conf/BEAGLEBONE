@@ -89,6 +89,7 @@ device		random			# Entropy device
 # GPIO
 device		gpio
 device		gpioled
+device		gpiobacklight
 
 # ADC support
 device		ti_adc
@@ -145,3 +146,4 @@ device		hdmi
 device		ums
 device		ukbd
 device		kbdmux
+device		gpiokeys
