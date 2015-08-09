@@ -50,15 +50,7 @@ __FBSDID("$FreeBSD: head/sys/dev/gpio/gpiokey.c 283360 2015-05-24 07:45:42Z ganb
 
 #include <dev/fdt/fdt_common.h>
 #include <dev/ofw/ofw_bus.h>
-
-#include <dev/gpio/gpiobusvar.h>
-
-#include "gpiobus_if.h"
-
-/*
- * Only one pin for led
- */
-#define	GPIOKEYS_PIN	0
+#include <dev/ofw/ofw_bus_subr.h>
 
 #define GPIOKEYS_LOCK(_sc)		mtx_lock(&(_sc)->sc_mtx)
 #define	GPIOKEYS_UNLOCK(_sc)		mtx_unlock(&(_sc)->sc_mtx)
@@ -125,7 +117,6 @@ struct gpiokeys_softc
 	keyboard_t	sc_kbd;
 	keymap_t	sc_keymap;
 	accentmap_t	sc_accmap;
-	struct thread	*sc_poll_thread;
 
 	uint32_t	sc_ntime[GPIOKEYS_GLOBAL_NKEYCODE];
 	uint32_t	sc_otime[GPIOKEYS_GLOBAL_NKEYCODE];
@@ -149,21 +140,6 @@ struct gpiokeys_softc
 	uint8_t		sc_buffer[GPIOKEYS_GLOBAL_BUFFER_SIZE];
 };
 
-struct gpiokey_softc 
-{
-	device_t	sc_dev;
-	device_t	sc_busdev;
-	int		sc_irq_rid;
-	struct resource	*sc_irq_res;
-	void		*sc_intr_hl;
-	struct mtx	sc_mtx;
-};
-
-/* Single key device */
-static int gpiokey_probe(device_t);
-static int gpiokey_attach(device_t);
-static int gpiokey_detach(device_t);
-
 /* gpio-keys device */
 static int gpiokeys_probe(device_t);
 static int gpiokeys_attach(device_t);
@@ -180,98 +156,6 @@ static int	gpiokeys_enable(keyboard_t *);
 static int	gpiokeys_disable(keyboard_t *);
 static void	gpiokeys_interrupt(struct gpiokeys_softc *);
 static void	gpiokeys_event_keyinput(struct gpiokeys_softc *);
-
-static void
-gpiokey_intr(void *arg)
-{
-	struct gpiokey_softc *sc;
-
-	sc = arg;
-	device_printf(sc->sc_dev, "Intr!\n");
-}
-
-static void
-gpiokey_identify(driver_t *driver, device_t bus)
-{
-	phandle_t child, leds, root;
-
-	root = OF_finddevice("/");
-	if (root == 0)
-		return;
-	for (leds = OF_child(root); leds != 0; leds = OF_peer(leds)) {
-		if (!fdt_is_compatible_strict(leds, "gpio-keys"))
-			continue;
-		/* Traverse the 'gpio-leds' node and add its children. */
-		for (child = OF_child(leds); child != 0; child = OF_peer(child)) {
-			if (!OF_hasprop(child, "gpios"))
-				continue;
-			if (ofw_gpiobus_add_fdt_child(bus, driver->name, child) == NULL)
-				continue;
-		}
-	}
-}
-
-static int
-gpiokey_probe(device_t dev)
-{
-	phandle_t node;
-	char *name;
-
-	if ((node = ofw_bus_get_node(dev)) == -1)
-		return (ENXIO);
-
-	name = NULL;
-	if (OF_getprop_alloc(node, "label", 1, (void **)&name) == -1)
-		OF_getprop_alloc(node, "name", 1, (void **)&name);
-
-	if (name != NULL) {
-		device_set_desc_copy(dev, name);
-		free(name, M_OFWPROP);
-	}
-
-	return (0);
-}
-
-static int
-gpiokey_attach(device_t dev)
-{
-	struct gpiokey_softc *sc;
-
-	sc = device_get_softc(dev);
-	sc->sc_dev = dev;
-	sc->sc_busdev = device_get_parent(dev);
-
-	sc->sc_irq_res = bus_alloc_resource_any(dev, SYS_RES_IRQ, &sc->sc_irq_rid,
-	    RF_ACTIVE);
-	if (!sc->sc_irq_res) {
-		device_printf(dev, "cannot allocate interrupt\n");
-		return (ENXIO);
-	}
-
-	if (bus_setup_intr(dev, sc->sc_irq_res, INTR_TYPE_MISC | INTR_MPSAFE,
-			NULL, gpiokey_intr, sc,
-			&sc->sc_intr_hl) != 0) {
-		bus_release_resource(dev, SYS_RES_IRQ, sc->sc_irq_rid,
-		    sc->sc_irq_res);
-		device_printf(dev, "Unable to setup the irq handler.\n");
-		return (ENXIO);
-	}
-
-	GPIOKEYS_LOCK_INIT(sc);
-
-	return (0);
-}
-
-static int
-gpiokey_detach(device_t dev)
-{
-	struct gpiokey_softc *sc;
-
-	sc = device_get_softc(dev);
-	GPIOKEYS_LOCK_DESTROY(sc);
-
-	return (0);
-}
 
 static int
 gpiokeys_probe(device_t dev)
@@ -745,10 +629,9 @@ gpiokeys_poll(keyboard_t *kbd, int on)
 	struct gpiokeys_softc *sc = kbd->kb_data;
 
 	GPIOKEYS_GLOBAL_LOCK();
-	if (on) {
+	if (on)
 		sc->sc_flags |= GPIOKEYS_GLOBAL_FLAG_POLLING;
-		sc->sc_poll_thread = curthread;
-	} else {
+	else {
 		sc->sc_flags &= ~GPIOKEYS_GLOBAL_FLAG_POLLING;
 		/* XXX: gpiokeys_start_timer(sc); */	/* start timer */ 
 	}
@@ -811,27 +694,6 @@ gpiokeys_driver_load(module_t mod, int what, void *arg)
 	}
 	return (0);
 }
-
-static devclass_t gpiokey_devclass;
-
-static device_method_t gpiokey_methods[] = {
-	/* Device interface */
-	DEVMETHOD(device_identify,	gpiokey_identify),
-
-	DEVMETHOD(device_probe,		gpiokey_probe),
-	DEVMETHOD(device_attach,	gpiokey_attach),
-	DEVMETHOD(device_detach,	gpiokey_detach),
-
-	{ 0, 0 }
-};
-
-static driver_t gpiokey_driver = {
-	"gpiokey",
-	gpiokey_methods,
-	sizeof(struct gpiokey_softc),
-};
-
-DRIVER_MODULE(gpiokey, gpiobus, gpiokey_driver, gpiokey_devclass, 0, 0);
 
 static devclass_t gpiokeys_devclass;
 
