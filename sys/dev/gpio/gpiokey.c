@@ -55,6 +55,7 @@ struct gpiokey_softc
 	struct resource	*sc_irq_res;
 	void		*sc_intr_hl;
 	struct mtx	sc_mtx;
+	struct callout	sc_debounce;
 };
 
 #define GPIOKEY_LOCK(_sc)		mtx_lock(&(_sc)->sc_mtx)
@@ -69,8 +70,12 @@ static int gpiokey_probe(device_t);
 static int gpiokey_attach(device_t);
 static int gpiokey_detach(device_t);
 
+
+void
+gpiokeys_key_event(uint16_t keycode, int pressed);
+
 static void
-gpiokey_intr(void *arg)
+gpiokey_debounced_intr(void *arg)
 {
 	struct gpiokey_softc *sc;
 	int error;
@@ -78,18 +83,33 @@ gpiokey_intr(void *arg)
 
 	sc = arg;
 
-	GPIOKEY_LOCK(sc);
 	error = GPIOBUS_ACQUIRE_BUS(sc->sc_busdev, sc->sc_dev,
 	    GPIOBUS_DONTWAIT);
-	if (error != 0) {
-		GPIOKEY_UNLOCK(sc);
+	if (error != 0)
 		return;
-	}
 	GPIOBUS_PIN_GET(sc->sc_busdev, sc->sc_dev, 0, &val);
 	GPIOBUS_RELEASE_BUS(sc->sc_busdev, sc->sc_dev);
-	GPIOKEY_UNLOCK(sc);
+	if (val == 0)
+		gpiokeys_key_event(44 + device_get_unit(sc->sc_dev), 1);
+	else
+		gpiokeys_key_event(44 + device_get_unit(sc->sc_dev), 0);
+}
 
-	device_printf(sc->sc_dev, ": %d\n", val);
+static void
+gpiokey_intr(void *arg)
+{
+	struct gpiokey_softc *sc;
+	int debounce_ticks;
+
+	sc = arg;
+
+	GPIOKEY_LOCK(sc);
+	debounce_ticks = hz*5/1000;
+	if (debounce_ticks == 0)
+		debounce_ticks = 1;
+	if (!callout_pending(&sc->sc_debounce))
+		callout_reset(&sc->sc_debounce, hz*5/1000, gpiokey_debounced_intr, sc);
+	GPIOKEY_UNLOCK(sc);
 }
 
 static void
@@ -160,6 +180,7 @@ gpiokey_attach(device_t dev)
 	}
 
 	GPIOKEY_LOCK_INIT(sc);
+	callout_init_mtx(&sc->sc_debounce, &sc->sc_mtx, 0);
 
 	return (0);
 }

@@ -58,7 +58,7 @@ __FBSDID("$FreeBSD: head/sys/dev/gpio/gpiokey.c 283360 2015-05-24 07:45:42Z ganb
 #define	GPIOKEYS_UNLOCK(_sc)		mtx_unlock(&(_sc)->sc_mtx)
 #define GPIOKEYS_LOCK_INIT(_sc) \
 	mtx_init(&_sc->sc_mtx, device_get_nameunit(_sc->sc_dev), \
-	    "gpiokey", MTX_DEF)
+	    "gpiokeys", MTX_DEF)
 #define GPIOKEYS_LOCK_DESTROY(_sc)	mtx_destroy(&_sc->sc_mtx);
 
 #define	KEY_ERROR	  0x01
@@ -242,6 +242,7 @@ gpiokeys_key_event(uint16_t keycode, int pressed)
 		key |= KEY_RELEASE;
 
 	gpiokeys_put_key(gpiokeys_sc, key);
+	gpiokeys_event_keyinput(gpiokeys_sc);
 }
 
 
@@ -334,7 +335,6 @@ gpiokeys_do_poll(struct gpiokeys_softc *sc, uint8_t wait)
 	KASSERT((sc->sc_flags & GPIOKEYS_GLOBAL_FLAG_POLLING) != 0,
 	    ("gpiokeys_do_poll called when not polling\n"));
 
-	printf("%s:%d\n", __FILE__, __LINE__);
 	if (!kdb_active && !SCHEDULER_STOPPED()) {
 		while (sc->sc_inputs == 0) {
 			kern_yield(PRI_UNCHANGED);
@@ -355,7 +355,6 @@ gpiokeys_check(keyboard_t *kbd)
 {
 	struct gpiokeys_softc *sc = kbd->kb_data;
 
-	printf("%s:%d\n", __FILE__, __LINE__);
 
 	if (!KBD_IS_ACTIVE(kbd))
 		return (0);
@@ -373,7 +372,6 @@ gpiokeys_check(keyboard_t *kbd)
 static int
 gpiokeys_check_char_locked(keyboard_t *kbd)
 {
-	printf("%s:%d\n", __FILE__, __LINE__);
 	if (!KBD_IS_ACTIVE(kbd))
 		return (0);
 
@@ -688,6 +686,30 @@ gpiokeys_set_typematic(keyboard_t *kbd, int code)
 	kbd->kb_delay1 = delays[(code >> 5) & 3];
 	kbd->kb_delay2 = rates[code & 0x1f];
 	return (0);
+}
+
+static void
+gpiokeys_event_keyinput(struct gpiokeys_softc *sc)
+{
+	int c;
+
+	if ((sc->sc_flags & GPIOKEYS_GLOBAL_FLAG_POLLING) != 0)
+		return;
+
+	if (sc->sc_inputs == 0)
+		return;
+
+	if (KBD_IS_ACTIVE(&sc->sc_kbd) &&
+	    KBD_IS_BUSY(&sc->sc_kbd)) {
+		/* let the callback function process the input */
+		(sc->sc_kbd.kb_callback.kc_func) (&sc->sc_kbd, KBDIO_KEYINPUT,
+		    sc->sc_kbd.kb_callback.kc_arg);
+	} else {
+		/* read and discard the input, no one is waiting for it */
+		do {
+			c = gpiokeys_read_char(&sc->sc_kbd, 0);
+		} while (c != NOKEY);
+	}
 }
 
 static keyboard_switch_t gpiokeyssw = {
