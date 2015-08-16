@@ -73,9 +73,23 @@ static void
 gpiokey_intr(void *arg)
 {
 	struct gpiokey_softc *sc;
+	int error;
+	int val;
 
 	sc = arg;
-	device_printf(sc->sc_dev, "Intr!\n");
+
+	GPIOKEY_LOCK(sc);
+	error = GPIOBUS_ACQUIRE_BUS(sc->sc_busdev, sc->sc_dev,
+	    GPIOBUS_DONTWAIT);
+	if (error != 0) {
+		GPIOKEY_UNLOCK(sc);
+		return;
+	}
+	GPIOBUS_PIN_GET(sc->sc_busdev, sc->sc_dev, 0, &val);
+	GPIOBUS_RELEASE_BUS(sc->sc_busdev, sc->sc_dev);
+	GPIOKEY_UNLOCK(sc);
+
+	device_printf(sc->sc_dev, ": %d\n", val);
 }
 
 static void
