@@ -45,6 +45,18 @@
 
 struct regulator_fixed_softc {
 	device_t		dev;
+	char			*name;
+	int 			min_uvolt;
+	int 			max_uvolt;
+	int 			min_uamp;
+	int 			max_uamp;
+	int 			boot_on;
+	int 			always_on;
+
+	int			gpio_open_drain;
+	int			enable_active_high;
+	phandle_t		supply_pnode;
+	struct gpiobus_pin	*gpio_en;
 };
 
 static struct ofw_compat_data compat_data[] = {
@@ -56,6 +68,67 @@ static struct ofw_compat_data compat_data[] = {
 static int
 regulator_fixed_set(device_t provider, intptr_t id, int val)
 {
+	struct regulator_fixed_softc *sc;
+	int rv;
+
+	sc = device_get_softc(provider);
+	if (sc->always_on && (val == 0))
+		return (0);
+	if (sc->gpio_en == NULL)
+		return (0);
+
+	rv = GPIO_PIN_SET(sc->gpio_en->dev, sc->gpio_en->pin, val);
+
+	return (rv);
+}
+
+static int
+regulator_fixed_parse(struct regulator_fixed_softc *sc, phandle_t node)
+{
+	int rv;
+
+	rv = OF_getprop_alloc(node, "regulator-name", 1,
+	    (void **)&sc->name);
+	if (rv <= 0)
+		sc->name = "Unnamed";
+
+	rv = OF_getencprop(node, "regulator-min-microvolt", &sc->min_uvolt,
+	    sizeof(sc->min_uvolt));
+	if (rv <= 0)
+		sc->min_uvolt = 0;
+
+	rv = OF_getencprop(node, "regulator-max-microvolt", &sc->max_uvolt,
+	    sizeof(sc->max_uvolt));
+	if (rv <= 0)
+		sc->max_uvolt = 0;
+
+	rv = OF_getencprop(node, "regulator-min-microamp", &sc->min_uamp,
+	    sizeof(sc->min_uamp));
+	if (rv <= 0)
+		sc->min_uamp = 0;
+
+	rv = OF_getencprop(node, "regulator-max-microamp", &sc->max_uamp,
+	    sizeof(sc->max_uamp));
+	if (rv <= 0)
+		sc->max_uamp = 0;
+
+	if (OF_hasprop(node, "regulator-boot-on"))
+		sc->boot_on = 1;
+	if (OF_hasprop(node, "regulator-always-on"))
+		sc->always_on = 1;
+
+	if (OF_hasprop(node, "gpio-open-drain"))
+		sc->gpio_open_drain = 1;
+
+	if (OF_hasprop(node, "enable-active-high"))
+		sc->enable_active_high = 1;
+	rv = OF_getencprop(node, "vin-supply", &sc->supply_pnode,
+	    sizeof(sc->supply_pnode));
+	if (rv <= 0)
+		sc->supply_pnode = 0;
+	rv = ofw_gpiobus_parse_gpios(sc->dev, "gpio", &sc->gpio_en);
+	if (rv != 1)
+		sc->gpio_en = NULL;
 
 	return (0);
 }
