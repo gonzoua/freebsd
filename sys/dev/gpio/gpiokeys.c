@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: head/sys/dev/gpio/gpiokey.c 283360 2015-05-24 07:45:42Z ganbold $");
+__FBSDID("$FreeBSD$");
 
 #include "opt_platform.h"
 #include "opt_kbd.h"
@@ -54,6 +54,8 @@ __FBSDID("$FreeBSD: head/sys/dev/gpio/gpiokey.c 283360 2015-05-24 07:45:42Z ganb
 #include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/ofw_bus_subr.h>
 
+#include <dev/gpio/gpiokeys.h>
+
 #define GPIOKEYS_LOCK(_sc)		mtx_lock(&(_sc)->sc_mtx)
 #define	GPIOKEYS_UNLOCK(_sc)		mtx_unlock(&(_sc)->sc_mtx)
 #define GPIOKEYS_LOCK_INIT(_sc) \
@@ -61,20 +63,11 @@ __FBSDID("$FreeBSD: head/sys/dev/gpio/gpiokey.c 283360 2015-05-24 07:45:42Z ganb
 	    "gpiokeys", MTX_DEF)
 #define GPIOKEYS_LOCK_DESTROY(_sc)	mtx_destroy(&_sc->sc_mtx);
 
-#define	KEY_ERROR	  0x01
-
 #define	KEY_PRESS	  0
-#define	KEY_RELEASE	  0x400
-#define	KEY_INDEX(c)	  ((c) & 0xFF)
+#define	KEY_RELEASE	  0x80
 
 #define	SCAN_PRESS	  0
 #define	SCAN_RELEASE	  0x80
-#define	SCAN_PREFIX_E0	  0x100
-#define	SCAN_PREFIX_E1	  0x200
-#define	SCAN_PREFIX_CTL	  0x400
-#define	SCAN_PREFIX_SHIFT 0x800
-#define	SCAN_PREFIX	(SCAN_PREFIX_E0  | SCAN_PREFIX_E1 | \
-			 SCAN_PREFIX_CTL | SCAN_PREFIX_SHIFT)
 #define	SCAN_CHAR(c)	((c) & 0x7f)
 
 #define	GPIOKEYS_GLOBAL_NMOD                     8	/* units */
@@ -110,8 +103,6 @@ struct gpiokeys_softc
 	uint16_t	sc_inputtail;
 
 	uint8_t		sc_kbd_id;
-
-	uint8_t		sc_buffer[GPIOKEYS_GLOBAL_BUFFER_SIZE];
 };
 
 struct gpiokeys_softc *gpiokeys_sc;
@@ -122,15 +113,12 @@ static int gpiokeys_attach(device_t);
 static int gpiokeys_detach(device_t);
 
 /* kbd methods prototypes */
-static void	gpiokeys_timeout(void *);
-static void	gpiokeys_set_leds(struct gpiokeys_softc *, uint8_t);
 static int	gpiokeys_set_typematic(keyboard_t *, int);
 static uint32_t	gpiokeys_read_char(keyboard_t *, int);
 static void	gpiokeys_clear_state(keyboard_t *);
 static int	gpiokeys_ioctl(keyboard_t *, u_long, caddr_t);
 static int	gpiokeys_enable(keyboard_t *);
 static int	gpiokeys_disable(keyboard_t *);
-static void	gpiokeys_interrupt(struct gpiokeys_softc *);
 static void	gpiokeys_event_keyinput(struct gpiokeys_softc *);
 
 static int
@@ -190,7 +178,7 @@ gpiokeys_attach(device_t dev)
 	}
 #endif
 
-	if (1) {
+	if (bootverbose) {
 		genkbd_diag(kbd, 1);
 	}
 
@@ -230,8 +218,6 @@ gpiokeys_put_key(struct gpiokeys_softc *sc, uint32_t key)
 
 
 
-void
-gpiokeys_key_event(uint16_t keycode, int pressed);
 void
 gpiokeys_key_event(uint16_t keycode, int pressed)
 {
@@ -642,7 +628,7 @@ gpiokeys_clear_state(keyboard_t *kbd)
 	sc->sc_accents = 0;
 }
 
-/* save the internal state, not used */
+/* get the internal state, not used */
 static int
 gpiokeys_get_state(keyboard_t *kbd, void *buf, size_t len)
 {

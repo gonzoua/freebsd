@@ -25,7 +25,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: head/sys/dev/gpio/gpiokey.c 283360 2015-05-24 07:45:42Z ganbold $");
+__FBSDID("$FreeBSD$");
 
 #include "opt_platform.h"
 
@@ -44,6 +44,7 @@ __FBSDID("$FreeBSD: head/sys/dev/gpio/gpiokey.c 283360 2015-05-24 07:45:42Z ganb
 #include <dev/ofw/ofw_bus.h>
 
 #include <dev/gpio/gpiobusvar.h>
+#include <dev/gpio/gpiokeys.h>
 
 #include "gpiobus_if.h"
 
@@ -55,6 +56,8 @@ struct gpiokey_softc
 	struct resource	*sc_irq_res;
 	void		*sc_intr_hl;
 	struct mtx	sc_mtx;
+	uint32_t	sc_keycode;
+	int		sc_autorepeat;
 	struct callout	sc_debounce;
 };
 
@@ -65,14 +68,39 @@ struct gpiokey_softc
 	    "gpiokey", MTX_DEF)
 #define GPIOKEY_LOCK_DESTROY(_sc)	mtx_destroy(&_sc->sc_mtx);
 
+/* No key code */
+#define GPIOKEY_NONE	0
+
 /* Single key device */
 static int gpiokey_probe(device_t);
 static int gpiokey_attach(device_t);
 static int gpiokey_detach(device_t);
 
+static uint32_t
+gpiokey_map_linux_code(uint32_t linux_code)
+{
+	switch (linux_code) {
+		case 28: /* ENTER */
+			return 28;
+			break;
+		case 105: /* LEFT */
+			return 97;
+			break;
+		case 106: /* RIGHT */
+			return 98;
+			break;
+		case 103: /* UP */
+			return 95;
+			break;
+		case 108: /* DOWN */
+			return 100;
+			break;
 
-void
-gpiokeys_key_event(uint16_t keycode, int pressed);
+		default:
+			return GPIOKEY_NONE;
+	}
+}
+
 
 static void
 gpiokey_debounced_intr(void *arg)
@@ -83,16 +111,20 @@ gpiokey_debounced_intr(void *arg)
 
 	sc = arg;
 
+	if (sc->sc_keycode == GPIOKEY_NONE)
+		return;
+
 	error = GPIOBUS_ACQUIRE_BUS(sc->sc_busdev, sc->sc_dev,
 	    GPIOBUS_DONTWAIT);
 	if (error != 0)
 		return;
 	GPIOBUS_PIN_GET(sc->sc_busdev, sc->sc_dev, 0, &val);
 	GPIOBUS_RELEASE_BUS(sc->sc_busdev, sc->sc_dev);
+	// printf("code: %d, %d\n", sc->sc_keycode, (val == 0));
 	if (val == 0)
-		gpiokeys_key_event(44 + device_get_unit(sc->sc_dev), 1);
+		gpiokeys_key_event(sc->sc_keycode, 1);
 	else
-		gpiokeys_key_event(44 + device_get_unit(sc->sc_dev), 0);
+		gpiokeys_key_event(sc->sc_keycode, 0);
 }
 
 static void
@@ -137,9 +169,13 @@ gpiokey_identify(driver_t *driver, device_t bus)
 static int
 gpiokey_probe(device_t dev)
 {
+	struct gpiokey_softc *sc;
 	phandle_t node;
+	pcell_t prop;
 	char *name;
+	uint32_t code;
 
+	sc = device_get_softc(dev);
 	if ((node = ofw_bus_get_node(dev)) == -1)
 		return (ENXIO);
 
@@ -151,6 +187,18 @@ gpiokey_probe(device_t dev)
 		device_set_desc_copy(dev, name);
 		free(name, M_OFWPROP);
 	}
+
+	sc->sc_autorepeat = OF_hasprop(node, "autorepeat");
+	if ((OF_getprop(node, "freebsd,code", &prop, sizeof(prop))) > 0)
+		sc->sc_keycode = fdt32_to_cpu(prop);
+	else if ((OF_getprop(node, "linux,code", &prop, sizeof(prop))) > 0) {
+		code = fdt32_to_cpu(prop);
+		sc->sc_keycode = gpiokey_map_linux_code(code);
+		if (sc->sc_keycode == GPIOKEY_NONE)
+			device_printf(dev, "failed to map linux,code value %d\n", code);
+	}
+	else
+		device_printf(dev, "no key code property\n");
 
 	return (0);
 }
@@ -217,5 +265,3 @@ static driver_t gpiokey_driver = {
 };
 
 DRIVER_MODULE(gpiokey, gpiobus, gpiokey_driver, gpiokey_devclass, 0, 0);
-
-
