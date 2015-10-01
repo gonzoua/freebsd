@@ -108,7 +108,8 @@ gpiokey_intr(void *arg)
 	if (debounce_ticks == 0)
 		debounce_ticks = 1;
 	if (!callout_pending(&sc->sc_debounce))
-		callout_reset(&sc->sc_debounce, hz*5/1000, gpiokey_debounced_intr, sc);
+		callout_reset(&sc->sc_debounce, debounce_ticks,
+		    gpiokey_debounced_intr, sc);
 	GPIOKEY_UNLOCK(sc);
 }
 
