@@ -48,6 +48,9 @@ __FBSDID("$FreeBSD$");
 
 #include "gpiobus_if.h"
 
+#define	AUTOREPEAT_DELAY	250
+#define	AUTOREPEAT_REPEAT	34
+
 struct gpiokey_softc 
 {
 	device_t	sc_dev;
@@ -58,7 +61,10 @@ struct gpiokey_softc
 	struct mtx	sc_mtx;
 	uint32_t	sc_keycode;
 	int		sc_autorepeat;
-	struct callout	sc_debounce;
+	struct callout	sc_debounce_callout;
+	struct callout	sc_repeat_callout;
+	int		sc_repeat_delay;
+	int		sc_repeat;
 };
 
 #define GPIOKEY_LOCK(_sc)		mtx_lock(&(_sc)->sc_mtx)
@@ -70,6 +76,8 @@ struct gpiokey_softc
 
 /* No key code */
 #define GPIOKEY_NONE	0
+
+#define	GPIOKEY_E0(k)	(SCAN_PREFIX_E0 | k)
 
 /* Single key device */
 static int gpiokey_probe(device_t);
@@ -84,16 +92,16 @@ gpiokey_map_linux_code(uint32_t linux_code)
 			return 28;
 			break;
 		case 105: /* LEFT */
-			return 97;
+			return GPIOKEY_E0(0x4b);
 			break;
 		case 106: /* RIGHT */
-			return 98;
+			return GPIOKEY_E0(0x4d);
 			break;
 		case 103: /* UP */
-			return 95;
+			return GPIOKEY_E0(0x48);
 			break;
 		case 108: /* DOWN */
-			return 100;
+			return GPIOKEY_E0(0x50);
 			break;
 
 		default:
@@ -101,6 +109,21 @@ gpiokey_map_linux_code(uint32_t linux_code)
 	}
 }
 
+static void
+gpiokey_autorepeat(void *arg)
+{
+	struct gpiokey_softc *sc;
+
+	sc = arg;
+
+	if (sc->sc_keycode == GPIOKEY_NONE)
+		return;
+
+	gpiokeys_key_event(sc->sc_keycode, 1);
+
+	callout_reset(&sc->sc_repeat_callout, sc->sc_repeat,
+		    gpiokey_autorepeat, sc);
+}
 
 static void
 gpiokey_debounced_intr(void *arg)
@@ -121,10 +144,19 @@ gpiokey_debounced_intr(void *arg)
 	GPIOBUS_PIN_GET(sc->sc_busdev, sc->sc_dev, 0, &val);
 	GPIOBUS_RELEASE_BUS(sc->sc_busdev, sc->sc_dev);
 	// printf("code: %d, %d\n", sc->sc_keycode, (val == 0));
-	if (val == 0)
+	if (val == 0) {
 		gpiokeys_key_event(sc->sc_keycode, 1);
-	else
+		if (sc->sc_autorepeat) {
+			callout_reset(&sc->sc_repeat_callout, sc->sc_repeat_delay,
+			    gpiokey_autorepeat, sc);
+		}
+	}
+	else {
+		if (sc->sc_autorepeat &&
+		    callout_pending(&sc->sc_repeat_callout))
+			callout_stop(&sc->sc_repeat_callout);
 		gpiokeys_key_event(sc->sc_keycode, 0);
+	}
 }
 
 static void
@@ -139,11 +171,12 @@ gpiokey_intr(void *arg)
 	debounce_ticks = hz*5/1000;
 	if (debounce_ticks == 0)
 		debounce_ticks = 1;
-	if (!callout_pending(&sc->sc_debounce))
-		callout_reset(&sc->sc_debounce, debounce_ticks,
+	if (!callout_pending(&sc->sc_debounce_callout))
+		callout_reset(&sc->sc_debounce_callout, debounce_ticks,
 		    gpiokey_debounced_intr, sc);
 	GPIOKEY_UNLOCK(sc);
 }
+
 
 static void
 gpiokey_identify(driver_t *driver, device_t bus)
@@ -229,7 +262,17 @@ gpiokey_attach(device_t dev)
 	}
 
 	GPIOKEY_LOCK_INIT(sc);
-	callout_init_mtx(&sc->sc_debounce, &sc->sc_mtx, 0);
+
+	sc->sc_repeat_delay = hz*AUTOREPEAT_DELAY/1000;
+	if (sc->sc_repeat_delay == 0)
+		sc->sc_repeat_delay = 1;
+
+	sc->sc_repeat = hz*AUTOREPEAT_REPEAT/1000;
+	if (sc->sc_repeat == 0)
+		sc->sc_repeat = 1;
+
+	callout_init_mtx(&sc->sc_debounce_callout, &sc->sc_mtx, 0);
+	callout_init_mtx(&sc->sc_repeat_callout, &sc->sc_mtx, 0);
 
 	return (0);
 }

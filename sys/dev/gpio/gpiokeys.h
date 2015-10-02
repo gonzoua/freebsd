@@ -28,6 +28,10 @@
 #ifndef __GPIOKEYS_H__
 #define __GPIOKEYS_H__
 
+#define	SCAN_KEYCODE_MASK	0xff
+#define	SCAN_PREFIX_E0		0x10000000
+#define	SCAN_PREFIX_E1		0x20000000
+
 void gpiokeys_key_event(uint16_t keycode, int pressed);
 
 #endif /* __GPIOKEYS_H__ */

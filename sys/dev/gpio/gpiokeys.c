@@ -223,11 +223,18 @@ gpiokeys_key_event(uint16_t keycode, int pressed)
 {
 	uint32_t key;
 
-	key = keycode;
+	key = keycode & SCAN_KEYCODE_MASK;
+
 	if (!pressed)
 		key |= KEY_RELEASE;
 
+	if (keycode & SCAN_PREFIX_E0)
+		gpiokeys_put_key(gpiokeys_sc, 0xe0);
+	else if (keycode & SCAN_PREFIX_E1)
+		gpiokeys_put_key(gpiokeys_sc, 0xe1);
+
 	gpiokeys_put_key(gpiokeys_sc, key);
+
 	gpiokeys_event_keyinput(gpiokeys_sc);
 }
 
@@ -399,6 +406,7 @@ gpiokeys_get_key(struct gpiokeys_softc *sc, uint8_t wait)
 			sc->sc_inputhead = 0;
 		}
 	}
+
 	return (c);
 }
 
@@ -407,19 +415,19 @@ static int
 gpiokeys_read(keyboard_t *kbd, int wait)
 {
 	struct gpiokeys_softc *sc = kbd->kb_data;
-	int32_t usbcode;
+	int32_t keycode;
 
 	if (!KBD_IS_ACTIVE(kbd))
 		return (-1);
 
 	/* XXX */
-	usbcode = gpiokeys_get_key(sc, (wait == FALSE) ? 0 : 1);
-	if (!KBD_IS_ACTIVE(kbd) || (usbcode == -1))
+	keycode = gpiokeys_get_key(sc, (wait == FALSE) ? 0 : 1);
+	if (!KBD_IS_ACTIVE(kbd) || (keycode == -1))
 		return (-1);
 
 	++(kbd->kb_count);
 
-	return (usbcode);
+	return (keycode);
 }
 
 /* read char from the keyboard */
