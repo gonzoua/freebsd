@@ -143,7 +143,6 @@ gpiokey_debounced_intr(void *arg)
 		return;
 	GPIOBUS_PIN_GET(sc->sc_busdev, sc->sc_dev, 0, &val);
 	GPIOBUS_RELEASE_BUS(sc->sc_busdev, sc->sc_dev);
-	// printf("code: %d, %d\n", sc->sc_keycode, (val == 0));
 	if (val == 0) {
 		gpiokeys_key_event(sc->sc_keycode, 1);
 		if (sc->sc_autorepeat) {
@@ -283,6 +282,18 @@ gpiokey_detach(device_t dev)
 	struct gpiokey_softc *sc;
 
 	sc = device_get_softc(dev);
+
+	if (sc->sc_intr_hl) {
+		bus_teardown_intr(dev, sc->sc_irq_res, sc->sc_intr_hl);
+		bus_release_resource(dev, SYS_RES_IRQ, sc->sc_irq_rid,
+		    sc->sc_irq_res);
+	}
+
+	if (callout_pending(&sc->sc_repeat_callout))
+		callout_stop(&sc->sc_repeat_callout);
+	if (callout_pending(&sc->sc_debounce_callout))
+		callout_stop(&sc->sc_debounce_callout);
+
 	GPIOKEY_LOCK_DESTROY(sc);
 
 	return (0);
