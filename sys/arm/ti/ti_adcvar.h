@@ -35,10 +35,20 @@
 #define	ADC_WRITE4(_sc, reg, value)	\
 	bus_write_4((_sc)->sc_mem_res, reg, value)
 
+#define	BUFFER_EVENTS	2048
+
+struct tsc_event 
+{
+	struct timeval	ev_time;
+	uint32_t	ev_type;
+	uint32_t	ev_value;
+};
+
 struct ti_adc_softc {
 	device_t		sc_dev;
 	int			sc_last_state;
 	struct mtx		sc_mtx;
+	struct cv		sc_cv;
 	struct resource		*sc_mem_res;
 	struct resource		*sc_irq_res;
 	void			*sc_intrhand;
@@ -54,6 +64,13 @@ struct ti_adc_softc {
 	int			sc_yp_bit, sc_yp_inp;
 	int			sc_yn_bit, sc_yn_inp;
 	uint32_t		sc_tsc_enabled;
+	/* touchscreen data */
+	int			sc_pen_down;
+	struct tsc_event	sc_events[BUFFER_EVENTS];
+	int			sc_evens_read_pos;
+	int			sc_evens_write_pos;
+	struct cdev		*sc_cdev;
+	struct selinfo		sc_events_poll;
 };
 
 struct ti_adc_input {

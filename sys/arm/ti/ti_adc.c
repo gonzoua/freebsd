@@ -31,14 +31,19 @@ __FBSDID("$FreeBSD$");
 #include <sys/systm.h>
 #include <sys/bus.h>
 
+#include <sys/conf.h>
 #include <sys/kernel.h>
 #include <sys/limits.h>
 #include <sys/lock.h>
 #include <sys/module.h>
 #include <sys/mutex.h>
+#include <sys/condvar.h>
 #include <sys/resource.h>
 #include <sys/rman.h>
 #include <sys/sysctl.h>
+#include <sys/selinfo.h>
+#include <sys/poll.h>
+#include <sys/uio.h>
 
 #include <machine/bus.h>
 
@@ -59,6 +64,11 @@ __FBSDID("$FreeBSD$");
 #define	ORDER_YP	2
 #define	ORDER_YN	3
 
+#define		EVENT_PEN		1
+#define		EVENT_ABS_X		2
+#define		EVENT_ABS_Y		3
+#define		EVENT_ABS_PRESSURE	4
+
 /* Define our 8 steps, one for each input channel. */
 static struct ti_adc_input ti_adc_inputs[TI_ADC_NPINS] = {
 	{ .stepconfig = ADC_STEPCFG(1), .stepdelay = ADC_STEPDLY(1) },
@@ -72,6 +82,92 @@ static struct ti_adc_input ti_adc_inputs[TI_ADC_NPINS] = {
 };
 
 static int ti_adc_samples[5] = { 0, 2, 4, 8, 16 };
+
+static d_read_t		ti_tsc_read;
+static d_poll_t		ti_tsc_poll;
+
+static struct cdevsw tsc_cdevsw = {
+	.d_version	= D_VERSION,
+	.d_read		= ti_tsc_read,
+	.d_poll		= ti_tsc_poll,
+	.d_name		= "touchscreen",
+};
+
+static int
+ti_tsc_read(struct cdev *dev, struct uio *uio, int ioflag)
+{
+	struct ti_adc_softc *sc;
+	size_t tomove;
+	struct tsc_event event;
+	int error;
+
+	sc = dev->si_drv1;
+	error = 0;
+	tomove = uio->uio_resid;
+	if (tomove != sizeof(struct tsc_event))
+		return (EINVAL);
+
+	TI_ADC_LOCK(sc);
+	while (sc->sc_evens_write_pos == sc->sc_evens_read_pos) {
+		error = cv_wait_sig(&sc->sc_cv, &sc->sc_mtx);
+		if (error != 0)
+			break;
+	}
+
+	if (sc->sc_evens_write_pos != sc->sc_evens_read_pos) {
+		memcpy(&event, &sc->sc_events[sc->sc_evens_read_pos],
+			sizeof(event));
+		sc->sc_evens_read_pos = (sc->sc_evens_read_pos + 1) % BUFFER_EVENTS;
+	}
+
+	TI_ADC_UNLOCK(sc);
+
+
+	if (error == 0)
+		error = uiomove(&event, tomove, uio);
+
+	return (error);
+}
+
+static int
+ti_tsc_poll(struct cdev *dev, int events, struct thread *td)
+{
+	int revents = 0;
+	struct ti_adc_softc *sc;
+
+	sc = dev->si_drv1;
+
+	TI_ADC_LOCK(sc);
+	if (events & (POLLIN|POLLRDNORM)) {
+		if (sc->sc_evens_write_pos != sc->sc_evens_read_pos) {
+			revents = events & (POLLIN|POLLRDNORM);
+		}
+		else
+			selrecord(td, &sc->sc_events_poll);
+	}
+	TI_ADC_UNLOCK(sc);
+
+	return (revents);
+}
+
+
+
+static void
+ti_adc_send_event(struct ti_adc_softc *sc, uint32_t event, uint32_t arg)
+{
+	int newwpos;
+
+	sc->sc_events[sc->sc_evens_write_pos].ev_type = event;
+	sc->sc_events[sc->sc_evens_write_pos].ev_value = arg;
+	getmicrotime(&sc->sc_events[sc->sc_evens_write_pos].ev_time);
+	newwpos = (sc->sc_evens_write_pos + 1) % BUFFER_EVENTS;
+	if (newwpos == sc->sc_evens_read_pos)
+		sc->sc_evens_read_pos  = (sc->sc_evens_read_pos + 1) % BUFFER_EVENTS;
+
+	sc->sc_evens_write_pos = newwpos;
+	selwakeup(&sc->sc_events_poll);
+	cv_broadcast(&sc->sc_cv);
+}
 
 static void
 ti_adc_enable(struct ti_adc_softc *sc)
@@ -442,7 +538,10 @@ ti_adc_tsc_read_data(struct ti_adc_softc *sc)
 		x += data[i];
 	x /= (end - start);
 
-	printf("x: %d, y: %d\n", x, y);
+	// printf("x: %d, y: %d\n", x, y);
+	ti_adc_send_event(sc, EVENT_ABS_X, x);
+	ti_adc_send_event(sc, EVENT_ABS_Y, y);
+	ti_adc_send_event(sc, EVENT_PEN, 1);
 }
 
 static void
@@ -476,14 +575,16 @@ ti_adc_intr(void *arg)
 	status = ADC_READ4(sc, ADC_IRQSTATUS);
 
 	if (rawstatus & ADC_IRQ_HW_PEN_ASYNC) {
-		printf("PEN DOWN\n");
+		sc->sc_pen_down = 1;
+		// ti_adc_send_event(sc, EVENT_PEN, 0);
 		status |= ADC_IRQ_HW_PEN_ASYNC;
 		ADC_WRITE4(sc, ADC_IRQENABLE_CLR,
 			ADC_IRQ_HW_PEN_ASYNC);
 	}
 
 	if (rawstatus & ADC_IRQ_PEN_UP) {
-		printf("PEN UP\n");
+		sc->sc_pen_down = 0;
+		ti_adc_send_event(sc, EVENT_PEN, 0);
 		status |= ADC_IRQ_PEN_UP;
 	}
 
@@ -492,7 +593,7 @@ ti_adc_intr(void *arg)
 
 	if (status & ADC_IRQ_FIFO1_THRES) {
 		ti_adc_tsc_intr_locked(sc, status);
-		printf("--> %08x vs %08x\n", status, rawstatus);
+		// printf("--> %08x vs %08x\n", status, rawstatus);
 	}
 
 	if (status) {
@@ -819,9 +920,17 @@ ti_adc_attach(device_t dev)
 	 * is 2400 - 1).
 	 * This sets the ADC clock to ~10Khz (CLK_M_OSC / 2400).
 	 */
-	ADC_WRITE4(sc, ADC_CLKDIV, 2399);
+	ADC_WRITE4(sc, ADC_CLKDIV, 23);
 
 	TI_ADC_LOCK_INIT(sc);
+	cv_init(&sc->sc_cv, "ti_tscrd");
+	sc->sc_evens_read_pos = 0;
+	sc->sc_evens_write_pos = 0;
+	sc->sc_pen_down = 0;
+
+	sc->sc_cdev = make_dev(&tsc_cdevsw, 0, UID_ROOT, GID_WHEEL, 0644,
+	    "touchscreen");
+	sc->sc_cdev->si_drv1 = sc;
 
 	ti_adc_idlestep_init(sc);
 	ti_adc_inputs_init(sc);
