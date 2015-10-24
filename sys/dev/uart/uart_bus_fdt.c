@@ -111,6 +111,9 @@ uart_fdt_probe(device_t dev)
 	pcell_t clock, shift;
 	int err;
 
+	if (device_get_unit(dev) > 3)
+		return (ENXIO);
+
 	sc = device_get_softc(dev);
 
 	if (!ofw_bus_status_okay(dev))

@@ -1,0 +1,8 @@
+# CI20 -- Kernel config for Creator CI20 board
+#
+# $FreeBSD$
+ 
+ident		CI20
+
+makeoptions 	TRAMPLOADADDR=0x88000000
+include		"JZ47XX"
