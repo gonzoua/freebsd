@@ -156,6 +156,7 @@
 #define	FIFO_XMT_RST	FCR_XMT_RST
 #define	FCR_DMA		0x08
 #define	FIFO_DMA_MODE	FCR_DMA
+#define	FCR_UART_ON	0x10	/* JZ47xx only */
 #define	FCR_RX_LOW	0x00
 #define	FIFO_RX_LOW	FCR_RX_LOW
 #define	FCR_RX_MEDL	0x40
