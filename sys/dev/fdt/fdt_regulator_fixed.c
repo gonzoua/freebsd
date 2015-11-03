@@ -77,6 +77,9 @@ regulator_fixed_set(device_t provider, intptr_t id, int val)
 	if (sc->gpio_en == NULL)
 		return (0);
 
+	if (sc->enable_active_high == 0)
+		val = (val != 0) ? 0 : 1;
+
 	rv = GPIO_PIN_SET(sc->gpio_en->dev, sc->gpio_en->pin, val);
 
 	return (rv);
@@ -129,6 +132,41 @@ regulator_fixed_parse(struct regulator_fixed_softc *sc, phandle_t node)
 	rv = ofw_gpiobus_parse_gpios(sc->dev, "gpio", &sc->gpio_en);
 	if (rv != 1)
 		sc->gpio_en = NULL;
+
+	return (0);
+}
+
+static int
+regulator_fixed_configure_gpio(struct regulator_fixed_softc *sc)
+{
+	int rv;
+	uint32_t flags;
+	uint32_t init_val;
+
+	flags = GPIO_PIN_OUTPUT;
+/* XXX Not now
+	if (!sc->enable_active_high) {
+		flags |= GPIO_PIN_INVIN;
+		flags |= GPIO_PIN_INVOUT;
+	}
+*/
+	if (sc->gpio_open_drain)
+		flags |= GPIO_PIN_OPENDRAIN;
+	init_val = sc->boot_on ? 1 : 0;
+
+	rv = GPIO_PIN_SET(sc->gpio_en->dev, sc->gpio_en->pin, init_val);
+	if (rv != 0) {
+		device_printf(sc->dev, "Cannot configure GPIO pin: %d\n",
+		    sc->gpio_en->pin);
+		return (rv);
+	}
+
+	rv = GPIO_PIN_SETFLAGS(sc->gpio_en->dev, sc->gpio_en->pin, flags);
+	if (rv != 0) {
+		device_printf(sc->dev, "Cannot configure GPIO pin: %d\n",
+		    sc->gpio_en->pin);
+		return (rv);
+	}
 
 	return (0);
 }
