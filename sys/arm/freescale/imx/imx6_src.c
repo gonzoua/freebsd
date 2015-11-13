@@ -153,7 +153,6 @@ src_probe(device_t dev)
 	return (BUS_PROBE_DEFAULT);
 }
 
-
 static device_method_t src_methods[] = {
 	/* Device interface */
 	DEVMETHOD(device_probe,  src_probe),
