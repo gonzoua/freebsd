@@ -61,9 +61,6 @@ __FBSDID("$FreeBSD$");
 #include "fb_if.h"
 #include "hdmi_if.h"
 
-void
-imx_ccm_ipu_ctrl(int enable);
-
 static int have_ipu = 0;
 
 #define	LDB_CLOCK_RATE	280000000

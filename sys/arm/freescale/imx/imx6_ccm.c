@@ -354,9 +354,6 @@ imx_ccm_ahb_hz(void)
 }
 
 void
-imx_ccm_ipu_ctrl(int enable);
-
-void
 imx_ccm_ipu_ctrl(int enable)
 {
 	struct ccm_softc *sc;
