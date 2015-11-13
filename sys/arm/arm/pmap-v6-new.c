@@ -162,7 +162,6 @@ __FBSDID("$FreeBSD$");
 static void pmap_zero_page_check(vm_page_t m);
 void pmap_debug(int level);
 int pmap_pid_dump(int pid);
-void pmap_pvdump(vm_paddr_t pa);
 
 #define PDEBUG(_lev_,_stat_) \
 	if (pmap_debug_level >= (_lev_)) \
@@ -714,6 +713,7 @@ pmap_bootstrap_prepare(vm_paddr_t last)
 	pt1_entry_t *pte1p;
 	pt2_entry_t *pte2p;
 	u_int i;
+	uint32_t actlr_mask, actlr_set;
 
 	/*
 	 * Now, we are going to make real kernel mapping. Note that we are
@@ -830,8 +830,8 @@ pmap_bootstrap_prepare(vm_paddr_t last)
 
 	/* Finally, switch from 'boot_pt1' to 'kern_pt1'. */
 	pmap_kern_ttb = base_pt1 | ttb_flags;
-	reinit_mmu(pmap_kern_ttb, (1 << 6) | (1 << 0), (1 << 6) | (1 << 0));
-
+	cpuinfo_get_actlr_modifier(&actlr_mask, &actlr_set);
+	reinit_mmu(pmap_kern_ttb, actlr_mask, actlr_set);
 	/*
 	 * Initialize the first available KVA. As kernel image is mapped by
 	 * sections, we are leaving some gap behind.
@@ -1156,6 +1156,21 @@ pmap_bootstrap(vm_offset_t firstaddr)
 	kernel_vm_end_new = kernel_vm_end;
 	virtual_end = vm_max_kernel_address;
 }
+
+static void
+pmap_init_qpages(void)
+{
+	struct pcpu *pc;
+	int i;
+
+	CPU_FOREACH(i) {
+		pc = pcpu_find(i);
+		pc->pc_qmap_addr = kva_alloc(PAGE_SIZE);
+		if (pc->pc_qmap_addr == 0)
+			panic("%s: unable to allocate KVA", __func__);
+	}
+}
+SYSINIT(qpages_init, SI_SUB_CPU, SI_ORDER_ANY, pmap_init_qpages, NULL);
 
 /*
  *  The function can already be use in second initialization stage.
@@ -2852,7 +2867,7 @@ free_pv_chunk(struct pv_chunk *pc)
 	/* entire chunk is free, return it */
 	m = PHYS_TO_VM_PAGE(pmap_kextract((vm_offset_t)pc));
 	pmap_qremove((vm_offset_t)pc, 1);
-	vm_page_unwire(m, PQ_INACTIVE);
+	vm_page_unwire(m, PQ_NONE);
 	vm_page_free(m);
 	pmap_pte2list_free(&pv_vafree, (vm_offset_t)pc);
 }
@@ -5710,6 +5725,41 @@ pmap_copy_pages(vm_page_t ma[], vm_offset_t a_offset, vm_page_t mb[],
 	mtx_unlock(&sysmaps->lock);
 }
 
+vm_offset_t
+pmap_quick_enter_page(vm_page_t m)
+{
+	pt2_entry_t *pte2p;
+	vm_offset_t qmap_addr;
+
+	critical_enter();
+	qmap_addr = PCPU_GET(qmap_addr);
+	pte2p = pt2map_entry(qmap_addr);
+
+	KASSERT(pte2_load(pte2p) == 0, ("%s: PTE2 busy", __func__));
+
+	pte2_store(pte2p, PTE2_KERN_NG(VM_PAGE_TO_PHYS(m), PTE2_AP_KRW,
+	    pmap_page_get_memattr(m)));
+	tlb_flush_local(qmap_addr);
+
+	return (qmap_addr);
+}
+
+void
+pmap_quick_remove_page(vm_offset_t addr)
+{
+	pt2_entry_t *pte2p;
+	vm_offset_t qmap_addr;
+
+	qmap_addr = PCPU_GET(qmap_addr);
+	pte2p = pt2map_entry(qmap_addr);
+
+	KASSERT(addr == qmap_addr, ("%s: invalid address", __func__));
+	KASSERT(pte2_load(pte2p) != 0, ("%s: PTE2 not in use", __func__));
+
+	pte2_clear(pte2p);
+	critical_exit();
+}
+
 /*
  *	Copy the range specified by src_addr/len
  *	from the source map to the range dst_addr/len
@@ -5895,13 +5945,6 @@ pmap_activate(struct thread *td)
 	cp15_ttbr_set(ttb);
 	PCPU_SET(curpmap, pmap);
 	critical_exit();
-}
-
-int
-pmap_dmap_iscurrent(pmap_t pmap)
-{
-
-	return (pmap_is_current(pmap));
 }
 
 /*
@@ -6090,7 +6133,7 @@ CTASSERT(powerof2(PT2MAP_SIZE));
  *  Handle access and R/W emulation faults.
  */
 int
-pmap_fault(pmap_t pmap, vm_offset_t far, uint32_t fsr, int idx, int usermode)
+pmap_fault(pmap_t pmap, vm_offset_t far, uint32_t fsr, int idx, bool usermode)
 {
 	pt1_entry_t *pte1p, pte1;
 	pt2_entry_t *pte2p, pte2;
@@ -6109,8 +6152,9 @@ pmap_fault(pmap_t pmap, vm_offset_t far, uint32_t fsr, int idx, int usermode)
 		 * All L1 tables should always be mapped and present.
 		 * However, we check only current one herein. For user mode,
 		 * only permission abort from malicious user is not fatal.
+		 * And alignment abort as it may have higher priority.
 		 */
-		if (!usermode || (idx != FAULT_PERM_L2)) {
+		if (!usermode || (idx != FAULT_ALIGN && idx != FAULT_PERM_L2)) {
 			CTR4(KTR_PMAP, "%s: pmap %#x pm_pt1 %#x far %#x",
 			    __func__, pmap, pmap->pm_pt1, far);
 			panic("%s: pm_pt1 abort", __func__);
@@ -6123,9 +6167,10 @@ pmap_fault(pmap_t pmap, vm_offset_t far, uint32_t fsr, int idx, int usermode)
 		 * L1 table. However, only existing L2 tables are mapped
 		 * in PT2MAP. For user mode, only L2 translation abort and
 		 * permission abort from malicious user is not fatal.
+		 * And alignment abort as it may have higher priority.
 		 */
-		if (!usermode ||
-		    (idx != FAULT_TRAN_L2 && idx != FAULT_PERM_L2)) {
+		if (!usermode || (idx != FAULT_ALIGN &&
+		    idx != FAULT_TRAN_L2 && idx != FAULT_PERM_L2)) {
 			CTR4(KTR_PMAP, "%s: pmap %#x PT2MAP %#x far %#x",
 			    __func__, pmap, PT2MAP, far);
 			panic("%s: PT2MAP abort", __func__);
@@ -6345,62 +6390,6 @@ pmap_pid_dump(int pid)
 	return (npte2);
 }
 
-/*
- *  Print address space of pmap.
- */
-static void
-pads(pmap_t pmap)
-{
-	int i, j;
-	vm_paddr_t va;
-	pt1_entry_t pte1;
-	pt2_entry_t *pte2p, pte2;
-
-	if (pmap == kernel_pmap)
-		return;
-	for (i = 0; i < NPTE1_IN_PT1; i++) {
-		pte1 = pte1_load(&pmap->pm_pt1[i]);
-		if (pte1_is_section(pte1)) {
-			/*
-			 * QQQ: Do something here!
-			 */
-		} else if (pte1_is_link(pte1)) {
-			for (j = 0; j < NPTE2_IN_PT2; j++) {
-				va = (i << PTE1_SHIFT) + (j << PAGE_SHIFT);
-				if (pmap == kernel_pmap && va < KERNBASE)
-					continue;
-				if (pmap != kernel_pmap && va >= KERNBASE &&
-				    (va < UPT2V_MIN_ADDRESS ||
-				    va >= UPT2V_MAX_ADDRESS))
-					continue;
-
-				pte2p = pmap_pte2(pmap, va);
-				pte2 = pte2_load(pte2p);
-				pmap_pte2_release(pte2p);
-				if (!pte2_is_valid(pte2))
-					continue;
-				printf("%x:%x ", va, pte2);
-			}
-		}
-	}
-}
-
-void
-pmap_pvdump(vm_paddr_t pa)
-{
-	pv_entry_t pv;
-	pmap_t pmap;
-	vm_page_t m;
-
-	printf("pa %x", pa);
-	m = PHYS_TO_VM_PAGE(pa);
-	TAILQ_FOREACH(pv, &m->md.pv_list, pv_next) {
-		pmap = PV_PMAP(pv);
-		printf(" -> pmap %p, va %x", (void *)pmap, pv->pv_va);
-		pads(pmap);
-	}
-	printf(" ");
-}
 #endif
 
 #ifdef DDB

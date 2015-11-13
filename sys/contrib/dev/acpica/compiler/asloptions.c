@@ -440,6 +440,7 @@ AslDoOptions (
             /* Produce listing file (Mixed source/aml) */
 
             Gbl_ListingFlag = TRUE;
+            AcpiGbl_DmOpt_Listing = TRUE;
             break;
 
         case 'i':

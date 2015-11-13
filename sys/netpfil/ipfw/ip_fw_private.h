@@ -256,7 +256,7 @@ struct ip_fw {
 	ipfw_insn	cmd[1];		/* storage for commands		*/
 };
 
-#define	IPFW_RULE_CNTR_SIZE	(2 * sizeof(counter_u64_t))
+#define	IPFW_RULE_CNTR_SIZE	(2 * sizeof(uint64_t))
 
 #endif
 
@@ -673,6 +673,7 @@ int ipfw_objhash_free_idx(struct namedobj_instance *ni, uint16_t idx);
 int ipfw_objhash_alloc_idx(void *n, uint16_t *pidx);
 void ipfw_objhash_set_funcs(struct namedobj_instance *ni,
     objhash_hash_f *hash_f, objhash_cmp_f *cmp_f);
+void ipfw_export_obj_ntlv(struct named_object *no, ipfw_obj_ntlv *ntlv);
 void ipfw_init_obj_rewriter(void);
 void ipfw_destroy_obj_rewriter(void);
 void ipfw_add_obj_rewriter(struct opcode_obj_rewrite *rw, size_t count);
@@ -692,6 +693,7 @@ void update_opcode_kidx(ipfw_insn *cmd, uint16_t idx);
 int classify_opcode_kidx(ipfw_insn *cmd, uint16_t *puidx);
 void ipfw_init_srv(struct ip_fw_chain *ch);
 void ipfw_destroy_srv(struct ip_fw_chain *ch);
+int ipfw_check_object_name_generic(const char *name);
 
 /* In ip_fw_table.c */
 struct table_info;
@@ -724,6 +726,23 @@ extern ipfw_nat_cfg_t *ipfw_nat_cfg_ptr;
 extern ipfw_nat_cfg_t *ipfw_nat_del_ptr;
 extern ipfw_nat_cfg_t *ipfw_nat_get_cfg_ptr;
 extern ipfw_nat_cfg_t *ipfw_nat_get_log_ptr;
+
+/* Helper functions for IP checksum adjustment */
+static __inline uint16_t
+cksum_add(uint16_t sum, uint16_t a)
+{
+	uint16_t res;
+
+	res = sum + a;
+	return (res + (res < a));
+}
+
+static __inline uint16_t
+cksum_adjust(uint16_t oldsum, uint16_t old, uint16_t new)
+{
+
+	return (~cksum_add(cksum_add(~oldsum, ~old), new));
+}
 
 #endif /* _KERNEL */
 #endif /* _IPFW2_PRIVATE_H */

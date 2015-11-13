@@ -119,15 +119,15 @@ VNET_DECLARE(u_long, in_ifaddrhmask);		/* mask for hash table */
 #define INADDR_HASH(x) \
 	(&V_in_ifaddrhashtbl[INADDR_HASHVAL(x) & V_in_ifaddrhmask])
 
-extern	struct rwlock in_ifaddr_lock;
+extern	struct rmlock in_ifaddr_lock;
 
-#define	IN_IFADDR_LOCK_ASSERT()	rw_assert(&in_ifaddr_lock, RA_LOCKED)
-#define	IN_IFADDR_RLOCK()	rw_rlock(&in_ifaddr_lock)
-#define	IN_IFADDR_RLOCK_ASSERT()	rw_assert(&in_ifaddr_lock, RA_RLOCKED)
-#define	IN_IFADDR_RUNLOCK()	rw_runlock(&in_ifaddr_lock)
-#define	IN_IFADDR_WLOCK()	rw_wlock(&in_ifaddr_lock)
-#define	IN_IFADDR_WLOCK_ASSERT()	rw_assert(&in_ifaddr_lock, RA_WLOCKED)
-#define	IN_IFADDR_WUNLOCK()	rw_wunlock(&in_ifaddr_lock)
+#define	IN_IFADDR_LOCK_ASSERT()	rm_assert(&in_ifaddr_lock, RA_LOCKED)
+#define	IN_IFADDR_RLOCK(t)	rm_rlock(&in_ifaddr_lock, (t))
+#define	IN_IFADDR_RLOCK_ASSERT()	rm_assert(&in_ifaddr_lock, RA_RLOCKED)
+#define	IN_IFADDR_RUNLOCK(t)	rm_runlock(&in_ifaddr_lock, (t))
+#define	IN_IFADDR_WLOCK()	rm_wlock(&in_ifaddr_lock)
+#define	IN_IFADDR_WLOCK_ASSERT()	rm_assert(&in_ifaddr_lock, RA_WLOCKED)
+#define	IN_IFADDR_WUNLOCK()	rm_wunlock(&in_ifaddr_lock)
 
 /*
  * Macro for finding the internet address structure (in_ifaddr)
@@ -161,18 +161,19 @@ do { \
  * Macro for finding the internet address structure (in_ifaddr) corresponding
  * to a given interface (ifnet structure).
  */
-#define IFP_TO_IA(ifp, ia)						\
+#define IFP_TO_IA(ifp, ia, t)						\
 	/* struct ifnet *ifp; */					\
 	/* struct in_ifaddr *ia; */					\
+	/* struct rm_priotracker *t; */					\
 do {									\
-	IN_IFADDR_RLOCK();						\
+	IN_IFADDR_RLOCK((t));						\
 	for ((ia) = TAILQ_FIRST(&V_in_ifaddrhead);			\
 	    (ia) != NULL && (ia)->ia_ifp != (ifp);			\
 	    (ia) = TAILQ_NEXT((ia), ia_link))				\
 		continue;						\
 	if ((ia) != NULL)						\
 		ifa_ref(&(ia)->ia_ifa);					\
-	IN_IFADDR_RUNLOCK();						\
+	IN_IFADDR_RUNLOCK((t));						\
 } while (0)
 
 /*
@@ -379,7 +380,7 @@ int	in_scrubprefix(struct in_ifaddr *, u_int);
 void	ip_input(struct mbuf *);
 void	ip_direct_input(struct mbuf *);
 void	in_ifadown(struct ifaddr *ifa, int);
-struct	mbuf	*ip_fastforward(struct mbuf *);
+struct	mbuf	*ip_tryforward(struct mbuf *);
 void	*in_domifattach(struct ifnet *);
 void	in_domifdetach(struct ifnet *, void *);
 
@@ -390,8 +391,6 @@ void	 in_rtalloc(struct route *ro, u_int fibnum);
 struct rtentry *in_rtalloc1(struct sockaddr *, int, u_long, u_int);
 void	 in_rtredirect(struct sockaddr *, struct sockaddr *,
 	    struct sockaddr *, int, struct sockaddr *, u_int);
-int	 in_rtrequest(int, struct sockaddr *,
-	    struct sockaddr *, struct sockaddr *, int, struct rtentry **, u_int);
 #endif /* _KERNEL */
 
 /* INET6 stuff */

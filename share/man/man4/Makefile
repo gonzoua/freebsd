@@ -96,6 +96,7 @@ MAN=	aac.4 \
 	cdce.4 \
 	ch.4 \
 	ciss.4 \
+	cloudabi.4 \
 	cm.4 \
 	cmx.4 \
 	${_coretemp.4} \
@@ -107,6 +108,7 @@ MAN=	aac.4 \
 	cxgb.4 \
 	cxgbe.4 \
 	cy.4 \
+	cyapa.4 \
 	da.4 \
 	dc.4 \
 	dcons.4 \
@@ -205,6 +207,7 @@ MAN=	aac.4 \
 	intpm.4 \
 	intro.4 \
 	${_io.4} \
+	${_ioat.4} \
 	ip.4 \
 	ip6.4 \
 	ipfirewall.4 \
@@ -215,11 +218,14 @@ MAN=	aac.4 \
 	ipw.4 \
 	ipwfw.4 \
 	isci.4 \
+	isl.4 \
 	ismt.4 \
 	isp.4 \
 	ispfw.4 \
 	iwi.4 \
 	iwifw.4 \
+	iwm.4 \
+	iwmfw.4 \
 	iwn.4 \
 	iwnfw.4 \
 	ixgb.4 \
@@ -305,7 +311,6 @@ MAN=	aac.4 \
 	ng_atm.4 \
 	ngatmbase.4 \
 	ng_atmllc.4 \
-	ng_bluetooth.4 \
 	ng_bpf.4 \
 	ng_bridge.4 \
 	ng_bt3c.4 \
@@ -373,6 +378,9 @@ MAN=	aac.4 \
 	oce.4 \
 	ohci.4 \
 	orm.4 \
+	ow.4 \
+	ow_temp.4 \
+	owc.4 \
 	${_padlock.4} \
 	pass.4 \
 	patm.4 \
@@ -388,6 +396,7 @@ MAN=	aac.4 \
 	${_pflog.4} \
 	${_pfsync.4} \
 	pim.4 \
+	pms.4 \
 	polling.4 \
 	ppbus.4 \
 	ppc.4 \
@@ -413,8 +422,6 @@ MAN=	aac.4 \
 	rndtest.4 \
 	route.4 \
 	rp.4 \
-	rsu.4 \
-	rsufw.4 \
 	rue.4 \
 	rum.4 \
 	run.4 \
@@ -580,6 +587,7 @@ MLINKS+=bwn.4 if_bwn.4
 MLINKS+=${_bxe.4} ${_if_bxe.4}
 MLINKS+=cas.4 if_cas.4
 MLINKS+=cdce.4 if_cdce.4
+MLINKS+=cloudabi.4 cloudabi64.4
 MLINKS+=crypto.4 cryptodev.4
 MLINKS+=cue.4 if_cue.4
 MLINKS+=cxgb.4 if_cxgb.4
@@ -624,6 +632,7 @@ MLINKS+=ipfirewall.4 ipaccounting.4 \
 MLINKS+=ipheth.4 if_ipheth.4
 MLINKS+=ipw.4 if_ipw.4
 MLINKS+=iwi.4 if_iwi.4
+MLINKS+=iwm.4 if_iwm.4
 MLINKS+=iwn.4 if_iwn.4
 MLINKS+=ixgb.4 if_ixgb.4
 MLINKS+=ixgbe.4 ix.4
@@ -658,11 +667,13 @@ MLINKS+=nge.4 if_nge.4
 MLINKS+=${_ntb.4} ${_if_ntb.4} \
 	${_ntb.4} ${_ntb_hw.4}
 MLINKS+=${_nxge.4} ${_if_nxge.4}
+MLINKS+=ow.4 onewire.4
 MLINKS+=patm.4 if_patm.4
 MLINKS+=pccbb.4 cbb.4
 MLINKS+=pcm.4 snd.4 \
 	pcm.4 sound.4
 MLINKS+=pcn.4 if_pcn.4
+MLINKS+=pms.4 pmspcv.4
 MLINKS+=ral.4 if_ral.4
 MLINKS+=re.4 if_re.4
 MLINKS+=rl.4 if_rl.4
@@ -791,6 +802,7 @@ _xnb.4=		xnb.4
 
 .if ${MACHINE_CPUARCH} == "amd64"
 _if_ntb.4=	if_ntb.4
+_ioat.4=	ioat.4
 _ntb.4=		ntb.4
 _ntb_hw.4=	ntb_hw.4
 _qlxge.4=	qlxge.4
@@ -814,6 +826,10 @@ _nvram2env.4=	nvram2env.4
 
 .if exists(${.CURDIR}/man4.${MACHINE_CPUARCH})
 SUBDIR=	man4.${MACHINE_CPUARCH}
+.endif
+
+.if ${MK_BLUETOOTH} != "no"
+MAN+=		ng_bluetooth.4
 .endif
 
 .if ${MK_CCD} != "no"
@@ -849,6 +865,10 @@ _pfsync.4=	pfsync.4
 
 .if ${MK_USB} != "no"
 MAN+=	\
+	otus.4 \
+	otusfw.4 \
+	rsu.4 \
+	rsufw.4 \
 	u3g.4 \
 	uark.4 \
 	uart.4 \
@@ -902,6 +922,8 @@ MAN+=	\
 	uvisor.4 \
 	uvscom.4 \
 
+MLINKS+=otus.4 if_otus.4
+MLINKS+=rsu.4 if_rsu.4
 MLINKS+=u3g.4 u3gstub.4
 MLINKS+=uath.4 if_uath.4
 MLINKS+=udav.4 if_udav.4
@@ -909,6 +931,7 @@ MLINKS+=upgt.4 if_upgt.4
 MLINKS+=ural.4 if_ural.4
 MLINKS+=urndis.4 if_urndis.4
 MLINKS+=${_urtw.4} ${_if_urtw.4}
+MLINKS+=urtwn.4 if_urtwn.4
 .endif
 
 .include <bsd.prog.mk>

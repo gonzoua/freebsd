@@ -1063,9 +1063,9 @@ vm_object_sync(vm_object_t object, vm_ooffset_t offset, vm_size_t size,
 			 */
 			flags = OBJPR_NOTMAPPED;
 		else if (old_msync)
-			flags = OBJPR_NOTWIRED;
+			flags = 0;
 		else
-			flags = OBJPR_CLEANONLY | OBJPR_NOTWIRED;
+			flags = OBJPR_CLEANONLY;
 		vm_object_page_remove(object, OFF_TO_IDX(offset),
 		    OFF_TO_IDX(offset + size + PAGE_MASK), flags);
 	}
@@ -1894,7 +1894,6 @@ vm_object_page_remove(vm_object_t object, vm_pindex_t start, vm_pindex_t end,
     int options)
 {
 	vm_page_t p, next;
-	int wirings;
 
 	VM_OBJECT_ASSERT_WLOCKED(object);
 	KASSERT((object->flags & OBJ_UNMANAGED) == 0 ||
@@ -1928,15 +1927,9 @@ again:
 			VM_OBJECT_WLOCK(object);
 			goto again;
 		}
-		if ((wirings = p->wire_count) != 0 &&
-		    (wirings = pmap_page_wired_mappings(p)) != p->wire_count) {
-			if ((options & (OBJPR_NOTWIRED | OBJPR_NOTMAPPED)) ==
-			    0) {
+		if (p->wire_count != 0) {
+			if ((options & OBJPR_NOTMAPPED) == 0)
 				pmap_remove_all(p);
-				/* Account for removal of wired mappings. */
-				if (wirings != 0)
-					p->wire_count -= wirings;
-			}
 			if ((options & OBJPR_CLEANONLY) == 0) {
 				p->valid = 0;
 				vm_page_undirty(p);
@@ -1957,19 +1950,8 @@ again:
 			if (p->dirty)
 				goto next;
 		}
-		if ((options & OBJPR_NOTMAPPED) == 0) {
-			if ((options & OBJPR_NOTWIRED) != 0 && wirings != 0)
-				goto next;
+		if ((options & OBJPR_NOTMAPPED) == 0)
 			pmap_remove_all(p);
-			/* Account for removal of wired mappings. */
-			if (wirings != 0) {
-				KASSERT(p->wire_count == wirings,
-				    ("inconsistent wire count %d %d %p",
-				    p->wire_count, wirings, p));
-				p->wire_count = 0;
-				atomic_subtract_int(&vm_cnt.v_wire_count, 1);
-			}
-		}
 		vm_page_free(p);
 next:
 		vm_page_unlock(p);
@@ -1981,15 +1963,15 @@ skipmemq:
 }
 
 /*
- *	vm_object_page_cache:
+ *	vm_object_page_noreuse:
  *
- *	For the given object, attempt to move the specified clean
- *	pages to the cache queue.  If a page is wired for any reason,
- *	then it will not be changed.  Pages are specified by the given
- *	range ["start", "end").  As a special case, if "end" is zero,
- *	then the range extends from "start" to the end of the object.
- *	Any mappings to the specified pages are removed before the
- *	pages are moved to the cache queue.
+ *	For the given object, attempt to move the specified pages to
+ *	the head of the inactive queue.  This bypasses regular LRU
+ *	operation and allows the pages to be reused quickly under memory
+ *	pressure.  If a page is wired for any reason, then it will not
+ *	be queued.  Pages are specified by the range ["start", "end").
+ *	As a special case, if "end" is zero, then the range extends from
+ *	"start" to the end of the object.
  *
  *	This operation should only be performed on objects that
  *	contain non-fictitious, managed pages.
@@ -1997,14 +1979,14 @@ skipmemq:
  *	The object must be locked.
  */
 void
-vm_object_page_cache(vm_object_t object, vm_pindex_t start, vm_pindex_t end)
+vm_object_page_noreuse(vm_object_t object, vm_pindex_t start, vm_pindex_t end)
 {
 	struct mtx *mtx, *new_mtx;
 	vm_page_t p, next;
 
 	VM_OBJECT_ASSERT_WLOCKED(object);
 	KASSERT((object->flags & (OBJ_FICTITIOUS | OBJ_UNMANAGED)) == 0,
-	    ("vm_object_page_cache: illegal object %p", object));
+	    ("vm_object_page_noreuse: illegal object %p", object));
 	if (object->resident_page_count == 0)
 		return;
 	p = vm_page_find_least(object, start);
@@ -2027,7 +2009,7 @@ vm_object_page_cache(vm_object_t object, vm_pindex_t start, vm_pindex_t end)
 			mtx = new_mtx;
 			mtx_lock(mtx);
 		}
-		vm_page_try_to_cache(p);
+		vm_page_deactivate_noreuse(p);
 	}
 	if (mtx != NULL)
 		mtx_unlock(mtx);

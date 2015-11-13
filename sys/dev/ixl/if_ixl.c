@@ -160,8 +160,10 @@ static void	ixl_free_mac_filters(struct ixl_vsi *vsi);
 
 
 /* Sysctl debug interface */
+#ifdef IXL_DEBUG_SYSCTL
 static int	ixl_debug_info(SYSCTL_HANDLER_ARGS);
 static void	ixl_print_debug_info(struct ixl_pf *);
+#endif
 
 /* The MSI/X Interrupt handlers */
 static void	ixl_intr(void *);
@@ -1141,7 +1143,8 @@ ixl_init_locked(struct ixl_pf *pf)
 	bcopy(IF_LLADDR(vsi->ifp), tmpaddr,
 	      I40E_ETH_LENGTH_OF_ADDRESS);
 	if (!cmp_etheraddr(hw->mac.addr, tmpaddr) && 
-	    i40e_validate_mac_addr(tmpaddr)) {
+	    (i40e_validate_mac_addr(tmpaddr) == I40E_SUCCESS)) {
+		ixl_del_filter(vsi, hw->mac.addr, IXL_VLAN_ANY);
 		bcopy(tmpaddr, hw->mac.addr,
 		    I40E_ETH_LENGTH_OF_ADDRESS);
 		ret = i40e_aq_mac_address_write(hw,
@@ -1151,6 +1154,8 @@ ixl_init_locked(struct ixl_pf *pf)
 			device_printf(dev, "LLA address"
 			 "change failed!!\n");
 			return;
+		} else {
+			ixl_add_filter(vsi, hw->mac.addr, IXL_VLAN_ANY);
 		}
 	}
 
@@ -4370,6 +4375,7 @@ ixl_do_adminq(void *context, int pending)
 	IXL_PF_UNLOCK(pf);
 }
 
+#ifdef IXL_DEBUG_SYSCTL
 static int
 ixl_debug_info(SYSCTL_HANDLER_ARGS)
 {
@@ -4434,6 +4440,7 @@ ixl_print_debug_info(struct ixl_pf *pf)
 	reg = rd32(hw, I40E_GLPRT_MLFC(hw->port));
 	 printf("mac local fault = %x\n", reg);
 }
+#endif
 
 /**
  * Update VSI-specific ethernet statistics counters.
@@ -5112,17 +5119,9 @@ ixl_sysctl_hw_res_alloc(SYSCTL_HANDLER_ARGS)
 	}
 
 	error = sbuf_finish(buf);
-	if (error) {
-		device_printf(dev, "Error finishing sbuf: %d\n", error);
-		sbuf_delete(buf);
-		return error;
-	}
-
-	error = sysctl_handle_string(oidp, sbuf_data(buf), sbuf_len(buf), req);
-	if (error)
-		device_printf(dev, "sysctl error: %d\n", error);
 	sbuf_delete(buf);
-	return error;
+
+	return (error);
 }
 
 /*
@@ -5229,15 +5228,6 @@ ixl_sysctl_switch_config(SYSCTL_HANDLER_ARGS)
 	sbuf_delete(nmbuf);
 
 	error = sbuf_finish(buf);
-	if (error) {
-		device_printf(dev, "Error finishing sbuf: %d\n", error);
-		sbuf_delete(buf);
-		return error;
-	}
-
-	error = sysctl_handle_string(oidp, sbuf_data(buf), sbuf_len(buf), req);
-	if (error)
-		device_printf(dev, "sysctl error: %d\n", error);
 	sbuf_delete(buf);
 
 	return (error);

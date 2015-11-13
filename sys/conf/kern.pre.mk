@@ -128,7 +128,7 @@ CFLAGS+=	${CONF_CFLAGS}
 LINTFLAGS=	${LINTOBJKERNFLAGS}
 
 NORMAL_C= ${CC} -c ${CFLAGS} ${WERROR} ${PROF} ${.IMPSRC}
-NORMAL_S= ${CC} -c ${ASM_CFLAGS} ${WERROR} ${.IMPSRC}
+NORMAL_S= ${CC:N${CCACHE_BIN}} -c ${ASM_CFLAGS} ${WERROR} ${.IMPSRC}
 PROFILE_C= ${CC} -c ${CFLAGS} ${WERROR} ${.IMPSRC}
 NORMAL_C_NOWERROR= ${CC} -c ${CFLAGS} ${PROF} ${.IMPSRC}
 
@@ -177,9 +177,13 @@ NORMAL_CTFCONVERT=	@:
 
 NORMAL_LINT=	${LINT} ${LINTFLAGS} ${CFLAGS:M-[DIU]*} ${.IMPSRC}
 
+# Linux Kernel Programming Interface C-flags
+LINUXKPI_INCLUDES=	-I$S/compat/linuxkpi/common/include
+LINUXKPI_C=		${NORMAL_C} ${LINUXKPI_INCLUDES}
+
 # Infiniband C flags.  Correct include paths and omit errors that linux
 # does not honor.
-OFEDINCLUDES=	-I$S/ofed/include/
+OFEDINCLUDES=	-I$S/ofed/include ${LINUXKPI_INCLUDES}
 OFEDNOERR=	-Wno-cast-qual -Wno-pointer-arith
 OFEDCFLAGS=	${CFLAGS:N-I*} ${OFEDINCLUDES} ${CFLAGS:M-I*} ${OFEDNOERR}
 OFED_C_NOIMP=	${CC} -c -o ${.TARGET} ${OFEDCFLAGS} ${WERROR} ${PROF}
@@ -191,6 +195,9 @@ SYSTEM_DEP= Makefile ${SYSTEM_OBJS}
 SYSTEM_OBJS= locore.o ${MDOBJS} ${OBJS}
 SYSTEM_OBJS+= ${SYSTEM_CFILES:.c=.o}
 SYSTEM_OBJS+= hack.So
+.if ${MFS_IMAGE:Uno} != "no"
+SYSTEM_OBJS+= embedfs_${MFS_IMAGE:T:R}.o
+.endif
 SYSTEM_LD= @${LD} -Bdynamic -T ${LDSCRIPT} ${_LDFLAGS} --no-warn-mismatch \
 	--warn-common --export-dynamic --dynamic-linker /red/herring \
 	-o ${.TARGET} -X ${SYSTEM_OBJS} vers.o
@@ -221,6 +228,32 @@ MKMODULESENV+=	MODULES_OVERRIDE="${MODULES_OVERRIDE}"
 MKMODULESENV+=	DEBUG_FLAGS="${DEBUG}"
 .endif
 MKMODULESENV+=	_MPATH="${_MPATH}"
+
+# Architecture and output format arguments for objdump to convert image to
+# object file
+.if ${MFS_IMAGE:Uno} != "no"
+
+.if !defined(EMBEDFS_FORMAT.${MACHINE_ARCH})
+EMBEDFS_FORMAT.${MACHINE_ARCH}!= awk -F'"' '/OUTPUT_FORMAT/ {print $$2}' ${LDSCRIPT}
+.if empty(EMBEDFS_FORMAT.${MACHINE_ARCH})
+.undef EMBEDFS_FORMAT.${MACHINE_ARCH}
+.endif
+.endif
+
+.if !defined(EMBEDFS_ARCH.${MACHINE_ARCH})
+EMBEDFS_ARCH.${MACHINE_ARCH}!= sed -n '/OUTPUT_ARCH/s/.*(\(.*\)).*/\1/p' ${LDSCRIPT}
+.if empty(EMBEDFS_ARCH.${MACHINE_ARCH})
+.undef EMBEDFS_ARCH.${MACHINE_ARCH}
+.endif
+.endif
+
+EMBEDFS_FORMAT.arm?=		elf32-littlearm
+EMBEDFS_FORMAT.armv6?=		elf32-littlearm
+EMBEDFS_FORMAT.mips?=		elf32-tradbigmips
+EMBEDFS_FORMAT.mipsel?=		elf32-tradlittlemips
+EMBEDFS_FORMAT.mips64?=		elf64-tradbigmips
+EMBEDFS_FORMAT.mips64el?=	elf64-tradlittlemips
+.endif
 
 # Detect kernel config options that force stack frames to be turned on.
 DDB_ENABLED!=	grep DDB opt_ddb.h || true ; echo
