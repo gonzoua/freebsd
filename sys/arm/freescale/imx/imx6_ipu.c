@@ -76,7 +76,7 @@ static int have_ipu = 0;
 #define	MODE_PIXEL_CLOCK_INVERT	1
 
 #define M(nm,hr,vr,clk,hs,he,ht,vs,ve,vt,f) \
-	{ clk, hr, hs, he, ht, vr, vs, ve, vt, f, nm } 
+	{ clk, hr, hs, he, ht, vr, vs, ve, vt, f, nm }
 
 static struct videomode mode1024x768 = M("1024x768x60",1024,768,65000,1048,1184,1344,771,777,806,VID_NHSYNC|VID_PHSYNC);
 
@@ -170,7 +170,6 @@ static struct videomode mode1024x768 = M("1024x768x60",1024,768,65000,1048,1184,
 #define	DC_MAP_CONF_15		0x00258144
 #define	DC_MAP_CONF_VAL(map)	(DC_MAP_CONF_15 + ((map)/2)*sizeof(uint32_t))
 #define	DC_MAP_CONF_PTR(ptr)	(DC_MAP_CONF_0 + ((ptr)/2)*sizeof(uint32_t))
-
 
 struct ipu_cpmem_word {
 	uint32_t	data[5];
@@ -308,7 +307,7 @@ struct ipu_softc {
 };
 
 #if 0
-static void 
+static void
 dump_registers(struct ipu_softc *sc, uint32_t addr, int size)
 {
 	int i, zero;
@@ -425,16 +424,15 @@ ipu_print_channel(struct ipu_cpmem_ch_param *param)
 	for (int i = 0; offset0[i+1] != -1; i++) {
 		int len = offset0[i+1] - offset0[i];
 		printf("W0[%d:%d] = %d\n", offset0[i],
-			offset0[i] + len - 1, 
+			offset0[i] + len - 1,
 			ipu_ch_param_get_value(param, 0, offset0[i], len)
 			);
 	}
 
-
 	for (int i = 0; offset1[i+1] != -1; i++) {
 		int len = offset1[i+1] - offset1[i];
 		printf("W1[%d:%d] = %d\n", offset1[i],
-			offset1[i] + len - 1, 
+			offset1[i] + len - 1,
 			ipu_ch_param_get_value(param, 1, offset1[i], len)
 			);
 	}
@@ -626,7 +624,6 @@ ipu_config_timing(struct ipu_softc *sc, int di)
 
 	imx_ccm_ldb_configure(0);
 
-
 	/* Setup wave generator */
 	dw_gen_offset = di ? IPU_DI1_DW_GEN_0 : IPU_DI0_DW_GEN_0;
 	dw_gen = IPU_READ4(sc, dw_gen_offset);
@@ -718,7 +715,6 @@ ipu_config_timing(struct ipu_softc *sc, int di)
 
 	printf("%08x (XXX)\n", gen);
 	IPU_WRITE4(sc, gen_offset, gen);
-
 
 	as_gen_offset = di ?  IPU_DI1_SYNC_AS_GEN : IPU_DI0_SYNC_AS_GEN;
 	as_gen = IPU_READ4(sc, as_gen_offset);
@@ -826,7 +822,6 @@ ipu_dc_setup_map(struct ipu_softc *sc, int map,
 	IPU_WRITE4(sc, DC_MAP_CONF_PTR(map), reg);
 }
 
-
 static void
 ipu_dc_reset_map(struct ipu_softc *sc, int map)
 {
@@ -852,7 +847,6 @@ ipu_dc_init(struct ipu_softc *sc)
 	else
 		addr = 5;
 
-
 	ipu_dc_link_event(sc, DC_EVENT_NL, addr, 3);
 	ipu_dc_link_event(sc, DC_EVENT_EOL, addr+1, 2);
 	ipu_dc_link_event(sc, DC_EVENT_NEW_DATA, addr+2, 1);
@@ -866,11 +860,11 @@ ipu_dc_init(struct ipu_softc *sc)
 	conf = 0x02; /* W_SIZE */
         conf |= DI_PORT << 3; /* PROG_DISP_ID */
 	conf |= DI_PORT << 2; /* PROG_DI_ID */
-	printf("DC_WRITE_CH_CONF_5: %08x -> %08x\n", 
+	printf("DC_WRITE_CH_CONF_5: %08x -> %08x\n",
 		IPU_READ4(sc, DC_WRITE_CH_CONF_5), conf);
-	printf("DC_WRITE_CH_ADDR_5: %08x -> 0x00000000\n", 
+	printf("DC_WRITE_CH_ADDR_5: %08x -> 0x00000000\n",
 		IPU_READ4(sc, DC_WRITE_CH_ADDR_5));
-	printf("DC_GEN: %08x -> 0x00000084\n", 
+	printf("DC_GEN: %08x -> 0x00000084\n",
 		IPU_READ4(sc, DC_GEN));
 
 	IPU_WRITE4(sc, DC_WRITE_CH_CONF_5, conf);
@@ -1120,7 +1114,6 @@ static int
 ipu_attach(device_t dev)
 {
 	struct ipu_softc *sc;
-
 
 	if (have_ipu)
 		return (ENXIO);
