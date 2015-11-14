@@ -22,7 +22,7 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- * 
+ *
  * $FreeBSD$
  */
 
@@ -92,7 +92,6 @@
 #define		HDMI_VP_PR_CD_COLOR_DEPTH_OFFSET	4
 #define		HDMI_VP_PR_CD_DESIRED_PR_FACTOR_MASK	0x0F
 #define		HDMI_VP_PR_CD_DESIRED_PR_FACTOR_OFFSET	0
-
 
 #define	HDMI_VP_STUFF                           0x0802
 #define		HDMI_VP_STUFF_IDEFAULT_PHASE_MASK		0x20
@@ -406,8 +405,6 @@
 #define	HDMI_FC_DBGTMDS1                        0x121A
 #define	HDMI_FC_DBGTMDS2                        0x121B
 
-
-
 #define	HDMI_PHY_CONF0		0x00003000
 #define		HDMI_PHY_CONF0_PDZ_MASK			0x80
 #define		HDMI_PHY_CONF0_PDZ_OFFSET		7
@@ -550,8 +547,6 @@
 #define	HDMI_A_PRESETUP                         0x501A
 #define	HDMI_A_SRM_BASE                         0x5020
 
-
-
 /* CEC Engine Registers */
 #define	HDMI_CEC_CTRL                           0x7D00
 #define	HDMI_CEC_STAT                           0x7D01
@@ -596,9 +591,6 @@
 #define	HDMI_CEC_RX_DATA15                      0x7D2f
 #define	HDMI_CEC_LOCK                           0x7D30
 #define	HDMI_CEC_WKUPCTRL                       0x7D31
-
-
-
 
 /* I2C Master Registers (E-DDC) */
 #define	HDMI_I2CM_SLAVE                         0x7E00
