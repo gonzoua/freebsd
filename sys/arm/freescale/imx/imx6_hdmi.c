@@ -49,9 +49,9 @@ __FBSDID("$FreeBSD$");
 #include <dev/iicbus/iicbus.h>
 #include <dev/iicbus/iiconf.h>
 
-#include <arm/freescale/imx/imx6_hdmi_regs.h>
-
+#include <arm/freescale/imx/imx_ccmvar.h>
 #include <arm/freescale/imx/imx_iomuxvar.h>
+#include <arm/freescale/imx/imx6_hdmi_regs.h>
 
 #include "hdmi_if.h"
 
@@ -693,6 +693,8 @@ imx_hdmi_attach(device_t dev)
 
 	sc->sc_edid = malloc(EDID_LENGTH, M_DEVBUF, M_WAITOK | M_ZERO);
 	sc->sc_edid_len = EDID_LENGTH;
+
+	imx_ccm_hdmi_enable();
 
 	device_printf(sc->sc_dev, "HDMI controller %02x:%02x:%02x:%02x\n",
 	    RD1(sc, HDMI_DESIGN_ID), RD1(sc, HDMI_REVISION_ID),

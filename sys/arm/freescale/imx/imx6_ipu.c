@@ -1064,7 +1064,8 @@ ipu_attach(device_t dev)
 		return (ENXIO);
 	}
 
-	imx_ccm_ipu_ctrl(1);
+	/* Enable IPU1 */
+	imx_ccm_ipu_enable(1);
 
 #if 0
 	dump_registers(sc, DC_TEMPL_BASE, 16*4);
@@ -1074,8 +1075,6 @@ ipu_attach(device_t dev)
 		device_printf(dev, "failed to reset IPU\n");
 		return (ENXIO);
 	}
-
-	imx_ccm_ipu_ctrl(1);
 
 #if 0
 	dump_registers(sc, DC_TEMPL_BASE, 16*4);

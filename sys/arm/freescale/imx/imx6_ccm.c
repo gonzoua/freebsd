@@ -124,16 +124,6 @@ ccm_init_gates(struct ccm_softc *sc)
 	reg = CCGR6_USBOH3 | CCGR6_USDHC1 | CCGR6_USDHC2 |
 	    CCGR6_USDHC3 | CCGR6_USDHC4;
 	WR4(sc, CCM_CCGR6, reg);
-
-	/* Set HDMI clock to 280MHz */
-	reg = RD4(sc, CCM_CHSCCDR);
-	reg &= ~(CHSCCDR_IPU1_DI0_PRE_CLK_SEL_MASK |
-	    CHSCCDR_IPU1_DI0_PODF_MASK | CHSCCDR_IPU1_DI0_CLK_SEL_MASK);
-	reg |= (CHSCCDR_PODF_DIVIDE_BY_3 << CHSCCDR_IPU1_DI0_PODF_SHIFT);
-	reg |= (CHSCCDR_IPU_PRE_CLK_540M_PFD << CHSCCDR_IPU1_DI0_PRE_CLK_SEL_SHIFT);
-	WR4(sc, CCM_CHSCCDR, reg);
-	reg |= (CHSCCDR_CLK_SEL_LDB_DI0 << CHSCCDR_IPU1_DI0_CLK_SEL_SHIFT);
-	WR4(sc, CCM_CHSCCDR, reg);
 }
 
 static int
@@ -359,13 +349,40 @@ imx_ccm_ahb_hz(void)
 }
 
 void
-imx_ccm_ipu_ctrl(int enable)
+imx_ccm_ipu_enable(int ipu)
 {
 	struct ccm_softc *sc;
 	uint32_t reg;
 
 	sc = ccm_sc;
 	reg = RD4(sc, CCM_CCGR3);
+	if (ipu == 1)
+		reg |= CCGR3_IPU1_IPU | CCGR3_IPU1_DI0;
+	else
+		reg |= CCGR3_IPU2_IPU | CCGR3_IPU2_DI0;
+	WR4(sc, CCM_CCGR3, reg);
+}
+
+void
+imx_ccm_hdmi_enable()
+{
+	struct ccm_softc *sc;
+	uint32_t reg;
+
+	sc = ccm_sc;
+	reg = RD4(sc, CCM_CCGR2);
+	reg |= CCGR2_HDMI_TX | CCGR2_HDMI_TX_ISFR;
+	WR4(sc, CCM_CCGR2, reg);
+
+	/* Set HDMI clock to 280MHz */
+	reg = RD4(sc, CCM_CHSCCDR);
+	reg &= ~(CHSCCDR_IPU1_DI0_PRE_CLK_SEL_MASK |
+	    CHSCCDR_IPU1_DI0_PODF_MASK | CHSCCDR_IPU1_DI0_CLK_SEL_MASK);
+	reg |= (CHSCCDR_PODF_DIVIDE_BY_3 << CHSCCDR_IPU1_DI0_PODF_SHIFT);
+	reg |= (CHSCCDR_IPU_PRE_CLK_540M_PFD << CHSCCDR_IPU1_DI0_PRE_CLK_SEL_SHIFT);
+	WR4(sc, CCM_CHSCCDR, reg);
+	reg |= (CHSCCDR_CLK_SEL_LDB_DI0 << CHSCCDR_IPU1_DI0_CLK_SEL_SHIFT);
+	WR4(sc, CCM_CHSCCDR, reg);
 }
 
 uint32_t
