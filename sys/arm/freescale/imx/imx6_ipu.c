@@ -378,6 +378,7 @@ ipu_ch_param_set_value(struct ipu_cpmem_ch_param *param,
 	}
 }
 
+#ifdef DEBUG
 static uint32_t
 ipu_ch_param_get_value(struct ipu_cpmem_ch_param *param,
     int word, int offset, int len)
@@ -406,7 +407,6 @@ ipu_ch_param_get_value(struct ipu_cpmem_ch_param *param,
 	return (data);
 }
 
-#ifdef DEBUG
 static void
 ipu_print_channel(struct ipu_cpmem_ch_param *param)
 {
@@ -465,22 +465,7 @@ ipu_di_enable(struct ipu_softc *sc, int di)
 
 	flag = di ? DISP_GEN_DI1_CNTR_RELEASE : DISP_GEN_DI0_CNTR_RELEASE;
 	reg = IPU_READ4(sc, IPU_DISP_GEN);
-	printf("DISP_GEN: %08x -> ", reg);
 	reg |= flag;
-	printf("%08x\n", reg);
-	IPU_WRITE4(sc, IPU_DISP_GEN, reg);
-}
-
-static void
-ipu_di_disable(struct ipu_softc *sc, int di)
-{
-	uint32_t flag, reg;
-
-	flag = di ? DISP_GEN_DI1_CNTR_RELEASE : DISP_GEN_DI0_CNTR_RELEASE;
-	reg = IPU_READ4(sc, IPU_DISP_GEN);
-	printf("DISP_GEN: %08x -> ", reg);
-	reg &= ~flag;
-	printf("%08x\n", reg);
 	IPU_WRITE4(sc, IPU_DISP_GEN, reg);
 }
 
@@ -494,11 +479,9 @@ ipu_config_wave_gen_0(struct ipu_softc *sc, int di,
 	addr = (di ? IPU_DI1_SW_GEN0_1 : IPU_DI0_SW_GEN0_1)
 	    + (wave_gen-1)*sizeof(uint32_t);
 	reg = IPU_READ4(sc, addr);
-	printf("DI0_SW_GEN0_%d %08x -> ", wave_gen, reg);
 	reg = (run_value << 19) | (run_res << 16) |
 	    (offset_value << 3) | offset_res;
 	IPU_WRITE4(sc, addr, reg);
-	printf("%08x\n", reg);
 }
 
 static void
@@ -514,19 +497,16 @@ ipu_config_wave_gen_1(struct ipu_softc *sc, int di, int wave_gen,
 	addr = (di ? IPU_DI1_SW_GEN1_1 : IPU_DI0_SW_GEN1_1)
 	    + (wave_gen-1)*sizeof(uint32_t);
 	reg = IPU_READ4(sc, addr);
-	printf("DI0_SW_GEN1_%d %08x -> ", wave_gen, reg);
 	reg = (cnt_polarity_gen_en << 29) | (cnt_clr_src << 25)
 	    | (cnt_polarity_trigger_src << 12) | (cnt_polarity_clr_src << 9);
 	reg |= (cnt_down << 16) | cnt_up;
 	if (repeat_count == 0)
 		reg |= (1 << 28);
 	IPU_WRITE4(sc, addr, reg);
-	printf("%08x\n", reg);
 
 	addr = (di ? IPU_DI1_STP_REP : IPU_DI0_STP_REP)
 	    + (wave_gen-1)/2*sizeof(uint32_t);
 	reg = IPU_READ4(sc, addr);
-	printf("IPU_DI1_STP_REP%d %08x -> ", wave_gen/2 + 1, reg);
 	if (wave_gen % 2) {
 		reg &= ~(0xffff);
 		reg |= repeat_count;
@@ -535,7 +515,6 @@ ipu_config_wave_gen_1(struct ipu_softc *sc, int di, int wave_gen,
 		reg &= ~(0xffff << 16);
 		reg |= (repeat_count << 16);
 	}
-	printf("%08x\n", reg);
 	IPU_WRITE4(sc, addr, reg);
 }
 
@@ -592,8 +571,6 @@ ipu_init_micorcode_template(struct ipu_softc *sc, int di, int map)
 		w2 |= (1 << 9); /* Stop */
 
 		addr = DC_TEMPL_BASE + (word+i)*2*sizeof(uint32_t);
-		printf("W1[%d] %08x -> %08x\n", word, IPU_READ4(sc, addr), w1);
-		printf("W2[%d] %08x -> %08x\n", word, IPU_READ4(sc, addr + sizeof(uint32_t)), w2);
 		IPU_WRITE4(sc, addr, w1);
 		IPU_WRITE4(sc, addr + sizeof(uint32_t), w2);
 	}
@@ -617,8 +594,6 @@ ipu_config_timing(struct ipu_softc *sc, int di)
 	map = 0;
 
 	bs_clkgen_offset = di ? IPU_DI1_BS_CLKGEN0 : IPU_DI0_BS_CLKGEN0;
-	printf("DI_BS_CLKGEN0: %08x\n", IPU_READ4(sc, bs_clkgen_offset));
-	printf("DI_BS_CLKGEN1: %08x\n", IPU_READ4(sc, bs_clkgen_offset + 4));
 	IPU_WRITE4(sc, bs_clkgen_offset, (div * 16));
 	IPU_WRITE4(sc, bs_clkgen_offset + 4, (div << 16));
 
@@ -627,18 +602,14 @@ ipu_config_timing(struct ipu_softc *sc, int di)
 	/* Setup wave generator */
 	dw_gen_offset = di ? IPU_DI1_DW_GEN_0 : IPU_DI0_DW_GEN_0;
 	dw_gen = IPU_READ4(sc, dw_gen_offset);
-	printf("DW_GEN: %08x -> ", dw_gen);
 	dw_gen = ((div - 1) << 24) | ((div - 1) << 16);
 	dw_gen &= ~(3 << 8); /* pin15  */
 	dw_gen |= (3 << 8); /* pin15, set 3 */
-	printf("%08x\n", dw_gen);
 	IPU_WRITE4(sc, dw_gen_offset, dw_gen);
 
 	dw_set_offset = di ? IPU_DI1_DW_SET3_0 : IPU_DI0_DW_SET3_0;
 	dw_set = IPU_READ4(sc, dw_set_offset);
-	printf("DW_SET: %08x -> ", dw_set);
 	dw_set = (div*2 << 16) | 0;
-	printf("%08x\n", dw_set);
 	IPU_WRITE4(sc, dw_set_offset, dw_set);
 
 	div = 0;
@@ -693,7 +664,6 @@ ipu_config_timing(struct ipu_softc *sc, int di)
 
 	gen_offset = di ?  IPU_DI1_GENERAL : IPU_DI0_GENERAL;
 	gen = IPU_READ4(sc, gen_offset);
-	printf("DI_GENERAL: %08x -> ", gen);
 
 	if (sc->sc_mode->flags & VID_NHSYNC)
 		gen &= ~DI_GENERAL_POLARITY_2;
@@ -713,14 +683,11 @@ ipu_config_timing(struct ipu_softc *sc, int di)
 	/* User LDB clock to drive pixel clock */
 	gen |= 0x00100000;
 
-	printf("%08x (XXX)\n", gen);
 	IPU_WRITE4(sc, gen_offset, gen);
 
 	as_gen_offset = di ?  IPU_DI1_SYNC_AS_GEN : IPU_DI0_SYNC_AS_GEN;
 	as_gen = IPU_READ4(sc, as_gen_offset);
-	printf("SYNC_AS_GEN: %08x -> ", as_gen);
 	as_gen = ((DI_COUNTER_VSYNC-1) << 13) | 2;
-	printf("%08x\n", as_gen);
 	IPU_WRITE4(sc, as_gen_offset, as_gen);
 
 	IPU_WRITE4(sc, (di ? IPU_DI1_POL : IPU_DI0_POL), 0x10);
@@ -737,38 +704,11 @@ ipu_dc_enable(struct ipu_softc *sc)
 	IPU_WRITE4(sc, DC_WRITE_CH_CONF_1, 0x00000004);
 
 	conf = IPU_READ4(sc, DC_WRITE_CH_CONF_5);
-	printf("CONF: %08x -> ", conf);
 	conf &= ~(7 << 5); /* PROG_CHAN_TYP */
 	conf |= 4 << 5; /* ENABLED */
 	IPU_WRITE4(sc, DC_WRITE_CH_CONF_5, conf);
-	printf("%08x\n", conf);
 
 	/* TODO: enable clock */
-}
-
-static void
-ipu_dc_disable(struct ipu_softc *sc)
-{
-	uint32_t conf, reg;
-
-	/* TODO: wait for DC_STAT cleared */
-
-	conf = IPU_READ4(sc, DC_WRITE_CH_CONF_5);
-	printf("CONF: %08x -> ", conf);
-	conf &= ~(7 << 5); /* PROG_CHAN_TYP/DISABLE */
-	IPU_WRITE4(sc, DC_WRITE_CH_CONF_5, conf);
-	printf("%08x\n", conf);
-
-	reg = IPU_READ4(sc, IPU_DISP_GEN);
-	printf("DISP_GEN: %08x -> ", reg);
-	if (DI_PORT)
-		reg &= ~DISP_GEN_DI1_CNTR_RELEASE;
-	else
-		reg &= ~DISP_GEN_DI0_CNTR_RELEASE;
-	printf("%08x\n", reg);
-	IPU_WRITE4(sc, IPU_DISP_GEN, reg);
-
-	/* TODO: disable clock */
 }
 
 static void
@@ -800,25 +740,21 @@ ipu_dc_setup_map(struct ipu_softc *sc, int map,
 	ptr = map*3 + byte;
 
 	reg = IPU_READ4(sc, DC_MAP_CONF_VAL(ptr));
-	printf("DC_MAP_CONF_VAL[%08x]: %08x -> ", DC_MAP_CONF_VAL(ptr), reg);
 	if (ptr & 1)
 		shift = 16;
 	else
 		shift = 0;
 	reg &= ~(0xffff << shift);
 	reg |= ((offset << 8) | mask) << shift;
-	printf("%08x\n", reg);
 	IPU_WRITE4(sc, DC_MAP_CONF_VAL(ptr), reg);
 
 	reg = IPU_READ4(sc, DC_MAP_CONF_PTR(map));
-	printf("DC_MAP_CONF_PTR[%08x]: %08x -> ", DC_MAP_CONF_PTR(map), reg);
 	if (map & 1)
 		shift = 16  + 5*byte;
 	else
 		shift = 5*byte;
 	reg &= ~(0x1f << shift);
 	reg |= (ptr) << shift;
-	printf("%08x\n", reg);
 	IPU_WRITE4(sc, DC_MAP_CONF_PTR(map), reg);
 }
 
@@ -827,12 +763,10 @@ ipu_dc_reset_map(struct ipu_softc *sc, int map)
 {
 	uint32_t reg;
 	reg = IPU_READ4(sc, DC_MAP_CONF_PTR(map));
-	printf("DC_MAP_CONF[%d]: %08x -> ", map, reg);
 	if (map & 1)
 		reg &= 0x0000ffff;
 	else
 		reg &= 0xffff0000;
-	printf(" -> %08x\n", reg);
 	IPU_WRITE4(sc, DC_MAP_CONF_PTR(map), reg);
 }
 
@@ -860,12 +794,6 @@ ipu_dc_init(struct ipu_softc *sc)
 	conf = 0x02; /* W_SIZE */
         conf |= DI_PORT << 3; /* PROG_DISP_ID */
 	conf |= DI_PORT << 2; /* PROG_DI_ID */
-	printf("DC_WRITE_CH_CONF_5: %08x -> %08x\n",
-		IPU_READ4(sc, DC_WRITE_CH_CONF_5), conf);
-	printf("DC_WRITE_CH_ADDR_5: %08x -> 0x00000000\n",
-		IPU_READ4(sc, DC_WRITE_CH_ADDR_5));
-	printf("DC_GEN: %08x -> 0x00000084\n",
-		IPU_READ4(sc, DC_GEN));
 
 	IPU_WRITE4(sc, DC_WRITE_CH_CONF_5, conf);
 	IPU_WRITE4(sc, DC_WRITE_CH_ADDR_5, 0x00000000);
@@ -936,28 +864,23 @@ ipu_init_buffer(struct ipu_softc *sc)
 	}
 
 	reg = IPU_READ4(sc, db_mode_sel);
-	printf("DB_MODE_SEL %08x: %08x -> ", db_mode_sel, reg);
 	reg |= (1UL << (DMA_CHANNEL & 0x1f));
 	IPU_WRITE4(sc, db_mode_sel, reg);
-	printf("%08x\n", reg);
 
 	IPU_WRITE4(sc, cur_buf, (1UL << (DMA_CHANNEL & 0x1f)));
-
 }
 
 static int
 ipu_init(struct ipu_softc *sc)
 {
-	uint32_t reg;
-	int err;
+	uint32_t reg, off;
+	int i, err;
 	size_t dma_size;
 
 	reg = IPU_READ4(sc, IPU_CONF);
-	printf("IPU_CONF == %08x\n", reg);
 
 	IPU_WRITE4(sc, IPU_CONF, 0x00000040);
 
-	int i;
 	IPU_WRITE4(sc, IPU_MEM_RST, 0x807FFFFF);
 	i = 1000;
 	while (i-- > 0) {
@@ -1025,13 +948,9 @@ ipu_init(struct ipu_softc *sc)
 	ipu_di_enable(sc, DI_PORT);
 
 	/* Enable DMA channel */
-	uint32_t off = (DMA_CHANNEL > 31) ? IPU_IDMAC_CH_EN_2 : IPU_IDMAC_CH_EN_1;
+	off = (DMA_CHANNEL > 31) ? IPU_IDMAC_CH_EN_2 : IPU_IDMAC_CH_EN_1;
 	reg = IPU_READ4(sc, off);
-	printf("%08x: %08x\n", IPU_IDMAC_CH_EN_1, IPU_READ4(sc, IPU_IDMAC_CH_EN_1));
-	printf("%08x: %08x\n", IPU_IDMAC_CH_EN_2, IPU_READ4(sc, IPU_IDMAC_CH_EN_2));
-	printf("%08x: %08x -> ", off, reg);
 	reg |= (1 << (DMA_CHANNEL & 0x1f));
-	printf("%08x\n", reg);
 	IPU_WRITE4(sc, off, reg);
 
 	ipu_dc_enable(sc);
