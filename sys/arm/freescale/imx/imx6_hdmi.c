@@ -272,7 +272,7 @@ imx_hdmi_phy_sel_interface_control(struct imx_hdmi_softc *sc, uint8_t enable)
 	imx_hdmi_write_1(HDMI_PHY_CONF0, reg);
 }
 
-static inline void 
+static inline void
 imx_hdmi_phy_test_clear(struct imx_hdmi_softc *sc, unsigned char bit)
 {
 	uint8_t val;
@@ -283,7 +283,6 @@ imx_hdmi_phy_test_clear(struct imx_hdmi_softc *sc, unsigned char bit)
 		HDMI_PHY_TST0_TSTCLR_MASK;
 	imx_hdmi_write_1(HDMI_PHY_TST0, val);
 }
-
 
 static void imx_hdmi_clear_overflow(struct imx_hdmi_softc *sc)
 {
@@ -298,7 +297,6 @@ static void imx_hdmi_clear_overflow(struct imx_hdmi_softc *sc)
 	for (count = 0 ; count < 5 ; count++)
 		imx_hdmi_write_1(HDMI_FC_INVIDCONF, val);
 }
-
 
 static int imx_hdmi_phy_configure(struct imx_hdmi_softc *sc)
 {
@@ -548,9 +546,9 @@ imx_hdmi_set_mode(struct imx_hdmi_softc *sc)
 	imx_hdmi_av_composer(sc);
 	imx_hdmi_phy_init(sc);
 	imx_hdmi_enable_video_path(sc);
-	// TODO: AVI infoframes 
+	/* TODO: AVI infoframes */
 	imx_hdmi_video_packetize(sc);
-	// imx_hdmi_video_csc(sc);
+	/* TODO:  imx_hdmi_video_csc(sc); */
 	imx_hdmi_video_sample(sc);
 	imx_hdmi_clear_overflow(sc);
 
@@ -597,15 +595,6 @@ hdmi_edid_read(struct imx_hdmi_softc *sc, uint8_t **edid, uint32_t *edid_len)
 		*edid_len = sc->sc_edid_len;
 		*edid = sc->sc_edid;
 	}
-#if 0
-	for (i = 0; i < EDID_LENGTH; i++) {
-		printf("%02x ", edid[i]);
-		if ((i % 0x10) == 0xf) {
-			printf("\n");
-		}
-	}
-	printf("\n");
-#endif
 
 	return (result);
 }
@@ -626,8 +615,6 @@ imx_hdmi_intr(void *arg)
 {
 	panic("INTERRUPT");
 }
-
-
 
 static int
 imx_hdmi_detach(device_t dev)
@@ -701,14 +688,14 @@ imx_hdmi_attach(device_t dev)
 	if (OF_getencprop(node, "ddc-i2c-bus", &i2c_xref, sizeof(i2c_xref)) == -1)
 		sc->sc_i2c_xref = 0;
 	else
-		sc->sc_i2c_xref = i2c_xref; 
+		sc->sc_i2c_xref = i2c_xref;
 
 	err = 0;
 
 	sc->sc_edid = malloc(EDID_LENGTH, M_DEVBUF, M_WAITOK | M_ZERO);
 	sc->sc_edid_len = EDID_LENGTH;
 
-	device_printf(sc->sc_dev, "HDMI controller %02x:%02x:%02x:%02x\n", 
+	device_printf(sc->sc_dev, "HDMI controller %02x:%02x:%02x:%02x\n",
 	    RD1(sc, HDMI_DESIGN_ID), RD1(sc, HDMI_REVISION_ID),
 	    RD1(sc, HDMI_PRODUCT_ID0), RD1(sc, HDMI_PRODUCT_ID1));
 
@@ -716,10 +703,8 @@ imx_hdmi_attach(device_t dev)
 	disp_id = 0;
 
 	gpr3 = imx_iomux_gpr_get(12);
-	printf("GPR3 %08x -> ", gpr3);
 	gpr3 &= ~0x0d;
 	gpr3 |= ((ipu_id << 1) | disp_id) << 2;
-	printf("%08x\n", gpr3);
 	imx_iomux_gpr_set(12, gpr3);
 
 	WR1(sc, HDMI_PHY_POL0, HDMI_PHY_HPD);
