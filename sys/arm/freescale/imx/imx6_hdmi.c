@@ -604,7 +604,7 @@ imx_hdmi_detect_cable(void *arg)
 	struct imx_hdmi_softc *sc;
 
 	sc = arg;
-	EVENTHANDLER_INVOKE(hdmi_event, sc->sc_dev);
+	EVENTHANDLER_INVOKE(hdmi_event, sc->sc_dev, HDMI_EVENT_CONNECTED);
 	/* Finished with the interrupt hook */
 	config_intrhook_disestablish(&sc->sc_mode_hook);
 }
