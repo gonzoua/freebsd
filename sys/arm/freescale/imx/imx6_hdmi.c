@@ -53,7 +53,6 @@ __FBSDID("$FreeBSD$");
 
 #include <arm/freescale/imx/imx_iomuxvar.h>
 
-#include <arm/ti/am335x/hdmi.h>
 #include "hdmi_if.h"
 
 #define	I2C_DDC_ADDR	(0x50 << 1)
