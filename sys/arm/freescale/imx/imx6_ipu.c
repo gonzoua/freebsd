@@ -597,7 +597,13 @@ ipu_config_timing(struct ipu_softc *sc, int di)
 	IPU_WRITE4(sc, bs_clkgen_offset, (div * 16));
 	IPU_WRITE4(sc, bs_clkgen_offset + 4, (div << 16));
 
-	imx_ccm_ldb_configure(0);
+	/*
+	 * TODO: Configure LLDB clock by changing following fields
+	 * in CCM fields:
+	 * 	CS2CDR_LDB_DI0_CLK_SEL
+	 * 	CSCMR2_LDB_DI0_IPU_DIV
+	 * 	CBCDR_MMDC_CH1_AXI_PODF
+	 */
 
 	/* Setup wave generator */
 	dw_gen_offset = di ? IPU_DI1_DW_GEN_0 : IPU_DI0_DW_GEN_0;
