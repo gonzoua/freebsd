@@ -61,6 +61,8 @@ __FBSDID("$FreeBSD$");
 #include "fb_if.h"
 #include "hdmi_if.h"
 
+#undef EDID_DEBUG
+
 static int have_ipu = 0;
 
 #define	LDB_CLOCK_RATE	280000000
@@ -305,36 +307,6 @@ struct ipu_softc {
 	/* HDMI */
 	eventhandler_tag	sc_hdmi_evh;
 };
-
-#if 0
-static void
-dump_registers(struct ipu_softc *sc, uint32_t addr, int size)
-{
-	int i, zero;
-	zero = 0;
-	for (i = addr; i < addr + size; i += 16) {
-		uint32_t r1, r2, r3, r4;
-		r1 = IPU_READ4(sc, i);
-		r2 = IPU_READ4(sc, i + 4);
-		r3 = IPU_READ4(sc, i + 8);
-		r4 = IPU_READ4(sc, i + 12);
-		if (r1 || r2 || r3 || r4) {
-			if (zero) {
-				printf("...\n");
-				zero = 0;
-			}
-		}
-		else
-			zero = 1;
-		if (!zero)
-			printf("[%08x]: %08x %08x %08x %08x\n", i,
-				r1, r2, r3, r4);
-	}
-
-	if (zero)
-		printf("...\n");
-}
-#endif
 
 static void
 ipu_dmamap_cb(void *arg, bus_dma_segment_t *segs, int nseg, int err)
@@ -1006,10 +978,12 @@ ipu_hdmi_event(void *arg, device_t hdmi_dev)
 
 	videomode = NULL;
 
+#ifdef EDID_DEBUG
 	if ( edid && (edid_parse(edid, &ei) == 0)) {
 		edid_print(&ei);
 	} else
 		device_printf(sc->sc_dev, "failed to parse EDID\n");
+#endif
 
 	sc->sc_mode = &mode1024x768;
 	ipu_init(sc);
@@ -1067,31 +1041,10 @@ ipu_attach(device_t dev)
 	/* Enable IPU1 */
 	imx_ccm_ipu_enable(1);
 
-#if 0
-	dump_registers(sc, DC_TEMPL_BASE, 16*4);
-#endif
-
 	if (src_reset_ipu() != 0) {
 		device_printf(dev, "failed to reset IPU\n");
 		return (ENXIO);
 	}
-
-#if 0
-	dump_registers(sc, DC_TEMPL_BASE, 16*4);
-#endif
-
-#if 0
-	if (bus_setup_intr(dev, sc->sc_irq_res, INTR_TYPE_MISC | INTR_MPSAFE,
-			NULL, ipu_intr, sc,
-			&sc->sc_intr_hl) != 0) {
-		bus_release_resource(dev, SYS_RES_IRQ, rid,
-		    sc->sc_irq_res);
-		bus_release_resource(dev, SYS_RES_MEMORY, rid,
-		    sc->sc_mem_res);
-		device_printf(dev, "Unable to setup the irq handler.\n");
-		return (ENXIO);
-	}
-#endif
 
 	IPU_LOCK_INIT(sc);
 
