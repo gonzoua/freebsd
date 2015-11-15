@@ -531,13 +531,13 @@ ipu_init_micorcode_template(struct ipu_softc *sc, int di, int map)
 			glue = 4; /* keep negated */
 		else if (i == 2)
 			glue = 0;
-				
+
 		w1 = 5; /* sync */
 		w1 |= (glue << 4); /* glue */
 		w1 |= (1 << 11); /* wave unit 0 */
 		w1 |= ((map+1) << 15);
 		/* operand is zero */
-		
+
 		/* Write data to DI and Hold data in register */
 		w2 = 0x18 << 4; /* opcode: WROD 0x0 */
 		w2 |= (1 << 9); /* Stop */
@@ -952,7 +952,7 @@ ipu_init(struct ipu_softc *sc)
 		device_printf(sc->sc_dev, "Failed to attach fbd device\n");
 		goto fail;
 	}
-		
+
 	return (0);
 fail:
 
