@@ -609,10 +609,9 @@ imx_hdmi_detect_cable(void *arg)
 	config_intrhook_disestablish(&sc->sc_mode_hook);
 }
 
-static void
 imx_hdmi_intr(void *arg)
 {
-	panic("INTERRUPT");
+	/* Do nothing */
 }
 
 static int
