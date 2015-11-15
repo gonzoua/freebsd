@@ -112,6 +112,7 @@ static void
 imx_hdmi_phy_wait_i2c_done(struct imx_hdmi_softc *sc, int msec)
 {
 	unsigned char val = 0;
+
 	val = imx_hdmi_read_1(HDMI_IH_I2CMPHY_STAT0) & 0x3;
 	while (val == 0) {
 		DELAY(1000);
@@ -121,8 +122,9 @@ imx_hdmi_phy_wait_i2c_done(struct imx_hdmi_softc *sc, int msec)
 	}
 }
 
-static void imx_hdmi_phy_i2c_write(struct imx_hdmi_softc *sc, unsigned short data,
-			      unsigned char addr)
+static void
+imx_hdmi_phy_i2c_write(struct imx_hdmi_softc *sc, unsigned short data,
+    unsigned char addr)
 {
 	imx_hdmi_write_1(HDMI_IH_I2CMPHY_STAT0, 0xFF);
 	imx_hdmi_write_1(HDMI_PHY_I2CM_ADDRESS_ADDR, addr);
@@ -283,7 +285,8 @@ imx_hdmi_phy_test_clear(struct imx_hdmi_softc *sc, unsigned char bit)
 	imx_hdmi_write_1(HDMI_PHY_TST0, val);
 }
 
-static void imx_hdmi_clear_overflow(struct imx_hdmi_softc *sc)
+static void
+imx_hdmi_clear_overflow(struct imx_hdmi_softc *sc)
 {
 	int count;
 	uint8_t val;
@@ -297,7 +300,8 @@ static void imx_hdmi_clear_overflow(struct imx_hdmi_softc *sc)
 		imx_hdmi_write_1(HDMI_FC_INVIDCONF, val);
 }
 
-static int imx_hdmi_phy_configure(struct imx_hdmi_softc *sc)
+static int
+imx_hdmi_phy_configure(struct imx_hdmi_softc *sc)
 {
 	uint8_t val;
 	uint8_t msec;
@@ -393,7 +397,8 @@ static int imx_hdmi_phy_configure(struct imx_hdmi_softc *sc)
 	return true;
 }
 
-static void imx_hdmi_phy_init(struct imx_hdmi_softc *sc)
+static void
+imx_hdmi_phy_init(struct imx_hdmi_softc *sc)
 {
 	int i;
 
@@ -409,7 +414,8 @@ static void imx_hdmi_phy_init(struct imx_hdmi_softc *sc)
 	}
 }
 
-static void imx_hdmi_enable_video_path(struct imx_hdmi_softc *sc)
+static void
+imx_hdmi_enable_video_path(struct imx_hdmi_softc *sc)
 {
 	uint8_t clkdis;
 
@@ -436,7 +442,8 @@ static void imx_hdmi_enable_video_path(struct imx_hdmi_softc *sc)
 	imx_hdmi_write_1(HDMI_MC_CLKDIS, clkdis);
 }
 
-static void imx_hdmi_video_packetize(struct imx_hdmi_softc *sc)
+static void
+imx_hdmi_video_packetize(struct imx_hdmi_softc *sc)
 {
 	unsigned int color_depth = 0;
 	unsigned int remap_size = HDMI_VP_REMAP_YCC422_16BIT;
@@ -514,7 +521,8 @@ static void imx_hdmi_video_packetize(struct imx_hdmi_softc *sc)
 	imx_hdmi_write_1(HDMI_VP_CONF, val);
 }
 
-static void imx_hdmi_video_sample(struct imx_hdmi_softc *sc)
+static void
+imx_hdmi_video_sample(struct imx_hdmi_softc *sc)
 {
 	int color_format;
 	uint8_t val;
