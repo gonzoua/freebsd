@@ -1,6 +1,5 @@
 /*-
- * Copyright (c) 2006-2007 Bruce M. Simpson.
- * Copyright (c) 2003-2004 Juli Mallett.
+ * Copyright (c) 2015 Alexander Kabaev <kan@FreeBSD.org>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -46,7 +45,12 @@ __FBSDID("$FreeBSD$");
 #include <machine/locore.h>
 #include <machine/md_var.h>
 
-#include <mips/ingenic/jz47xx_regs.h>
+#include <dev/fdt/fdt_common.h>
+#include <dev/ofw/openfirm.h>
+#include <dev/ofw/ofw_bus.h>
+#include <dev/ofw/ofw_bus_subr.h>
+
+#include <mips/ingenic/jz4780_regs.h>
 
 uint64_t counter_freq;
 
@@ -73,7 +77,6 @@ static struct clock_softc *softc;
  * Device methods
  */
 static int clock_probe(device_t);
-static void clock_identify(driver_t *, device_t);
 static int clock_attach(device_t);
 static unsigned counter_get_timecount(struct timecounter *tc);
 
@@ -109,7 +112,7 @@ platform_initclocks(void)
 }
 
 static inline uint32_t
-jz47xx_rd_count(void)
+jz4780_rd_count(void)
 {
 	return readreg(JZ_OST_CNT_LO);
 }
@@ -139,7 +142,7 @@ tick_ticker(void)
 		t_lower_last = DPCPU_GET(counter_lower_last);
 	} while (t_upper != DPCPU_GET(counter_upper));
 
-	ticktock = jz47xx_rd_count();
+	ticktock = jz4780_rd_count();
 
 	critical_exit();
 
@@ -198,7 +201,7 @@ static unsigned
 counter_get_timecount(struct timecounter *tc)
 {
 
-	return (jz47xx_rd_count());
+	return (jz4780_rd_count());
 }
 
 /*
@@ -213,11 +216,11 @@ DELAY(int n)
 	 * This works by polling the timer and counting the number of
 	 * microseconds that go by.
 	 */
-	last = jz47xx_rd_count();
+	last = jz4780_rd_count();
 	delta = usecs = 0;
 
 	while (n > usecs) {
-		cur = jz47xx_rd_count();
+		cur = jz4780_rd_count();
 
 		/* Check to see if the timer has wrapped around. */
 		if (cur < last)
@@ -327,15 +330,15 @@ static int
 clock_probe(device_t dev)
 {
 
-	device_set_desc(dev, "Ingenic OS timer");
-	return (BUS_PROBE_NOWILDCARD);
-}
+	if (!ofw_bus_status_okay(dev))
+		return (ENXIO);
 
-static void
-clock_identify(driver_t * drv, device_t parent)
-{
+	if (ofw_bus_is_compatible(dev, "ingenic,jz4780-tcu")) {
+		device_set_desc(dev, "JZ4780 System Timer");
+		return (BUS_PROBE_DEFAULT);
+	}
 
-	BUS_ADD_CHILD(parent, 0, "clock", 0);
+	return (ENXIO);
 }
 
 static int
@@ -386,20 +389,68 @@ clock_attach(device_t dev)
 static device_method_t clock_methods[] = {
 	/* Device interface */
 	DEVMETHOD(device_probe, clock_probe),
-	DEVMETHOD(device_identify, clock_identify),
 	DEVMETHOD(device_attach, clock_attach),
-	DEVMETHOD(device_detach, bus_generic_detach),
-	DEVMETHOD(device_shutdown, bus_generic_shutdown),
-
 	{0, 0}
 };
 
 static driver_t clock_driver = {
-	"clock",
+	"systimer",
 	clock_methods,
 	sizeof(struct clock_softc),
 };
 
 static devclass_t clock_devclass;
 
-DRIVER_MODULE(clock, nexus, clock_driver, clock_devclass, 0, 0);
+DRIVER_MODULE(clock, simplebus, clock_driver, clock_devclass, 0, 0);
+
+/* Simple placeholder drivers for fixed clocks */
+
+static int
+fixed_clock_probe(device_t dev)
+{
+
+	if (!ofw_bus_status_okay(dev))
+		return (ENXIO);
+
+	if (ofw_bus_is_compatible(dev, "fixed-clock")) {
+		device_set_desc(dev, "Fixed clock");
+		return (BUS_PROBE_DEFAULT);
+	}
+
+	return (ENXIO);
+}
+
+static int
+fixed_clock_attach(device_t dev)
+{
+	phandle_t node;
+	pcell_t freq;
+
+	node = ofw_bus_get_node(dev);
+
+	if (OF_getencprop(node, "clock-frequency", &freq, sizeof(freq)) <= 0) {
+		device_printf(dev, "missing clock-frequency attribute in FDT\n");
+		return (ENXIO);
+	}
+
+	device_printf(dev, "frequency %u HZ\n", freq);
+	return 0;
+}
+
+static device_method_t fixed_clock_methods[] = {
+	/* Device interface */
+	DEVMETHOD(device_probe, fixed_clock_probe),
+	DEVMETHOD(device_attach, fixed_clock_attach),
+	{0, 0}
+};
+
+static driver_t fixed_clock_driver = {
+	"fixedclock",
+	fixed_clock_methods,
+	0
+};
+
+static devclass_t fixed_clock_devclass;
+
+DRIVER_MODULE(fixedclock, simplebus, fixed_clock_driver, fixed_clock_devclass,
+    0, 0);

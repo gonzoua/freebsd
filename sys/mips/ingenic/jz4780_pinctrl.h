@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2006 Wojciech A. Koszek <wkoszek@FreeBSD.org>
+ * Copyright 2015 Alexander Kabaev <kan@FreeBSD.org>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -23,54 +23,11 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $Id$
+ * $FreeBSD$
  */
-/*
- * Skeleton of this file was based on respective code for ARM
- * code written by Olivier Houchard.
- */
-#include "opt_uart.h"
 
-#include <sys/cdefs.h>
-__FBSDID("$FreeBSD$");
+#ifndef	_MIPS_INGENIC_JZ4780_PINCTRL_H
+#define	_MIPS_INGENIC_JZ4780_PINCTRL_H
 
-#include <sys/param.h>
-#include <sys/systm.h>
-#include <sys/bus.h>
-#include <sys/cons.h>
 
-#include <machine/bus.h>
-
-#include <dev/uart/uart.h>
-#include <dev/uart/uart_cpu.h>
-
-#include <mips/ingenic/jz47xx_regs.h>
-
-bus_space_tag_t uart_bus_space_io;
-bus_space_tag_t uart_bus_space_mem;
-
-int
-uart_cpu_eqres(struct uart_bas *b1, struct uart_bas *b2)
-{
-	return ((b1->bsh == b2->bsh && b1->bst == b2->bst) ? 1 : 0);
-}
-
-int
-uart_cpu_getdev(int devtype, struct uart_devinfo *di)
-{
-
-	di->ops = uart_getops(&uart_ns8250_class);
-	di->bas.chan = 0;
-	di->bas.bst = mips_bus_space_generic;
-	di->bas.bsh = MIPS_PHYS_TO_KSEG1(JZ_UART4);
-	di->bas.regshft = 2;	/* Registers are 32-bits */
-	di->bas.rclk = 0;
-	di->baudrate = 0;	/* retain the baudrate configured by U-Boot */
-	di->databits = 8;
-	di->stopbits = 1;
-	di->parity = UART_PARITY_NONE;
-
-	uart_bus_space_io = NULL;
-	uart_bus_space_mem = mips_bus_space_generic;
-	return (0);
-}
+#endif /* _MIPS_INGENIC_JZ4780_PINCTRL_H */

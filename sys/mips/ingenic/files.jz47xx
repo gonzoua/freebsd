@@ -1,9 +1,0 @@
-# $FreeBSD$
-
-mips/ingenic/uart_bus_jz47xx.c	optional uart_jz47xx
-mips/ingenic/uart_cpu_jz47xx.c	optional uart_jz47xx
-mips/ingenic/jz47xx_tick.c	standard
-
-mips/ingenic/jz47xx_machdep.c	standard
-mips/mips/intr_machdep.c	standard
-

@@ -1,0 +1,22 @@
+#include <ingenic/ci20.dts>
+
+&uart0 {
+	clock-frequency = <48000000>;
+};
+
+&uart1 {
+	clock-frequency = <48000000>;
+};
+
+&uart2 {
+	clock-frequency = <48000000>;
+};
+
+&uart3 {
+	clock-frequency = <48000000>;
+};
+
+&uart4 {
+	clock-frequency = <48000000>;
+};
+

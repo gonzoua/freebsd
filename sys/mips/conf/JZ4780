@@ -1,8 +1,8 @@
-# JZ47XX -- Kernel config for Ingenic JZ47XX boards
+# JZ4780 -- Kernel config for Ingenic JZ47XX boards
 #
 # $FreeBSD$
 
-ident		JZ47XX
+ident		JZ4780
 machine		mips mipsel
 cpu             CPU_MIPS4KC
 
@@ -11,8 +11,8 @@ makeoptions	KERNLOADADDR=0x80020000
 # Don't build any modules yet.
 makeoptions	MODULES_OVERRIDE=""
 
-files		"../ingenic/files.jz47xx"
-hints		"JZ47XX.hints"		#Default places to look for devices.
+files		"../ingenic/files.jz4780"
+hints		"JZ4780.hints"		#Default places to look for devices.
 
 makeoptions	DEBUG=-g		#Build kernel with gdb(1) debug symbols
 
@@ -50,5 +50,9 @@ device		ether
 #device		bpf
 #device		md
 device		uart
-device		uart_jz47xx
 #device		random
+
+device		fdt_clock
+device		fdt_pinctrl
+
+device		gpio

@@ -1,8 +1,14 @@
 # CI20 -- Kernel config for Creator CI20 board
 #
 # $FreeBSD$
- 
+
+include		"JZ4780"
 ident		CI20
 
+options		FDT
+options		FDT_DTB_STATIC
+makeoptions	FDT_DTS_FILE=ci20.dts
+
 makeoptions 	TRAMPLOADADDR=0x88000000
-include		"JZ47XX"
+
+#options		VERBOSE_SYSINIT
