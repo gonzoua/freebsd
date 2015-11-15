@@ -364,7 +364,7 @@ imx_ccm_ipu_enable(int ipu)
 }
 
 void
-imx_ccm_hdmi_enable()
+imx_ccm_hdmi_enable(void)
 {
 	struct ccm_softc *sc;
 	uint32_t reg;
