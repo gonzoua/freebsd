@@ -324,19 +324,22 @@ imx_hdmi_phy_configure(struct imx_hdmi_softc *sc)
 	imx_hdmi_write_1(HDMI_PHY_I2CM_SLAVE_ADDR, HDMI_PHY_I2CM_SLAVE_ADDR_PHY_GEN2);
 	imx_hdmi_phy_test_clear(sc, 0);
 
+	/*
+	 * PLL/MPLL config, see section 24.7.22 in TRM
+	 *  config, see section 24.7.22
+	 */
 	if (sc->sc_mode.dot_clock*1000 <= 45250000) {
-		/* PLL/MPLL Cfg */
-		imx_hdmi_phy_i2c_write(sc, 0x01e0, 0x06);
-		imx_hdmi_phy_i2c_write(sc, 0x0000, 0x15);  /* GMPCTRL */
+		imx_hdmi_phy_i2c_write(sc, CPCE_CTRL_45_25, HDMI_PHY_I2C_CPCE_CTRL);
+		imx_hdmi_phy_i2c_write(sc, GMPCTRL_45_25, HDMI_PHY_I2C_GMPCTRL);
 	} else if (sc->sc_mode.dot_clock*1000 <= 92500000) {
-		imx_hdmi_phy_i2c_write(sc, 0x0140, 0x06);
-		imx_hdmi_phy_i2c_write(sc, 0x0005, 0x15);
-	} else if (sc->sc_mode.dot_clock*1000 <= 148500000) {
-		imx_hdmi_phy_i2c_write(sc, 0x00a0, 0x06);
-		imx_hdmi_phy_i2c_write(sc, 0x000a, 0x15);
+		imx_hdmi_phy_i2c_write(sc, CPCE_CTRL_92_50, HDMI_PHY_I2C_CPCE_CTRL);
+		imx_hdmi_phy_i2c_write(sc, GMPCTRL_92_50, HDMI_PHY_I2C_GMPCTRL);
+	} else if (sc->sc_mode.dot_clock*1000 <= 185000000) {
+		imx_hdmi_phy_i2c_write(sc, CPCE_CTRL_185, HDMI_PHY_I2C_CPCE_CTRL);
+		imx_hdmi_phy_i2c_write(sc, GMPCTRL_185, HDMI_PHY_I2C_GMPCTRL);
 	} else {
-		imx_hdmi_phy_i2c_write(sc, 0x00a0, 0x06);
-		imx_hdmi_phy_i2c_write(sc, 0x000a, 0x15);
+		imx_hdmi_phy_i2c_write(sc, CPCE_CTRL_370, HDMI_PHY_I2C_CPCE_CTRL);
+		imx_hdmi_phy_i2c_write(sc, GMPCTRL_370, HDMI_PHY_I2C_GMPCTRL);
 	}
 
 	if (sc->sc_mode.dot_clock*1000 <= 54000000) {

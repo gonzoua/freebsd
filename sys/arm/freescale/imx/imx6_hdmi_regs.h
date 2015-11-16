@@ -615,5 +615,17 @@
 #define	HDMI_I2CM_FS_SCL_LCNT_1_ADDR            0x7E11
 #define	HDMI_I2CM_FS_SCL_LCNT_0_ADDR            0x7E12
 
+/* HDMI PHY register with access through I2C */
+#define	HDMI_PHY_I2C_CPCE_CTRL	0x6
+#define		CPCE_CTRL_45_25		((3 << 7) | (3 << 5))
+#define		CPCE_CTRL_92_50		((2 << 7) | (2 << 5))
+#define		CPCE_CTRL_185		((1 << 7) | (1 << 5))
+#define		CPCE_CTRL_370		((0 << 7) | (0 << 5))
+#define	HDMI_PHY_I2C_GMPCTRL	0x15
+#define		GMPCTRL_45_25		0x00
+#define		GMPCTRL_92_50		0x05
+#define		GMPCTRL_185		0x0a
+#define		GMPCTRL_370		0x0f
+
 #endif	/* __IMX6__HDMI_REGS_H__ */
 
