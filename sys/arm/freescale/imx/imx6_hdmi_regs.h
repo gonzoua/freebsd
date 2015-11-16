@@ -44,6 +44,8 @@
 #define	HDMI_IH_CEC_STAT0                       0x0106
 #define	HDMI_IH_VP_STAT0                        0x0107
 #define	HDMI_IH_I2CMPHY_STAT0                   0x0108
+#define		HDMI_IH_I2CMPHY_STAT0_DONE		(1 << 1)
+#define		HDMI_IH_I2CMPHY_STAT0_ERROR		(1 << 0)
 #define	HDMI_IH_AHBDMAAUD_STAT0                 0x0109
 
 #define	HDMI_IH_MUTE_FC_STAT0                   0x0180
@@ -339,6 +341,8 @@
 #define	HDMI_FC_STAT2                           0x10D8
 #define	HDMI_FC_INT2                            0x10D9
 #define	HDMI_FC_MASK2                           0x10DA
+#define		HDMI_FC_MASK2_LOW_PRI		(1 << 1)
+#define		HDMI_FC_MASK2_HIGH_PRI		(1 << 0)
 #define	HDMI_FC_POL2                            0x10DB
 #define	HDMI_FC_PRCONF                          0x10E0
 

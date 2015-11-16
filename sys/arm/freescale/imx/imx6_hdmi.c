@@ -113,12 +113,14 @@ imx_hdmi_phy_wait_i2c_done(struct imx_hdmi_softc *sc, int msec)
 {
 	unsigned char val = 0;
 
-	val = imx_hdmi_read_1(HDMI_IH_I2CMPHY_STAT0) & 0x3;
+	val = imx_hdmi_read_1(HDMI_IH_I2CMPHY_STAT0) &
+	    (HDMI_IH_I2CMPHY_STAT0_DONE | HDMI_IH_I2CMPHY_STAT0_ERROR);
 	while (val == 0) {
 		DELAY(1000);
 		if (msec-- == 0)
 			return;
-		val = imx_hdmi_read_1(HDMI_IH_I2CMPHY_STAT0) & 0x3;
+		val = imx_hdmi_read_1(HDMI_IH_I2CMPHY_STAT0) &
+		    (HDMI_IH_I2CMPHY_STAT0_DONE | HDMI_IH_I2CMPHY_STAT0_ERROR);
 	}
 }
 
@@ -126,7 +128,10 @@ static void
 imx_hdmi_phy_i2c_write(struct imx_hdmi_softc *sc, unsigned short data,
     unsigned char addr)
 {
-	imx_hdmi_write_1(HDMI_IH_I2CMPHY_STAT0, 0xFF);
+
+	/* clear DONE and ERROR flags */
+	imx_hdmi_write_1(HDMI_IH_I2CMPHY_STAT0,
+	    HDMI_IH_I2CMPHY_STAT0_DONE | HDMI_IH_I2CMPHY_STAT0_ERROR);
 	imx_hdmi_write_1(HDMI_PHY_I2CM_ADDRESS_ADDR, addr);
 	imx_hdmi_write_1(HDMI_PHY_I2CM_DATAO_1_ADDR, (unsigned char)(data >> 8));
 	imx_hdmi_write_1(HDMI_PHY_I2CM_DATAO_0_ADDR, (unsigned char)(data >> 0));
@@ -138,7 +143,8 @@ static void
 imx_hdmi_disable_overflow_interrupts(struct imx_hdmi_softc *sc)
 {
 	imx_hdmi_write_1(HDMI_IH_MUTE_FC_STAT2, HDMI_IH_MUTE_FC_STAT2_OVERFLOW_MASK);
-	imx_hdmi_write_1(HDMI_FC_MASK2, 0xff);
+	imx_hdmi_write_1(HDMI_FC_MASK2,
+	    HDMI_FC_MASK2_LOW_PRI | HDMI_FC_MASK2_HIGH_PRI);
 }
 
 static void
@@ -166,7 +172,7 @@ imx_hdmi_av_composer(struct imx_hdmi_softc *sc)
 		HDMI_FC_INVIDCONF_IN_I_P_INTERLACED :
 		HDMI_FC_INVIDCONF_IN_I_P_PROGRESSIVE);
 
-	inv_val |= (1 /*DVI*/ ?
+	inv_val |= (1 /* TODO: DVI */ ?
 		HDMI_FC_INVIDCONF_DVI_MODEZ_DVI_MODE :
 		HDMI_FC_INVIDCONF_DVI_MODEZ_HDMI_MODE);
 
