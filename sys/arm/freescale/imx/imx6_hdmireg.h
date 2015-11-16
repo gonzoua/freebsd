@@ -649,4 +649,3 @@
 #define		TXTERM_133		0x5
 
 #endif	/* __IMX6__HDMI_REGS_H__ */
-
