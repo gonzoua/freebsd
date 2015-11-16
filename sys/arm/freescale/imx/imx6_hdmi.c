@@ -51,6 +51,7 @@ __FBSDID("$FreeBSD$");
 
 #include <arm/freescale/imx/imx_ccmvar.h>
 #include <arm/freescale/imx/imx_iomuxvar.h>
+#include <arm/freescale/imx/imx_iomuxreg.h>
 #include <arm/freescale/imx/imx6_hdmireg.h>
 
 #include "hdmi_if.h"
@@ -669,7 +670,6 @@ imx_hdmi_attach(device_t dev)
 	struct imx_hdmi_softc *sc;
 	int err;
 	uint32_t gpr3;
-	int ipu_id, disp_id;
 	phandle_t node, i2c_xref;
 
 	sc = device_get_softc(dev);
@@ -729,13 +729,11 @@ imx_hdmi_attach(device_t dev)
 	    RD1(sc, HDMI_DESIGN_ID), RD1(sc, HDMI_REVISION_ID),
 	    RD1(sc, HDMI_PRODUCT_ID0), RD1(sc, HDMI_PRODUCT_ID1));
 
-	ipu_id = 0;
-	disp_id = 0;
 
-	gpr3 = imx_iomux_gpr_get(12);
-	gpr3 &= ~0x0d;
-	gpr3 |= ((ipu_id << 1) | disp_id) << 2;
-	imx_iomux_gpr_set(12, gpr3);
+	gpr3 = imx_iomux_gpr_get(IOMUXC_GPR3);
+	gpr3 &= ~(IOMUXC_GPR3_HDMI_MASK);
+	gpr3 |= IOMUXC_GPR3_HDMI_IPU1_DI0;
+	imx_iomux_gpr_set(IOMUXC_GPR3, gpr3);
 
 	WR1(sc, HDMI_PHY_POL0, HDMI_PHY_HPD);
 	WR1(sc, HDMI_IH_PHY_STAT0, HDMI_IH_PHY_STAT0_HPD);
