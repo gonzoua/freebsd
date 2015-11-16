@@ -87,8 +87,7 @@ ti_adc_enable(struct ti_adc_softc *sc)
 	ADC_WRITE4(sc, ADC_IRQENABLE_SET,
 	    ADC_IRQ_FIFO0_THRES | ADC_IRQ_FIFO1_THRES | ADC_IRQ_END_OF_SEQ);
 
-	reg = ADC_READ4(sc, ADC_CTRL);
-	reg |= ADC_CTRL_ENABLE;
+	reg = ADC_CTRL_STEP_WP | ADC_CTRL_STEP_ID;
 	if (sc->sc_tsc_wires > 0) {
 		reg |= ADC_CTRL_TSC_ENABLE;
 		switch (sc->sc_tsc_wires) {
@@ -105,6 +104,7 @@ ti_adc_enable(struct ti_adc_softc *sc)
 			break;
 		}
 	}
+	reg |= ADC_CTRL_ENABLE;
 	/* Enable the ADC.  Run thru enabled steps, start the conversions. */
 	ADC_WRITE4(sc, ADC_CTRL, reg);
 
@@ -384,13 +384,27 @@ ti_adc_read_data(struct ti_adc_softc *sc)
 	}
 }
 
+static int
+cmp_values(const void *a, const void *b)
+{
+	const uint32_t *v1, *v2;
+	v1 = a;
+	v2 = b;
+	if (*v1 < *v2)
+		return -1;
+	if (*v1 > *v2)
+		return 1;
+
+	return (0);
+}
+
 static void
 ti_adc_tsc_read_data(struct ti_adc_softc *sc)
 {
 	int count;
 	uint32_t data[16];
 	uint32_t x, y;
-	int i;
+	int i, start, end;
 
 	TI_ADC_LOCK_ASSERT(sc);
 
@@ -405,14 +419,28 @@ ti_adc_tsc_read_data(struct ti_adc_softc *sc)
 		count = ADC_READ4(sc, ADC_FIFO1COUNT) & ADC_FIFO_COUNT_MSK;
 	}
 
-	x = y = 0;
-	for (i = 0; i < sc->sc_coord_readouts; i++)
-		y += data[i];
-	y /= sc->sc_coord_readouts;
+	if (sc->sc_coord_readouts > 3) {
+		start = 1;
+		end = sc->sc_coord_readouts - 1;
+		qsort(data, sc->sc_coord_readouts,
+			sizeof(data[0]), &cmp_values);
+		qsort(&data[sc->sc_coord_readouts + 2],
+			sc->sc_coord_readouts,
+			sizeof(data[0]), &cmp_values);
+	}
+	else {
+		start = 0;
+		end = sc->sc_coord_readouts;
+	}
 
-	for (i = sc->sc_coord_readouts + 2; i < sc->sc_coord_readouts*2 + 2; i++)
+	x = y = 0;
+	for (i = start; i < end; i++)
+		y += data[i];
+	y /= (end - start);
+
+	for (i = sc->sc_coord_readouts + 2 + start; i < sc->sc_coord_readouts + 2 + end; i++)
 		x += data[i];
-	x /= sc->sc_coord_readouts;
+	x /= (end - start);
 
 	printf("x: %d, y: %d\n", x, y);
 }
@@ -442,14 +470,22 @@ ti_adc_intr(void *arg)
 
 	sc = (struct ti_adc_softc *)arg;
 
+	TI_ADC_LOCK(sc);
+
 	rawstatus = ADC_READ4(sc, ADC_IRQSTATUS_RAW);
 	status = ADC_READ4(sc, ADC_IRQSTATUS);
-	if (status == 0)
-		return;
 
-	TI_ADC_LOCK(sc);
-	/* ACK the interrupt. */
-	ADC_WRITE4(sc, ADC_IRQSTATUS, rawstatus);
+	if (rawstatus & ADC_IRQ_HW_PEN_ASYNC) {
+		printf("PEN DOWN\n");
+		status |= ADC_IRQ_HW_PEN_ASYNC;
+		ADC_WRITE4(sc, ADC_IRQENABLE_CLR,
+			ADC_IRQ_HW_PEN_ASYNC);
+	}
+
+	if (rawstatus & ADC_IRQ_PEN_UP) {
+		printf("PEN UP\n");
+		status |= ADC_IRQ_PEN_UP;
+	}
 
 	if (status & ADC_IRQ_FIFO0_THRES)
 		ti_adc_intr_locked(sc, status);
@@ -457,6 +493,11 @@ ti_adc_intr(void *arg)
 	if (status & ADC_IRQ_FIFO1_THRES) {
 		ti_adc_tsc_intr_locked(sc, status);
 		printf("--> %08x vs %08x\n", status, rawstatus);
+	}
+
+	if (status) {
+		/* ACK the interrupt. */
+		ADC_WRITE4(sc, ADC_IRQSTATUS, status);
 	}
 
 	/* Start the next conversion ? */
@@ -612,23 +653,8 @@ ti_adc_idlestep_init(struct ti_adc_softc *sc)
 {
 	uint32_t val;
 
-	val = ADC_READ4(sc, ADC_IDLECONFIG);
-
-	/* Set single ended operation. */
-	val &= ~ADC_STEP_DIFF_CNTRL;
-
-	/* Set the negative voltage reference. */
-	val &= ~ADC_STEP_RFM_MSK;
-	val |= ADC_STEP_RFM_VREFN << ADC_STEP_RFM_SHIFT;
-
-	/* Set the positive voltage reference. */
-	val &= ~ADC_STEP_RFP_MSK;
-	val |= ADC_STEP_RFP_VREFP << ADC_STEP_RFP_SHIFT;
-
-	/* Connect the input to VREFN. */
-	val &= ~ADC_STEP_INP_MSK;
-	val |= ADC_STEP_IN_VREFN << ADC_STEP_INP_SHIFT;
-
+	val = ADC_STEP_YNN_SW | ADC_STEP_INM(8) | ADC_STEP_INP(8) | ADC_STEP_YPN_SW;
+	
 	ADC_WRITE4(sc, ADC_IDLECONFIG, val);
 }
 
@@ -682,7 +708,7 @@ ti_adc_attach(device_t dev)
 {
 	int err, rid, i;
 	struct ti_adc_softc *sc;
-	uint32_t reg, rev;
+	uint32_t rev, reg;
 	phandle_t node, child;
 	pcell_t cell;
 	int *channels;
@@ -784,11 +810,8 @@ ti_adc_attach(device_t dev)
 	    rev & ADC_REV_MINOR_MSK,
 	    (rev & ADC_REV_CUSTOM_MSK) >> ADC_REV_CUSTOM_SHIFT);
 
-	/*
-	 * Disable the step write protect and make it store the step ID for
-	 * the captured data on FIFO.
-	 */
 	reg = ADC_READ4(sc, ADC_CTRL);
+	printf("reg: %08x -> %08x\n", reg, reg | ADC_CTRL_STEP_WP | ADC_CTRL_STEP_ID);
 	ADC_WRITE4(sc, ADC_CTRL, reg | ADC_CTRL_STEP_WP | ADC_CTRL_STEP_ID);
 
 	/*
