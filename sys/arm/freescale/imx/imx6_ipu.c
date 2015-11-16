@@ -965,7 +965,9 @@ ipu_hdmi_event(void *arg, device_t hdmi_dev)
 	struct ipu_softc *sc;
 	uint8_t *edid;
 	uint32_t edid_len;
+#ifdef EDID_DEBUG
 	struct edid_info ei;
+#endif
 	const struct videomode *videomode;
 
 	sc = arg;
