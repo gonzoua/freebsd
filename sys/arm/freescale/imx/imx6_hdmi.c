@@ -358,21 +358,25 @@ imx_hdmi_phy_configure(struct imx_hdmi_softc *sc)
 		panic("Unsupported mode\n");
 	}
 
-	imx_hdmi_phy_i2c_write(sc, 0x0000, 0x13);  /* PLLPHBYCTRL */
-	imx_hdmi_phy_i2c_write(sc, 0x0006, 0x17);
-	/* RESISTANCE TERM 133Ohm Cfg */
-	imx_hdmi_phy_i2c_write(sc, 0x0005, 0x19);  /* TXTERM */
+	imx_hdmi_phy_i2c_write(sc, 0x0000, HDMI_PHY_I2C_PLLPHBYCTRL);
+	imx_hdmi_phy_i2c_write(sc, MSM_CTRL_FB_CLK, HDMI_PHY_I2C_MSM_CTRL);
+	/* RESISTANCE TERM 133 Ohm */
+	imx_hdmi_phy_i2c_write(sc, TXTERM_133, HDMI_PHY_I2C_TXTERM);
 	/* PREEMP Cgf 0.00 */
-	imx_hdmi_phy_i2c_write(sc, 0x800d, 0x09);  /* CKSYMTXCTRL */
+	imx_hdmi_phy_i2c_write(sc,CKSYMTXCTRL_OVERRIDE | CKSYMTXCTRL_TX_SYMON |
+	    CKSYMTXCTRL_TX_TRAON | CKSYMTXCTRL_TX_CK_SYMON, HDMI_PHY_I2C_CKSYMTXCTRL); 
 	/* TX/CK LVL 10 */
-	imx_hdmi_phy_i2c_write(sc, 0x01ad, 0x0E);  /* VLEVCTRL */
+	imx_hdmi_phy_i2c_write(sc, VLEVCTRL_TX_LVL(13) | VLEVCTRL_CK_LVL(13),
+	    HDMI_PHY_I2C_VLEVCTRL);
 
 	/* REMOVE CLK TERM */
-	imx_hdmi_phy_i2c_write(sc, 0x8000, 0x05);  /* CKCALCTRL */
+	imx_hdmi_phy_i2c_write(sc, CKCALCTRL_OVERRIDE, HDMI_PHY_I2C_CKCALCTRL);
 
 	if (sc->sc_mode.dot_clock*1000 > 148500000) {
-		imx_hdmi_phy_i2c_write(sc, 0x800b, 0x09);
-		imx_hdmi_phy_i2c_write(sc, 0x0129, 0x0E);
+		imx_hdmi_phy_i2c_write(sc,CKSYMTXCTRL_OVERRIDE | CKSYMTXCTRL_TX_SYMON |
+		    CKSYMTXCTRL_TX_TRBON | CKSYMTXCTRL_TX_CK_SYMON, HDMI_PHY_I2C_CKSYMTXCTRL); 
+		imx_hdmi_phy_i2c_write(sc, VLEVCTRL_TX_LVL(9) | VLEVCTRL_CK_LVL(9),
+		    HDMI_PHY_I2C_VLEVCTRL);
 	}
 
 	imx_hdmi_phy_enable_power(sc, 1);

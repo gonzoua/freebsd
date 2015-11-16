@@ -616,16 +616,32 @@
 #define	HDMI_I2CM_FS_SCL_LCNT_0_ADDR            0x7E12
 
 /* HDMI PHY register with access through I2C */
+#define	HDMI_PHY_I2C_CKCALCTRL	0x5
+#define		CKCALCTRL_OVERRIDE	(1 << 15)
 #define	HDMI_PHY_I2C_CPCE_CTRL	0x6
 #define		CPCE_CTRL_45_25		((3 << 7) | (3 << 5))
 #define		CPCE_CTRL_92_50		((2 << 7) | (2 << 5))
 #define		CPCE_CTRL_185		((1 << 7) | (1 << 5))
 #define		CPCE_CTRL_370		((0 << 7) | (0 << 5))
+#define	HDMI_PHY_I2C_CKSYMTXCTRL	0x9
+#define		CKSYMTXCTRL_OVERRIDE	(1 << 15)
+#define		CKSYMTXCTRL_TX_SYMON	(1 << 3)
+#define		CKSYMTXCTRL_TX_TRAON	(1 << 2)
+#define		CKSYMTXCTRL_TX_TRBON	(1 << 1)
+#define		CKSYMTXCTRL_TX_CK_SYMON	(1 << 0)
+#define	HDMI_PHY_I2C_VLEVCTRL		0x0E
+#define	HDMI_PHY_I2C_PLLPHBYCTRL	0x13
+#define		VLEVCTRL_TX_LVL(x)	((x) << 5)
+#define		VLEVCTRL_CK_LVL(x)	(x)
 #define	HDMI_PHY_I2C_GMPCTRL	0x15
 #define		GMPCTRL_45_25		0x00
 #define		GMPCTRL_92_50		0x05
 #define		GMPCTRL_185		0x0a
 #define		GMPCTRL_370		0x0f
+#define	HDMI_PHY_I2C_MSM_CTRL	0x17
+#define		MSM_CTRL_FB_CLK		(0x3 << 1)
+#define	HDMI_PHY_I2C_TXTERM	0x19
+#define		TXTERM_133		0x5
 
 #endif	/* __IMX6__HDMI_REGS_H__ */
 
