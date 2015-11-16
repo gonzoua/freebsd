@@ -16,6 +16,8 @@ hints		"JZ4780.hints"		#Default places to look for devices.
 
 makeoptions	DEBUG=-g		#Build kernel with gdb(1) debug symbols
 
+options		MIPS_INTRNG		# Borrow interrupt code from ARM
+
 options 	DDB
 options 	KDB
 

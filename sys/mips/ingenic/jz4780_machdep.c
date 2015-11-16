@@ -77,11 +77,11 @@ platform_reset(void)
 	 * For now, provoke a watchdog reset in about a second, so UART buffers
 	 * have a fighting chance to flush before we pull the plug
 	 */
-	writereg(JZ_WDOG_TCER, 0);	/* disable watchdog */
-	writereg(JZ_WDOG_TCNT, 0);	/* reset counter */
-	writereg(JZ_WDOG_TDR, 128);	/* wait for ~1s */
-	writereg(JZ_WDOG_TCSR, TCSR_RTC_EN | TCSR_DIV_256);
-	writereg(JZ_WDOG_TCER, TCER_ENABLE);	/* fire! */
+	writereg(JZ_TCU_BASE + JZ_WDOG_TCER, 0);	/* disable watchdog */
+	writereg(JZ_TCU_BASE + JZ_WDOG_TCNT, 0);	/* reset counter */
+	writereg(JZ_TCU_BASE + JZ_WDOG_TDR, 128);	/* wait for ~1s */
+	writereg(JZ_TCU_BASE + JZ_WDOG_TCSR, TCSR_RTC_EN | TCSR_DIV_256);
+	writereg(JZ_TCU_BASE + JZ_WDOG_TCER, TCER_ENABLE);	/* fire! */
 
 	/* Wait for reset */
 	while (1)
@@ -198,7 +198,6 @@ void
 platform_start(__register_t a0 __unused, __register_t a1 __unused,
     __register_t a2 __unused, __register_t a3 __unused)
 {
-	uint64_t platform_counter_freq;
 	vm_offset_t kernend;
 #ifdef FDT
 	vm_offset_t dtbp;
@@ -233,7 +232,6 @@ platform_start(__register_t a0 __unused, __register_t a1 __unused,
 #else
 #error	"Non-static FDT not supported on JZ4780"
 #endif
-
 	if (OF_install(OFW_FDT, 0) == FALSE)
 		while (1);
 	if (OF_init((void *)dtbp) != 0)
@@ -255,15 +253,9 @@ platform_start(__register_t a0 __unused, __register_t a1 __unused,
 		_parse_bootargs(buf);
 #endif
 
-	/* Initialize OST */
-	platform_counter_freq = 12000000;
-	mips_timer_early_init(platform_counter_freq);
-
 	cninit();
 
 	bootverbose = 1;
 
 	mips_init();
-
-	mips_timer_init_params(platform_counter_freq, 1);
 }

@@ -43,12 +43,15 @@
 #define JZ_LCDC0_BASE 0x13050000
 #define JZ_LCDC1_BASE 0x130a0000
 
-/* watchdog */
-#define JZ_WDOG_TDR	0x10002000	/* compare */
-#define JZ_WDOG_TCER	0x10002004
+/* TCU unit base address */
+#define JZ_TCU_BASE	0x10002000
+
+/* Watchdog */
+#define JZ_WDOG_TDR	0x00000000	/* compare */
+#define JZ_WDOG_TCER	0x00000004
 	#define TCER_ENABLE	0x01	/* enable counter */
-#define JZ_WDOG_TCNT	0x10002008	/* 16bit up count */
-#define JZ_WDOG_TCSR	0x1000200c
+#define JZ_WDOG_TCNT	0x00000008	/* 16bit up count */
+#define JZ_WDOG_TCSR	0x0000000c
 	#define TCSR_PCK_EN	0x01	/* PCLK */
 	#define TCSR_RTC_EN	0x02	/* RTCCLK - 32.768kHz */
 	#define TCSR_EXT_EN	0x04	/* EXTCLK - 48MHz */
@@ -61,19 +64,19 @@
 	#define TCSR_DIV_1024	0x28
 
 /* timers and PWMs */
-#define JZ_TC_TER	0x10002010	/* TC enable reg, ro */
-#define JZ_TC_TESR	0x10002014	/* TC enable set reg. */
-	#define TESR_TCST0	0x0001	/* enable counter 0 */ 
-	#define TESR_TCST1	0x0002	/* enable counter 1 */ 
-	#define TESR_TCST2	0x0004	/* enable counter 2 */ 
-	#define TESR_TCST3	0x0008	/* enable counter 3 */ 
-	#define TESR_TCST4	0x0010	/* enable counter 4 */ 
-	#define TESR_TCST5	0x0020	/* enable counter 5 */ 
-	#define TESR_TCST6	0x0040	/* enable counter 6 */ 
-	#define TESR_TCST7	0x0080	/* enable counter 7 */ 
-	#define TESR_OST	0x8000	/* enable OST */ 
-#define JZ_TC_TECR	0x10002018	/* TC enable clear reg. */
-#define JZ_TC_TFR	0x10002020
+#define JZ_TC_TER	0x00000010	/* TC enable reg, ro */
+#define JZ_TC_TESR	0x00000014	/* TC enable set reg. */
+	#define TESR_TCST0	0x0001	/* enable counter 0 */
+	#define TESR_TCST1	0x0002	/* enable counter 1 */
+	#define TESR_TCST2	0x0004	/* enable counter 2 */
+	#define TESR_TCST3	0x0008	/* enable counter 3 */
+	#define TESR_TCST4	0x0010	/* enable counter 4 */
+	#define TESR_TCST5	0x0020	/* enable counter 5 */
+	#define TESR_TCST6	0x0040	/* enable counter 6 */
+	#define TESR_TCST7	0x0080	/* enable counter 7 */
+	#define TESR_OST	0x8000	/* enable OST */
+#define JZ_TC_TECR	0x00000018	/* TC enable clear reg. */
+#define JZ_TC_TFR	0x00000020
 	#define TFR_FFLAG0	0x00000001	/* channel 0 */
 	#define TFR_FFLAG1	0x00000002	/* channel 1 */
 	#define TFR_FFLAG2	0x00000004	/* channel 2 */
@@ -83,24 +86,26 @@
 	#define TFR_FFLAG6	0x00000040	/* channel 6 */
 	#define TFR_FFLAG7	0x00000080	/* channel 7 */
 	#define TFR_OSTFLAG	0x00008000	/* OS timer */
-#define JZ_TC_TFSR	0x10002024	/* timer flag set */
-#define JZ_TC_TFCR	0x10002028	/* timer flag clear */
-#define JZ_TC_TMR	0x10002030	/* timer flag mask */
-#define JZ_TC_TMSR	0x10002034	/* timer flag mask set */
-#define JZ_TC_TMCR	0x10002038	/* timer flag mask clear*/
+#define JZ_TC_TFSR	0x00000024	/* timer flag set */
+#define JZ_TC_TFCR	0x00000028	/* timer flag clear */
+#define JZ_TC_TMR	0x00000030	/* timer flag mask */
+	#define TMR_FMASK(n)	(1 << (n))
+	#define TMR_HMASK(n)	(1 << ((n) + 16))
+#define JZ_TC_TMSR	0x00000034	/* timer flag mask set */
+#define JZ_TC_TMCR	0x00000038	/* timer flag mask clear*/
 
-#define JZ_TC_TDFR(n)	(0x10002040 + (n * 0x10))	/* FULL compare */
-#define JZ_TC_TDHR(n)	(0x10002044 + (n * 0x10))	/* HALF compare */
-#define JZ_TC_TCNT(n)	(0x10002048 + (n * 0x10))	/* count */
+#define JZ_TC_TDFR(n)	(0x00000040 + (n * 0x10))	/* FULL compare */
+#define JZ_TC_TDHR(n)	(0x00000044 + (n * 0x10))	/* HALF compare */
+#define JZ_TC_TCNT(n)	(0x00000048 + (n * 0x10))	/* count */
 
-#define JZ_TC_TCSR(n)	(0x1000204c + (n * 0x10))
+#define JZ_TC_TCSR(n)	(0x0000004c + (n * 0x10))
 /* same bits as in JZ_WDOG_TCSR	*/
 
 /* operating system timer */
-#define JZ_OST_DATA	0x100020e0	/* compare */
-#define JZ_OST_CNT_LO	0x100020e4
-#define JZ_OST_CNT_HI	0x100020e8
-#define JZ_OST_CTRL	0x100020ec
+#define JZ_OST_DATA	0x000000e0	/* compare */
+#define JZ_OST_CNT_LO	0x000000e4
+#define JZ_OST_CNT_HI	0x000000e8
+#define JZ_OST_CTRL	0x000000ec
 	#define OSTC_PCK_EN	0x0001	/* use PCLK */
 	#define OSTC_RTC_EN	0x0002	/* use RTCCLK */
 	#define OSTC_EXT_EN	0x0004	/* use EXTCLK */
@@ -113,7 +118,7 @@
 	#define OSTC_DIV_1024	0x0028
 	#define OSTC_SHUTDOWN	0x0200
 	#define OSTC_MODE	0x8000	/* 0 - reset to 0 when = OST_DATA */
-#define JZ_OST_CNT_U32	0x100020fc	/* copy of CNT_HI when reading CNT_LO */
+#define JZ_OST_CNT_U32	0x000000fc	/* copy of CNT_HI when reading CNT_LO */
 
 static inline void
 writereg(uint32_t reg, uint32_t val)
@@ -329,26 +334,27 @@ MFC0(uint32_t r, uint32_t s)
 #define JZ_ERNG	0x100000d8
 #define JZ_RNG	0x100000dc
 
-/* interrupt controller */
-#define JZ_ICSR0	0x10001000	/* raw IRQ line status */
-#define JZ_ICMR0	0x10001004	/* IRQ mask, 1 masks IRQ */
-#define JZ_ICMSR0	0x10001008	/* sets bits in mask register */
-#define JZ_ICMCR0	0x1000100c	/* clears bits in mask register */
-#define JZ_ICPR0	0x10001010	/* line status after masking */
+/* Interrupt controller */
+#define JZ_ICBASE	0x10001000	/* IC base address */
+#define JZ_ICSR0	0x00000000	/* raw IRQ line status */
+#define JZ_ICMR0	0x00000004	/* IRQ mask, 1 masks IRQ */
+#define JZ_ICMSR0	0x00000008	/* sets bits in mask register */
+#define JZ_ICMCR0	0x0000000c	/* clears bits in mask register */
+#define JZ_ICPR0	0x00000010	/* line status after masking */
 
-#define JZ_ICSR1	0x10001020	/* raw IRQ line status */
-#define JZ_ICMR1	0x10001024	/* IRQ mask, 1 masks IRQ */
-#define JZ_ICMSR1	0x10001028	/* sets bits in mask register */
-#define JZ_ICMCR1	0x1000102c	/* clears bits in maks register */
-#define JZ_ICPR1	0x10001030	/* line status after masking */
+#define JZ_ICSR1	0x00000020	/* raw IRQ line status */
+#define JZ_ICMR1	0x00000024	/* IRQ mask, 1 masks IRQ */
+#define JZ_ICMSR1	0x00000028	/* sets bits in mask register */
+#define JZ_ICMCR1	0x0000002c	/* clears bits in maks register */
+#define JZ_ICPR1	0x00000030	/* line status after masking */
 
-#define JZ_DSR0		0x10001034	/* source for PDMA */
-#define JZ_DMR0		0x10001038	/* mask for PDMA */
-#define JZ_DPR0		0x1000103c	/* pending for PDMA */
+#define JZ_DSR0		0x00000034	/* source for PDMA */
+#define JZ_DMR0		0x00000038	/* mask for PDMA */
+#define JZ_DPR0		0x0000003c	/* pending for PDMA */
 
-#define JZ_DSR1		0x10001040	/* source for PDMA */
-#define JZ_DMR1		0x10001044	/* mask for PDMA */
-#define JZ_DPR1		0x10001048	/* pending for PDMA */
+#define JZ_DSR1		0x00000040	/* source for PDMA */
+#define JZ_DMR1		0x00000044	/* mask for PDMA */
+#define JZ_DPR1		0x00000048	/* pending for PDMA */
 
 /* memory controller */
 #define JZ_DMMAP0	0x13010024

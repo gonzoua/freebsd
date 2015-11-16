@@ -50,6 +50,103 @@ __FBSDID("$FreeBSD$");
 #include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/ofw_bus_subr.h>
 
+#include <mips/ingenic/jz4780_regs.h>
+
+typedef struct apbus_dev {
+	const char *name;	/* driver name */
+	bus_addr_t addr;	/* base address */
+	uint32_t irq;		/* interrupt */
+	uint32_t clk0;		/* bit(s) in CLKGR0 */
+	uint32_t clk1;		/* bit(s) in CLKGR1 */
+	uint32_t clkreg;	/* CGU register */
+} apbus_dev_t;
+
+/*
+ * Hack: steal code from NetBSD until fine-grained CGU is
+ * functional.
+ */
+static const apbus_dev_t apbus_devs[] = {
+	{ "efuse",	JZ_EFUSE,	-1, 0, 0, 0},
+	{ "com",	JZ_UART0,	51, CLK_UART0, 0, 0},
+	{ "com",	JZ_UART1,	50, CLK_UART1, 0, 0},
+	{ "com",	JZ_UART2,	49, CLK_UART2, 0, 0},
+	{ "com",	JZ_UART3,	48, CLK_UART3, 0, 0},
+	{ "com",	JZ_UART4,	34, 0, CLK_UART4, 0},
+	{ "dwctwo",	JZ_DWC2_BASE,   21, CLK_OTG0 | CLK_UHC, CLK_OTG1, 0},
+	{ "ohci",	JZ_OHCI_BASE,    5, CLK_UHC, 0, 0},
+	{ "ehci",	JZ_EHCI_BASE,   20, CLK_UHC, 0, 0},
+	{ "jziic",	JZ_SMB0_BASE,   60, CLK_SMB0, 0, 0},
+	{ "jziic",	JZ_SMB1_BASE,   59, CLK_SMB1, 0, 0},
+	{ "jziic",	JZ_SMB2_BASE,   58, CLK_SMB2, 0, 0},
+	{ "jziic",	JZ_SMB3_BASE,   57, 0, CLK_SMB3, 0},
+	{ "jziic",	JZ_SMB4_BASE,   56, 0, CLK_SMB4, 0},
+	{ "jzmmc",	JZ_MSC0_BASE,   37, CLK_MSC0, 0, JZ_MSC0CDR},
+	{ "jzmmc",	JZ_MSC1_BASE,   36, CLK_MSC1, 0, JZ_MSC1CDR},
+	{ "jzmmc",	JZ_MSC2_BASE,   35, CLK_MSC2, 0, JZ_MSC2CDR},
+	{ "jzfb",	JZ_LCDC0_BASE,  31, CLK_LCD, CLK_HDMI, 0},
+	{ NULL,		-1,             -1, 0, 0, 0}
+};
+
+static void
+apbus_attach(device_t self)
+{
+	uint32_t reg, mpll, m, n, p, mclk, pclk, pdiv, cclk, cdiv;
+
+#ifdef INGENIC_DEBUG
+	printf("core ctrl:   %08x\n", MFC0(12, 2));
+	printf("core status: %08x\n", MFC0(12, 3));
+	printf("REIM: %08x\n", MFC0(12, 4));
+	printf("ID: %08x\n", MFC0(15, 1));
+#endif
+	/* assuming we're using MPLL */
+	mpll = readreg(JZ_CPMPCR);
+	m = (mpll & JZ_PLLM_M) >> JZ_PLLM_S;
+	n = (mpll & JZ_PLLN_M) >> JZ_PLLN_S;
+	p = (mpll & JZ_PLLP_M) >> JZ_PLLP_S;
+
+	/* assuming 48MHz EXTCLK */
+	mclk = (48000 * (m + 1) / (n + 1)) / (p + 1);
+
+	reg = readreg(JZ_CPCCR);
+	pdiv = ((reg & JZ_PDIV_M) >> JZ_PDIV_S) + 1;
+	pclk = mclk / pdiv;
+	cdiv = (reg & JZ_CDIV_M) + 1;
+	cclk = mclk / cdiv;
+
+	device_printf(self, "mclk %d kHz\n", mclk);
+	device_printf(self, "pclk %d kHz\n", pclk);
+	device_printf(self, "CPU clock %d kHz\n", cclk);
+
+	/* enable clocks */
+	reg = readreg(JZ_CLKGR1);
+	reg &= ~CLK_AHB_MON;	/* AHB_MON clock */
+	writereg(JZ_CLKGR1, reg);
+
+	printf("JZ_CLKGR0 %08x\n", readreg(JZ_CLKGR0));
+	printf("JZ_CLKGR1 %08x\n", readreg(JZ_CLKGR1));
+	printf("JZ_SPCR0  %08x\n", readreg(JZ_SPCR0));
+	printf("JZ_SPCR1  %08x\n", readreg(JZ_SPCR1));
+	printf("JZ_SRBC   %08x\n", readreg(JZ_SRBC));
+	printf("JZ_OPCR   %08x\n", readreg(JZ_OPCR));
+	printf("JZ_UHCCDR %08x\n", readreg(JZ_UHCCDR));
+	printf("JZ_ERNG   %08x\n", readreg(JZ_ERNG));
+	printf("JZ_RNG    %08x\n", readreg(JZ_RNG));
+
+	for (const apbus_dev_t *adv = apbus_devs; adv->name != NULL; adv++) {
+		/* enable clocks as needed */
+		if (adv->clk0 != 0) {
+			reg = readreg(JZ_CLKGR0);
+			reg &= ~adv->clk0;
+			writereg(JZ_CLKGR0, reg);
+		}
+
+		if (adv->clk1 != 0) {
+			reg = readreg(JZ_CLKGR1);
+			reg &= ~adv->clk1;
+			writereg(JZ_CLKGR1, reg);
+		}
+	}
+}
 
 struct jz4780_clock_softc {
 	device_t				dev;
@@ -93,6 +190,9 @@ static int
 jz4780_clock_attach(device_t dev)
 {
 	struct jz4780_clock_softc *sc = device_get_softc(dev);
+
+	/* HACK */
+	apbus_attach(dev);
 
 	sc->dev = dev;
 

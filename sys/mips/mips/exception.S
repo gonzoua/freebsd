@@ -640,7 +640,11 @@ NESTED_NOPROFILE(MipsKernIntr, KERN_EXC_FRAME_SIZE, ra)
  *  Call the interrupt handler. a0 points at the saved frame.
  */
 	PTR_LA	gp, _C_LABEL(_gp)
+#ifdef MIPS_INTRNG
+	PTR_LA	k0, _C_LABEL(arm_irq_handler)
+#else
 	PTR_LA	k0, _C_LABEL(cpu_intr)
+#endif
 	jalr	k0
 	REG_S	a3, CALLFRAME_RA + KERN_REG_SIZE(sp)		# for debugging
 
@@ -752,7 +756,11 @@ NESTED_NOPROFILE(MipsUserIntr, CALLFRAME_SIZ, ra)
 /*
  * Call the interrupt handler.
  */
+#ifdef MIPS_INTRNG
+	PTR_LA	k0, _C_LABEL(arm_irq_handler)
+#else
 	PTR_LA	k0, _C_LABEL(cpu_intr)
+#endif
 	jalr	k0
 	REG_S	a3, CALLFRAME_RA(sp)	# for debugging
 
@@ -1184,6 +1192,7 @@ FPReturn:
 	PTR_ADDU sp, sp, CALLFRAME_SIZ
 END(MipsFPTrap)
 
+#ifndef MIPS_INTRNG
 /*
  * Interrupt counters for vmstat.
  */
@@ -1210,6 +1219,7 @@ sintrcnt:
 #else
 	.int  INTRCNT_COUNT * (_MIPS_SZLONG / 8) * 2
 #endif
+#endif /* MIPS_INTRNG */
 
 
 /*

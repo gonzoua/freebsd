@@ -1,5 +1,5 @@
 # $FreeBSD$
 # device.hints
-hint.uart.0.at="nexus"
-hint.uart.0.maddr="0xb0030000"
-hint.uart.0.flags="0x90"
+# hint.uart.0.at="nexus"
+# hint.uart.0.maddr="0xb0030000"
+# hint.uart.0.flags="0x90"

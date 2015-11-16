@@ -143,12 +143,6 @@ jz4780_pinctrl_attach(device_t dev)
 		    &chip->chip_pullups, sizeof(chip->chip_pullups));
 		OF_getencprop(dt_child, "ingenic,pull-downs",
 		    &chip->chip_pulldowns, sizeof(chip->chip_pulldowns));
-
-		if (bootverbose)
-			device_printf(dev,
-			    "Chip controller %u pull-ups 0x%08x pull-downs 0x%08x\n",
-			    chip->chip_index, chip->chip_pullups,
-			    chip->chip_pulldowns);
 		STAILQ_INSERT_TAIL(&sc->chips, chip, chip_link);
 	}
 
@@ -313,10 +307,6 @@ jz4780_pinctrl_configure_pins(device_t dev, phandle_t cfgxref)
 			    pconf[1]);
 			goto done;
 		}
-		if (bootverbose)
-			device_printf(sc->dev,
-			    "chip %u pin %u function %u bias %u\n",
-			    chip->chip_index, pconf[1], pconf[2], bias);
 		/* Configure pin function as requested */
 		jz4780_pinctrl_pin_set_func(sc, chip, pconf[1], pconf[2]);
 		/* Configure pin bias as requested */

@@ -1209,6 +1209,7 @@ dosoftints(void)
 {
 }
 
+#if defined(__arm)
 /*
  * arm_irq_memory_barrier()
  *
@@ -1271,6 +1272,7 @@ arm_irq_memory_barrier(uintptr_t irq)
 	dsb();
 	cpu_l2cache_drain_writebuf();
 }
+#endif
 
 #ifdef SMP
 /*

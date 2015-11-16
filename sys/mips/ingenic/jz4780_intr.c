@@ -1,6 +1,5 @@
 /*-
- * Copyright (c) 2006 Oleksandr Tymoshenko
- * Copyright (c) 2002-2004 Juli Mallett <jmallett@FreeBSD.org>
+ * Copyright (c) 2015 Alexander Kabaev
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -26,253 +25,352 @@
  *
  */
 
+#include "opt_platform.h"
+
 #include <sys/cdefs.h>
 __FBSDID("$FreeBSD$");
-
-#include "opt_hwpmc_hooks.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/bus.h>
-#include <sys/interrupt.h>
-#include <sys/pmc.h>
-#include <sys/pmckern.h>
+#include <sys/kernel.h>
+#include <sys/ktr.h>
+#include <sys/module.h>
+#include <sys/malloc.h>
+#include <sys/rman.h>
+#include <sys/pcpu.h>
+#include <sys/proc.h>
+#include <sys/cpuset.h>
+#include <sys/lock.h>
+#include <sys/mutex.h>
+#include <sys/smp.h>
+#include <sys/sched.h>
+#include <machine/bus.h>
+#include <machine/intr.h>
+#include <machine/smp.h>
 
-#include <machine/clock.h>
-#include <machine/cpu.h>
-#include <machine/cpufunc.h>
-#include <machine/cpuinfo.h>
-#include <machine/cpuregs.h>
-#include <machine/frame.h>
-#include <machine/intr_machdep.h>
-#include <machine/md_var.h>
-#include <machine/trap.h>
+#include <dev/fdt/fdt_common.h>
+#include <dev/ofw/openfirm.h>
+#include <dev/ofw/ofw_bus.h>
+#include <dev/ofw/ofw_bus_subr.h>
 
-static struct intr_event *hardintr_events[NHARD_IRQS];
-static struct intr_event *softintr_events[NSOFT_IRQS];
-static mips_intrcnt_t mips_intr_counters[NSOFT_IRQS + NHARD_IRQS];
+#include <mips/ingenic/jz4780_regs.h>
 
-static int intrcnt_index;
+#include "pic_if.h"
 
-static cpu_intr_mask_t		hardintr_mask_func;
-static cpu_intr_unmask_t	hardintr_unmask_func;
+#define	JZ4780_NIRQS	64
 
-mips_intrcnt_t
-mips_intrcnt_create(const char* name)
+static int jz4780_pic_intr(void *);
+
+struct jz4780_pic_softc {
+	device_t		pic_dev;
+	void *                  pic_intrhand;
+	struct resource *       pic_res[2];
+	struct arm_irqsrc *	pic_irqs[JZ4780_NIRQS];
+	struct mtx		mutex;
+	uint32_t		nirqs;
+};
+
+static struct resource_spec jz4780_pic_spec[] = {
+	{ SYS_RES_MEMORY,	0,	RF_ACTIVE },	/* Registers */
+	{ SYS_RES_IRQ,		0,	RF_ACTIVE },	/* Parent interrupt */
+	{ -1, 0 }
+};
+
+static struct ofw_compat_data compat_data[] = {
+	{"ingenic,jz4780-intc",	true},
+	{NULL,			false}
+};
+
+#define	READ4(_sc, _reg)	bus_read_4((_sc)->pic_res[0], _reg)
+#define	WRITE4(_sc, _reg, _val) bus_write_4((_sc)->pic_res[0], _reg, _val)
+
+static int
+jz4780_pic_probe(device_t dev)
 {
-	mips_intrcnt_t counter = &intrcnt[intrcnt_index++];
 
-	mips_intrcnt_setname(counter, name);
-	return counter;
+	if (!ofw_bus_status_okay(dev))
+		return (ENXIO);
+
+	if (!ofw_bus_search_compatible(dev, compat_data)->ocd_data)
+		return (ENXIO);
+	device_set_desc(dev, "JZ4780 Interrupt Controller");
+	return (BUS_PROBE_DEFAULT);
 }
 
-void
-mips_intrcnt_setname(mips_intrcnt_t counter, const char *name)
+static inline void
+pic_irq_unmask(struct jz4780_pic_softc *sc, u_int irq)
 {
-	int idx = counter - intrcnt;
-
-	KASSERT(counter != NULL, ("mips_intrcnt_setname: NULL counter"));
-
-	snprintf(intrnames + (MAXCOMLEN + 1) * idx,
-	    MAXCOMLEN + 1, "%-*s", MAXCOMLEN, name);
+	if (irq < 32)
+		WRITE4(sc, JZ_ICMCR0, (1u << irq));
+	else
+		WRITE4(sc, JZ_ICMSR1, (1u << (irq - 32)));
 }
 
-static void
-mips_mask_hard_irq(void *source)
+static inline void
+pic_irq_mask(struct jz4780_pic_softc *sc, u_int irq)
 {
-	uintptr_t irq = (uintptr_t)source;
-
-	mips_wr_status(mips_rd_status() & ~(((1 << irq) << 8) << 2));
+	if (irq < 32)
+		WRITE4(sc, JZ_ICMSR1, (1u << irq));
+	else
+		WRITE4(sc, JZ_ICMSR1, (1u << (irq - 32)));
 }
 
-static void
-mips_unmask_hard_irq(void *source)
+static inline intptr_t
+pic_xref(device_t dev)
 {
-	uintptr_t irq = (uintptr_t)source;
-
-	mips_wr_status(mips_rd_status() | (((1 << irq) << 8) << 2));
+	return (OF_xref_from_node(ofw_bus_get_node(dev)));
 }
 
-static void
-mips_mask_soft_irq(void *source)
+static int
+jz4780_pic_attach(device_t dev)
 {
-	uintptr_t irq = (uintptr_t)source;
+	struct jz4780_pic_softc *sc;
+	intptr_t xref = pic_xref(dev);
 
-	mips_wr_status(mips_rd_status() & ~((1 << irq) << 8));
-}
+	sc = device_get_softc(dev);
 
-static void
-mips_unmask_soft_irq(void *source)
-{
-	uintptr_t irq = (uintptr_t)source;
+	if (bus_alloc_resources(dev, jz4780_pic_spec, sc->pic_res)) {
+		device_printf(dev, "could not allocate resources\n");
+		return (ENXIO);
+	}
 
-	mips_wr_status(mips_rd_status() | ((1 << irq) << 8));
-}
+	sc->pic_dev = dev;
 
-/*
- * Perform initialization of interrupts prior to setting 
- * handlings
- */
-void
-cpu_init_interrupts()
-{
-	int i;
-	char name[MAXCOMLEN + 1];
+	/* Initialize mutex */
+	mtx_init(&sc->mutex, "PIC lock", "", MTX_SPIN);
+
+	/* Set the number of interrupts */
+	sc->nirqs = nitems(sc->pic_irqs);
+
+	/* Mask all interrupts */
+	WRITE4(sc, JZ_ICMR0, 0xFFFFFFFF);
+	WRITE4(sc, JZ_ICMR1, 0xFFFFFFFF);
 
 	/*
-	 * Initialize all available vectors so spare IRQ
-	 * would show up in systat output 
+	 * Now, when everything is initialized, it's right time to
+	 * register interrupt controller to interrupt framefork.
 	 */
-	for (i = 0; i < NSOFT_IRQS; i++) {
-		snprintf(name, MAXCOMLEN + 1, "sint%d:", i);
-		mips_intr_counters[i] = mips_intrcnt_create(name);
+	if (arm_pic_register(dev, xref) != 0) {
+		device_printf(dev, "could not register PIC\n");
+		goto cleanup;
 	}
 
-	for (i = 0; i < NHARD_IRQS; i++) {
-		snprintf(name, MAXCOMLEN + 1, "int%d:", i);
-		mips_intr_counters[NSOFT_IRQS + i] = mips_intrcnt_create(name);
+	if (bus_setup_intr(dev, sc->pic_res[1], INTR_TYPE_CLK,
+	    jz4780_pic_intr, NULL, sc, &sc->pic_intrhand)) {
+		device_printf(dev, "could not setup irq handler\n");
+		arm_pic_unregister(dev, xref);
+		goto cleanup;
 	}
+	return (0);
+
+cleanup:
+	bus_release_resources(dev, jz4780_pic_spec, sc->pic_res);
+	return(ENXIO);
 }
 
-void
-cpu_set_hardintr_mask_func(cpu_intr_mask_t func)
+static int
+jz4780_pic_intr(void *arg)
 {
+	struct jz4780_pic_softc *sc = arg;
+	struct arm_irqsrc *isrc;
+	uint32_t i, intr;
 
-	hardintr_mask_func = func;
-}
+	intr = READ4(sc, JZ_ICPR0);
 
-void
-cpu_set_hardintr_unmask_func(cpu_intr_unmask_t func)
-{
-
-	hardintr_unmask_func = func;
-}
-
-void
-cpu_establish_hardintr(const char *name, driver_filter_t *filt,
-    void (*handler)(void*), void *arg, int irq, int flags, void **cookiep)
-{
-	struct intr_event *event;
-	int error;
-
-	/*
-	 * We have 6 levels, but thats 0 - 5 (not including 6)
-	 */
-	if (irq < 0 || irq >= NHARD_IRQS)
-		panic("%s called for unknown hard intr %d", __func__, irq);
-
-	if (hardintr_mask_func == NULL)
-		hardintr_mask_func = mips_mask_hard_irq;
-
-	if (hardintr_unmask_func == NULL)
-		hardintr_unmask_func = mips_unmask_hard_irq;
-
-	event = hardintr_events[irq];
-	if (event == NULL) {
-		error = intr_event_create(&event, (void *)(uintptr_t)irq, 0,
-		    irq, hardintr_mask_func, hardintr_unmask_func,
-		    NULL, NULL, "int%d", irq);
-		if (error)
-			return;
-		hardintr_events[irq] = event;
-		mips_unmask_hard_irq((void*)(uintptr_t)irq);
-	}
-
-	intr_event_add_handler(event, name, filt, handler, arg,
-	    intr_priority(flags), flags, cookiep);
-
-	mips_intrcnt_setname(mips_intr_counters[NSOFT_IRQS + irq],
-			     event->ie_fullname);
-}
-
-void
-cpu_establish_softintr(const char *name, driver_filter_t *filt,
-    void (*handler)(void*), void *arg, int irq, int flags,
-    void **cookiep)
-{
-	struct intr_event *event;
-	int error;
-
-#if 0
-	printf("Establish SOFT IRQ %d: filt %p handler %p arg %p\n",
-	    irq, filt, handler, arg);
-#endif
-	if (irq < 0 || irq > NSOFT_IRQS)
-		panic("%s called for unknown hard intr %d", __func__, irq);
-
-	event = softintr_events[irq];
-	if (event == NULL) {
-		error = intr_event_create(&event, (void *)(uintptr_t)irq, 0,
-		    irq, mips_mask_soft_irq, mips_unmask_soft_irq,
-		    NULL, NULL, "sint%d:", irq);
-		if (error)
-			return;
-		softintr_events[irq] = event;
-		mips_unmask_soft_irq((void*)(uintptr_t)irq);
-	}
-
-	intr_event_add_handler(event, name, filt, handler, arg,
-	    intr_priority(flags), flags, cookiep);
-
-	mips_intrcnt_setname(mips_intr_counters[irq], event->ie_fullname);
-}
-
-void
-cpu_intr(struct trapframe *tf)
-{
-	struct intr_event *event;
-	register_t cause, status;
-	int hard, i, intr;
-
-	critical_enter();
-
-	cause = mips_rd_cause();
-	status = mips_rd_status();
-	intr = (cause & MIPS_INT_MASK) >> 8;
-	/*
-	 * Do not handle masked interrupts. They were masked by 
-	 * pre_ithread function (mips_mask_XXX_intr) and will be 
-	 * unmasked once ithread is through with handler
-	 */
-	intr &= (status & MIPS_INT_MASK) >> 8;
 	while ((i = fls(intr)) != 0) {
-		intr &= ~(1 << (i - 1));
-		switch (i) {
-		case 1: case 2:
-			/* Software interrupt. */
-			i--; /* Get a 0-offset interrupt. */
-			hard = 0;
-			event = softintr_events[i];
-			mips_intrcnt_inc(mips_intr_counters[i]);
-			break;
-		default:
-			/* Hardware interrupt. */
-			i -= 2; /* Trim software interrupt bits. */
-			i--; /* Get a 0-offset interrupt. */
-			hard = 1;
-			event = hardintr_events[i];
-			mips_intrcnt_inc(mips_intr_counters[NSOFT_IRQS + i]);
-			break;
-		}
+		i--;
+		intr &= ~(1u << i);
 
-		if (!event || TAILQ_EMPTY(&event->ie_handlers)) {
-			printf("stray %s interrupt %d\n",
-			    hard ? "hard" : "soft", i);
+		isrc = sc->pic_irqs[i];
+		if (isrc == NULL) {
+			device_printf(sc->pic_dev, "Stray interrupt %u detected\n", i);
+			pic_irq_mask(sc, i);
 			continue;
 		}
-
-		if (intr_event_handle(event, tf) != 0) {
-			printf("stray %s interrupt %d\n", 
-			    hard ? "hard" : "soft", i);
-		}
+		arm_irq_dispatch(isrc, curthread->td_intr_frame);
 	}
 
 	KASSERT(i == 0, ("all interrupts handled"));
 
-	critical_exit();
+	intr = READ4(sc, JZ_ICPR1);
 
-#ifdef HWPMC_HOOKS
-	if (pmc_hook && (PCPU_GET(curthread)->td_pflags & TDP_CALLCHAIN))
-		pmc_hook(PCPU_GET(curthread), PMC_FN_USER_CALLCHAIN, tf);
-#endif
+	while ((i = fls(intr)) != 0) {
+		i--;
+		intr &= ~(1u << i);
+		i += 32;
+
+		isrc = sc->pic_irqs[i];
+		if (isrc == NULL) {
+			device_printf(sc->pic_dev, "Stray interrupt %u detected\n", i);
+			pic_irq_mask(sc, i);
+			continue;
+		}
+		arm_irq_dispatch(isrc, curthread->td_intr_frame);
+	}
+
+	KASSERT(i == 0, ("all interrupts handled"));
+
+	return (FILTER_HANDLED);
 }
+
+static int
+pic_attach_isrc(struct jz4780_pic_softc *sc, struct arm_irqsrc *isrc, u_int irq)
+{
+	const char *name;
+
+	/*
+	 * 1. The link between ISRC and controller must be set atomically.
+	 * 2. Just do things only once in rare case when consumers
+	 *    of shared interrupt came here at the same moment.
+	 */
+	mtx_lock_spin(&sc->mutex);
+	if (sc->pic_irqs[irq] != NULL) {
+		mtx_unlock_spin(&sc->mutex);
+		return (sc->pic_irqs[irq] == isrc ? 0 : EEXIST);
+	}
+	sc->pic_irqs[irq] = isrc;
+	isrc->isrc_data = irq;
+	mtx_unlock_spin(&sc->mutex);
+
+	name = device_get_nameunit(sc->pic_dev);
+	arm_irq_set_name(isrc, "%s,i%u", name, irq);
+	return (0);
+}
+
+static int
+pic_detach_isrc(struct jz4780_pic_softc *sc, struct arm_irqsrc *isrc, u_int irq)
+{
+
+	mtx_lock_spin(&sc->mutex);
+	if (sc->pic_irqs[irq] != isrc) {
+		mtx_unlock_spin(&sc->mutex);
+		return (sc->pic_irqs[irq] == NULL ? 0 : EINVAL);
+	}
+	sc->pic_irqs[irq] = NULL;
+	isrc->isrc_data = 0;
+	mtx_unlock_spin(&sc->mutex);
+
+	arm_irq_set_name(isrc, "%s", "");
+	return (0);
+}
+
+static int
+pic_map_fdt(struct jz4780_pic_softc *sc, struct arm_irqsrc *isrc, u_int *irqp)
+{
+	u_int irq;
+	int error;
+
+	irq = isrc->isrc_cells[0];
+	if (irq >= sc->nirqs)
+		return (EINVAL);
+
+	error = pic_attach_isrc(sc, isrc, irq);
+	if (error != 0)
+		return (error);
+
+	isrc->isrc_nspc_type = ARM_IRQ_NSPC_PLAIN;
+	isrc->isrc_nspc_num = irq;
+	isrc->isrc_trig = INTR_TRIGGER_CONFORM;
+	isrc->isrc_pol = INTR_POLARITY_CONFORM;
+
+	*irqp = irq;
+	return (0);
+}
+
+static int
+jz4780_pic_register(device_t dev, struct arm_irqsrc *isrc, boolean_t *is_percpu)
+{
+	struct jz4780_pic_softc *sc = device_get_softc(dev);
+	u_int irq;
+	int error;
+
+	if (isrc->isrc_type == ARM_ISRCT_FDT)
+		error = pic_map_fdt(sc, isrc, &irq);
+	else
+		return (EINVAL);
+
+	if (error == 0)
+		*is_percpu = TRUE;
+	return (error);
+}
+
+static void
+jz4780_pic_enable_intr(device_t dev, struct arm_irqsrc *isrc)
+{
+	if (isrc->isrc_trig == INTR_TRIGGER_CONFORM)
+		isrc->isrc_trig = INTR_TRIGGER_LEVEL;
+}
+
+static void
+jz4780_pic_enable_source(device_t dev, struct arm_irqsrc *isrc)
+{
+	struct jz4780_pic_softc *sc = device_get_softc(dev);
+	u_int irq = isrc->isrc_data;
+
+	pic_irq_unmask(sc, irq);
+}
+
+static void
+jz4780_pic_disable_source(device_t dev, struct arm_irqsrc *isrc)
+{
+	struct jz4780_pic_softc *sc = device_get_softc(dev);
+	u_int irq = isrc->isrc_data;
+
+	pic_irq_mask(sc, irq);
+}
+
+static int
+jz4780_pic_unregister(device_t dev, struct arm_irqsrc *isrc)
+{
+	struct jz4780_pic_softc *sc = device_get_softc(dev);
+	u_int irq = isrc->isrc_data;
+
+	return (pic_detach_isrc(sc, isrc, irq));
+}
+
+static void
+jz4780_pic_pre_ithread(device_t dev, struct arm_irqsrc *isrc)
+{
+
+	jz4780_pic_disable_source(dev, isrc);
+}
+
+static void
+jz4780_pic_post_ithread(device_t dev, struct arm_irqsrc *isrc)
+{
+
+	jz4780_pic_enable_source(dev, isrc);
+}
+
+static void
+jz4780_pic_post_filter(device_t dev, struct arm_irqsrc *isrc)
+{
+}
+
+static device_method_t jz4780_pic_methods[] = {
+	/* Device interface */
+	DEVMETHOD(device_probe,		jz4780_pic_probe),
+	DEVMETHOD(device_attach,	jz4780_pic_attach),
+	/* Interrupt controller interface */
+	DEVMETHOD(pic_disable_source,	jz4780_pic_disable_source),
+	DEVMETHOD(pic_enable_intr,	jz4780_pic_enable_intr),
+	DEVMETHOD(pic_enable_source,	jz4780_pic_enable_source),
+	DEVMETHOD(pic_post_filter,	jz4780_pic_post_filter),
+	DEVMETHOD(pic_post_ithread,	jz4780_pic_post_ithread),
+	DEVMETHOD(pic_pre_ithread,	jz4780_pic_pre_ithread),
+	DEVMETHOD(pic_register,		jz4780_pic_register),
+	DEVMETHOD(pic_unregister,	jz4780_pic_unregister),
+	{ 0, 0 }
+};
+
+static driver_t jz4780_pic_driver = {
+	"intc",
+	jz4780_pic_methods,
+	sizeof(struct jz4780_pic_softc),
+};
+
+static devclass_t jz4780_pic_devclass;
+
+EARLY_DRIVER_MODULE(intc, ofwbus, jz4780_pic_driver, jz4780_pic_devclass, 0, 0,
+    BUS_PASS_INTERRUPT + BUS_PASS_ORDER_MIDDLE);
