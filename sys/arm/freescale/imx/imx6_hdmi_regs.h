@@ -634,6 +634,7 @@
 #define		CKSYMTXCTRL_TX_TRBON	(1 << 1)
 #define		CKSYMTXCTRL_TX_CK_SYMON	(1 << 0)
 #define	HDMI_PHY_I2C_VLEVCTRL		0x0E
+#define	HDMI_PHY_I2C_CURRCTRL		0x10
 #define	HDMI_PHY_I2C_PLLPHBYCTRL	0x13
 #define		VLEVCTRL_TX_LVL(x)	((x) << 5)
 #define		VLEVCTRL_CK_LVL(x)	(x)

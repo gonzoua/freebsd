@@ -331,6 +331,10 @@ imx_hdmi_phy_configure(struct imx_hdmi_softc *sc)
 	imx_hdmi_phy_test_clear(sc, 0);
 
 	/*
+	 * Following initialization are for 8bit per color case
+	 */
+
+	/*
 	 * PLL/MPLL config, see section 24.7.22 in TRM
 	 *  config, see section 24.7.22
 	 */
@@ -348,18 +352,22 @@ imx_hdmi_phy_configure(struct imx_hdmi_softc *sc)
 		imx_hdmi_phy_i2c_write(sc, GMPCTRL_370, HDMI_PHY_I2C_GMPCTRL);
 	}
 
+	/*
+	 * Values described in TRM section 34.9.2 PLL/MPLL Generic
+	 *    Configuration Settings. Table 34-23.
+	 */
 	if (sc->sc_mode.dot_clock*1000 <= 54000000) {
-		imx_hdmi_phy_i2c_write(sc, 0x091c, 0x10);  /* CURRCTRL */
+		imx_hdmi_phy_i2c_write(sc, 0x091c, HDMI_PHY_I2C_CURRCTRL);
 	} else if (sc->sc_mode.dot_clock*1000 <= 58400000) {
-		imx_hdmi_phy_i2c_write(sc, 0x091c, 0x10);
+		imx_hdmi_phy_i2c_write(sc, 0x091c, HDMI_PHY_I2C_CURRCTRL);
 	} else if (sc->sc_mode.dot_clock*1000 <= 72000000) {
-		imx_hdmi_phy_i2c_write(sc, 0x06dc, 0x10);
+		imx_hdmi_phy_i2c_write(sc, 0x06dc, HDMI_PHY_I2C_CURRCTRL);
 	} else if (sc->sc_mode.dot_clock*1000 <= 74250000) {
-		imx_hdmi_phy_i2c_write(sc, 0x06dc, 0x10);
+		imx_hdmi_phy_i2c_write(sc, 0x06dc, HDMI_PHY_I2C_CURRCTRL);
 	} else if (sc->sc_mode.dot_clock*1000 <= 118800000) {
-		imx_hdmi_phy_i2c_write(sc, 0x091c, 0x10);
+		imx_hdmi_phy_i2c_write(sc, 0x091c, HDMI_PHY_I2C_CURRCTRL);
 	} else if (sc->sc_mode.dot_clock*1000 <= 216000000) {
-		imx_hdmi_phy_i2c_write(sc, 0x06dc, 0x10);
+		imx_hdmi_phy_i2c_write(sc, 0x06dc, HDMI_PHY_I2C_CURRCTRL);
 	} else {
 		panic("Unsupported mode\n");
 	}
