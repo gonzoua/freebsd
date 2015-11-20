@@ -34,11 +34,15 @@ __FBSDID("$FreeBSD$");
 #include <sys/module.h>
 
 #include <dev/fdt/fdt_common.h>
-#include <dev/ofw/openfirm.h>
+#include <dev/fdt/fdt_clock.h>
 #include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/ofw_bus_subr.h>
 
 /* Simple placeholder driver for fixed clocks */
+
+struct fixed_clock_softc {
+	uint32_t frequency;
+};
 
 static int
 fixed_clock_probe(device_t dev)
@@ -58,6 +62,7 @@ fixed_clock_probe(device_t dev)
 static int
 fixed_clock_attach(device_t dev)
 {
+	struct fixed_clock_softc *sc = device_get_softc(dev);
 	phandle_t node;
 	pcell_t freq;
 
@@ -68,21 +73,56 @@ fixed_clock_attach(device_t dev)
 		return (ENXIO);
 	}
 
+	sc->frequency = freq;
 	device_printf(dev, "frequency %u HZ\n", freq);
 	return 0;
+}
+
+static int
+fixed_clock_enable(device_t dev, int index)
+{
+
+	return (0);
+}
+
+static int
+fixed_clock_disable(device_t dev, int index)
+{
+
+	return (0);
+}
+
+static int
+fixed_clock_get_info(device_t dev, int index, struct fdt_clock_info *info)
+{
+	struct fixed_clock_softc *sc = device_get_softc(dev);
+
+	/* We are always running */
+	info->index = 0;
+	info->flags = FDT_CIFLAG_RUNNING;
+	info->frequency = sc->frequency;
+	info->name = ofw_bus_get_name(dev);
+
+	return (0);
 }
 
 static device_method_t fixed_clock_methods[] = {
 	/* Device interface */
 	DEVMETHOD(device_probe, fixed_clock_probe),
 	DEVMETHOD(device_attach, fixed_clock_attach),
-	{0, 0}
+
+	/* fdt_clock interface */
+	DEVMETHOD(fdt_clock_enable,	fixed_clock_enable),
+	DEVMETHOD(fdt_clock_disable,	fixed_clock_disable),
+	DEVMETHOD(fdt_clock_get_info,	fixed_clock_get_info),
+
+	DEVMETHOD_END
 };
 
 static driver_t fixed_clock_driver = {
 	"fixedclock",
 	fixed_clock_methods,
-	0
+	sizeof(struct fixed_clock_softc)
 };
 
 static devclass_t fixed_clock_devclass;
