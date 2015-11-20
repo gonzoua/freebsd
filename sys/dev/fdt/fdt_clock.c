@@ -54,21 +54,44 @@ enable_disable_all(device_t consumer, boolean_t enable)
 	phandle_t cnode;
 	device_t clockdev;
 	int clocknum, err, i, ncells;
-	uint32_t *clks;
+	uint32_t *clks, clockcells;
 	boolean_t anyerrors;
 
 	cnode = ofw_bus_get_node(consumer);
 	ncells = OF_getencprop_alloc(cnode, "clocks", sizeof(*clks),
 	    (void **)&clks);
-	if (enable && ncells < 2) {
+	if (enable && ncells < 1) {
 		device_printf(consumer, "Warning: No clocks specified in fdt "
 		    "data; device may not function.");
 		return (ENXIO);
 	}
 	anyerrors = false;
-	for (i = 0; i < ncells; i += 2) {
-		clockdev = OF_device_from_xref(clks[i]);
-		clocknum = clks[i + 1];
+	for (i = 0; i < ncells; i++) {
+		/* This can be a fixed clock with #clock-cells 0 */
+		cnode = OF_node_from_xref(clks[i]);
+		if (OF_getencprop(cnode, "#clock-cells", &clockcells,
+		    sizeof(clockcells)) <= 0)
+			clockcells = 1;
+		/* We only handle #clock-cells of 1 and 0 here */
+		if (clockcells > 1) {
+			if (enable)
+				device_printf(consumer, "Warning: clocks with "
+				    "#clock-cells of %u are not supported\n",
+				    clockcells);
+			anyerrors = true;
+			continue;
+		}
+		if (i + clockcells >= ncells) {
+			if (enable)
+				device_printf(consumer, "Warning: clocks with "
+				    "#clock-cells of %u are not supported\n",
+				    clockcells);
+			anyerrors = true;
+			continue;
+		}
+		cnode = clks[i];
+		clocknum = clockcells ? clks[i++] : 0;
+		clockdev = OF_device_from_xref(cnode);
 		if (clockdev == NULL) {
 			if (enable)
 				device_printf(consumer, "Warning: can not find "
@@ -99,33 +122,45 @@ fdt_clock_get_info(device_t consumer, int n, struct fdt_clock_info *info)
 	phandle_t cnode;
 	device_t clockdev;
 	int clocknum, err, ncells;
-	uint32_t *clks;
+	uint32_t *clks, clockcells;
+	int i;
 
 	cnode = ofw_bus_get_node(consumer);
 	ncells = OF_getencprop_alloc(cnode, "clocks", sizeof(*clks),
 	    (void **)&clks);
 	if (ncells <= 0)
 		return (ENXIO);
-	n *= 2;
-	if (ncells <= n)
-		err = ENXIO;
-	else {
-		clockdev = OF_device_from_xref(clks[n]);
-		if (clockdev == NULL)
-			err = ENXIO;
-		else  {
+	/* Assume the worst */
+	err = ENXIO;
+	/* Locate the clock requested. */
+	for (i = 0; i < ncells; i += clockcells + 1, n--) {
+		/* This can be a fixed clock with #clock-cells 0 */
+		cnode = OF_node_from_xref(clks[i]);
+		if (OF_getencprop(cnode, "#clock-cells", &clockcells,
+		    sizeof(clockcells)) <= 0)
+			clockcells = 1;
+		/* Missing clock number cell is always bad */
+		if (i + clockcells >= ncells)
+			break;
+		/* Skip this node if it is not the one we are looking for */
+		if (n > 0)
+			continue;
+		/* This got to be our clock, see if we can interrogate it */
+		clockdev = OF_device_from_xref(clks[i]);
+		if (clockdev != NULL && clockcells <= 1) {
 			/*
 			 * Make struct contents minimally valid, then call
 			 * provider to fill in what it knows (provider can
 			 * override anything it wants to).
 			 */
-			clocknum = clks[n + 1];
+			clocknum = clockcells ? clks[i + 1] : 0;
 			bzero(info, sizeof(*info));
 			info->provider = clockdev;
 			info->index = clocknum;
 			info->name = "";
 			err = FDT_CLOCK_GET_INFO(clockdev, clocknum, info);
 		}
+		break;
 	}
 	free(clks, M_OFWPROP);
 	return (err);
