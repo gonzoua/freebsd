@@ -3,10 +3,11 @@
 mips/ingenic/jz4780_clock.c	optional fdt_clock
 mips/ingenic/jz4780_pinctrl.c	optional fdt_pinctrl
 
+mips/ingenic/jz4780_fclock.c	standard
 mips/ingenic/jz4780_intr.c	standard
 mips/ingenic/jz4780_machdep.c	standard
+mips/ingenic/jz4780_nemc.c	standard
 mips/ingenic/jz4780_timer.c	standard
-mips/ingenic/jz4780_fclock.c	standard
 
 #
 # Hack to reuse ARM intrng code
