@@ -171,13 +171,18 @@ MFC0(uint32_t r, uint32_t s)
 
 #define CP0_CORE_MBOX	20	/* select 0 for core 0, 1 for 1 */
 
-/* power management */
-#define JZ_CPCCR	0x10000000	/* Clock Control Register */
+/* Clock management */
+#define JZ_CGU_BASE	0x10000000
+
+#define JZ_CPCCR	0x00000000	/* Clock Control Register */
 	#define JZ_PDIV_M	0x000f0000	/* PCLK divider mask */
 	#define JZ_PDIV_S	16		/* PCLK divider shift */
 	#define JZ_CDIV_M	0x0000000f	/* CPU clock divider mask */
 	#define JZ_CDIV_S	0		/* CPU clock divider shift */
+#define JZ_CPACPR	0x00000010	/* APLL */
 #define JZ_CPMPCR	0x00000014	/* MPLL */
+#define JZ_CPEPCR	0x00000018	/* EPLL */
+#define JZ_CPVPCR	0x0000001C	/* VPLL */
 	#define JZ_PLLM_S	19		/* PLL multiplier shift */
 	#define JZ_PLLM_M	0xfff80000	/* PLL multiplier mask */
 	#define JZ_PLLN_S	13		/* PLL divider shift */
@@ -187,7 +192,7 @@ MFC0(uint32_t r, uint32_t s)
 	#define JZ_PLLON	0x00000010	/* PLL is on and stable */
 	#define JZ_PLLBP	0x00000002	/* PLL bypass */
 	#define JZ_PLLEN	0x00000001	/* PLL enable */
-#define JZ_CLKGR0	0x10000020	/* CLocK Gating Registers */
+#define JZ_CLKGR0	0x00000020	/* Clock Gating Registers */
 	#define CLK_NEMC	(1 << 0)
 	#define CLK_BCH		(1 << 1)
 	#define CLK_OTG0	(1 << 2)
@@ -220,23 +225,7 @@ MFC0(uint32_t r, uint32_t s)
 	#define CLK_IPU		(1 << 29)
 	#define CLK_DDR0	(1 << 30)
 	#define CLK_DDR1	(1 << 31)
-
-#define JZ_OPCR		0x10000024	/* Oscillator Power Control Reg. */
-	#define OPCR_IDLE_DIS	0x80000000	/* don't stop CPU clk on idle */
-	#define OPCR_GPU_CLK_ST	0x40000000	/* stop GPU clock */
-	#define OPCR_L2CM_M	0x0c000000
-	#define OPCR_L2CM_ON	0x00000000	/* L2 stays on in sleep */
-	#define OPCR_L2CM_RET	0x04000000	/* L2 retention mode in sleep */
-	#define OPCR_L2CM_OFF	0x08000000	/* L2 powers down in sleep */
-	#define OPCR_SPENDN0	0x00000080	/* 0 - OTG port forced down */
-	#define OPCR_SPENDN1	0x00000040	/* 0 - UHC port forced down */
-	#define OPCR_BUS_MODE	0x00000020	/* 1 - bursts */
-	#define OPCR_O1SE	0x00000010	/* EXTCLK on in sleep */
-	#define OPCR_PD		0x00000008	/* P0 down in sleep */
-	#define OPCR_ERCS	0x00000004	/* 1 RTCCLK, 0 EXTCLK/512 */
-	#define OPCR_CPU_MODE	0x00000002	/* 1 access 'accelerated' */
-	#define OPCR_OSE	0x00000001	/* disable EXTCLK */
-#define JZ_CLKGR1	0x10000028	/* CLocK Gating Registers */
+#define JZ_CLKGR1	0x00000028	/* Clock Gating Registers */
 	#define CLK_SMB3	(1 << 0)
 	#define CLK_TSSI1	(1 << 1)
 	#define CLK_VPU		(1 << 2)
@@ -253,8 +242,44 @@ MFC0(uint32_t r, uint32_t s)
 	#define CLK_DES		(1 << 13)
 	#define CLK_X2D		(1 << 14)
 	#define CLK_P1		(1 << 15)
-
-#define JZ_USBPCR	0x1000003c
+#define JZ_DDCDR	0x0000002c	/* DDR clock divider register */
+#define JZ_VPUCDR	0x00000030	/* VPU clock divider register */
+#define JZ_I2SCDR	0x00000060	/* I2S device clock divider register */
+#define JZ_I2S1CDR	0x000000a0	/* I2S device clock divider register */
+#define JZ_USBCDR	0x00000050	/* OTG PHY clock divider register */
+#define JZ_LP0CDR	0x00000054	/* LCD0 pix clock divider register */
+#define JZ_LP1CDR	0x00000064	/* LCD1 pix clock divider register */
+#define JZ_MSC0CDR	0x00000068	/* MSC0 clock divider register */
+#define JZ_MSC1CDR	0x000000a4	/* MSC1 clock divider register */
+#define JZ_MSC2CDR	0x000000a8	/* MSC2 clock divider register */
+	#define MSCCDR_SCLK_A	0x40000000
+	#define MSCCDR_MPLL	0x80000000
+	#define MSCCDR_CE	0x20000000
+	#define MSCCDR_BUSY	0x10000000
+	#define MSCCDR_STOP	0x08000000
+	#define MSCCDR_PHASE	0x00008000	/* 0 - 90deg phase, 1 - 180 */
+	#define MSCCDR_DIV_M	0x000000ff	/* src / ((div + 1) * 2) */
+	#define UHCCDR_DIV_M	0x000000ff
+#define JZ_UHCCDR	0x0000006c	/* UHC 48M clock divider register */
+	#define UHCCDR_SCLK_A	0x00000000
+	#define UHCCDR_MPLL	0x40000000
+	#define UHCCDR_EPLL	0x80000000
+	#define UHCCDR_OTG_PHY	0xc0000000
+	#define UHCCDR_CE	0x20000000
+	#define UHCCDR_BUSY	0x10000000
+	#define UHCCDR_STOP	0x08000000
+	#define UHCCDR_DIV_M	0x000000ff
+#define JZ_SSICDR	0x00000074	/* SSI clock divider register */
+#define JZ_CIMCDR	0x0000007c	/* CIM MCLK clock divider register */
+#define JZ_PCMCDR	0x00000084	/* PCM device clock divider register */
+#define JZ_GPUCDR	0x00000088	/* GPU clock divider register */
+#define JZ_HDMICDR	0x0000008c	/* HDMI clock divider register */
+#define JZ_BCHCDR	0x000000ac	/* BCH clock divider register */
+#define JZ_CPM_INTR	0x000000b0	/* CPM interrupt register */
+#define JZ_CPM_INTRE	0x000000b4	/* CPM interrupt enable register */
+#define JZ_CPSPR	0x00000034	/* CPM scratch register */
+#define JZ_CPSRPR	0x00000038	/* CPM scratch protected register */
+#define JZ_USBPCR	0x1000003c	/* USB parameter control register */
 	#define PCR_USB_MODE		0x80000000	/* 1 - otg */
 	#define PCR_AVLD_REG		0x40000000
 	#define PCR_IDPULLUP_MASK	0x30000000
@@ -273,9 +298,9 @@ MFC0(uint32_t r, uint32_t s)
 	#define PCR_TXPREEMPHTUNE	0x00000040
 	#define PCR_TXHSXVTUNE		0x00000030
 	#define PCR_TXVREFTUNE		0x0000000f
-#define JZ_USBRDT	0x10000040	/* Reset Detect Timer Register */
-#define JZ_USBVBFIL	0x10000044
-#define JZ_USBPCR1	0x10000048
+#define JZ_USBRDT	0x00000040	/* Reset detect timer register */
+#define JZ_USBVBFIL	0x00000044	/* USB jitter filter register */
+#define JZ_USBPCR1	0x00000048	/* USB parameter control register 1 */
 	#define PCR_SYNOPSYS	0x10000000	/* Mentor mode otherwise */
 	#define PCR_REFCLK_CORE	0x0c000000
 	#define PCR_REFCLK_XO25	0x04000000
@@ -285,7 +310,7 @@ MFC0(uint32_t r, uint32_t s)
 	#define PCR_CLK_48	0x02000000	/* 48MHz */
 	#define PCR_CLK_24	0x01000000	/* 24MHz */
 	#define PCR_CLK_12	0x00000000	/* 12MHz */
-	#define PCR_DMPD1	0x00800000	/* pull down D- on port 1 */ 
+	#define PCR_DMPD1	0x00800000	/* pull down D- on port 1 */
 	#define PCR_DPPD1	0x00400000	/* pull down D+ on port 1 */
 	#define PCR_PORT0_RST	0x00200000	/* port 0 reset */
 	#define PCR_PORT1_RST	0x00100000	/* port 1 reset */
@@ -299,31 +324,26 @@ MFC0(uint32_t r, uint32_t s)
 	#define PCR_TXVREFTUNE1	0x00000017	/* HS DC voltage adj. */
 	#define PCR_TXRISETUNE1	0x00000001	/* rise/fall wave adj. */
 
-#define JZ_UHCCDR	0x1000006c	/* UHC Clock Divider Register */
-	#define UHCCDR_SCLK_A	0x00000000
-	#define UHCCDR_MPLL	0x40000000
-	#define UHCCDR_EPLL	0x80000000
-	#define UHCCDR_OTG_PHY	0xc0000000
-	#define UHCCDR_CE	0x20000000
-	#define UHCCDR_BUSY	0x10000000
-	#define UHCCDR_STOP	0x08000000
-	#define UHCCDR_DIV_M	0x000000ff
-#define JZ_SPCR0	0x100000b8	/* SRAM Power Control Registers */
-#define JZ_SPCR1	0x100000bc
-#define JZ_SRBC		0x100000c4	/* Soft Reset & Bus Control */
+/* power manager */
+#define JZ_OPCR		0x00000024	/* Oscillator Power Control Reg. */
+	#define OPCR_IDLE_DIS	0x80000000	/* don't stop CPU clk on idle */
+	#define OPCR_GPU_CLK_ST	0x40000000	/* stop GPU clock */
+	#define OPCR_L2CM_M	0x0c000000
+	#define OPCR_L2CM_ON	0x00000000	/* L2 stays on in sleep */
+	#define OPCR_L2CM_RET	0x04000000	/* L2 retention mode in sleep */
+	#define OPCR_L2CM_OFF	0x08000000	/* L2 powers down in sleep */
+	#define OPCR_SPENDN0	0x00000080	/* 0 - OTG port forced down */
+	#define OPCR_SPENDN1	0x00000040	/* 0 - UHC port forced down */
+	#define OPCR_BUS_MODE	0x00000020	/* 1 - bursts */
+	#define OPCR_O1SE	0x00000010	/* EXTCLK on in sleep */
+	#define OPCR_PD		0x00000008	/* P0 down in sleep */
+	#define OPCR_ERCS	0x00000004	/* 1 RTCCLK, 0 EXTCLK/512 */
+	#define OPCR_CPU_MODE	0x00000002	/* 1 access 'accelerated' */
+	#define OPCR_OSE	0x00000001	/* disable EXTCLK */
 
-/* clock divider registers */
-#define JZ_MSC0CDR	0x10000068
-	#define MSCCDR_SCLK_A	0x40000000
-	#define MSCCDR_MPLL	0x80000000
-	#define MSCCDR_CE	0x20000000
-	#define MSCCDR_BUSY	0x10000000
-	#define MSCCDR_STOP	0x08000000
-	#define MSCCDR_PHASE	0x00008000	/* 0 - 90deg phase, 1 - 180 */
-	#define MSCCDR_DIV_M	0x000000ff	/* src / ((div + 1) * 2) */
-	#define UHCCDR_DIV_M	0x000000ff
-#define JZ_MSC1CDR	0x100000a4
-#define JZ_MSC2CDR	0x100000a8
+#define JZ_SPCR0	0x000000b8	/* SRAM Power Control Registers */
+#define JZ_SPCR1	0x000000bc
+#define JZ_SRBC		0x000000c4	/* Soft Reset & Bus Control */
 
 /*
  * random number generator
@@ -331,8 +351,8 @@ MFC0(uint32_t r, uint32_t s)
  * Its function currently isn't documented by Ingenic.
  * However, testing suggests that it works as expected.
  */
-#define JZ_ERNG	0x100000d8
-#define JZ_RNG	0x100000dc
+#define JZ_ERNG	0x000000d8
+#define JZ_RNG	0x000000dc
 
 /* Interrupt controller */
 #define JZ_ICBASE	0x10001000	/* IC base address */
@@ -396,18 +416,18 @@ MFC0(uint32_t r, uint32_t s)
 /*
  * INT == 1: 0 - level triggered, 1 - edge triggered
  * INT == 0: 0 - device select, see below
- */ 
+ */
 #define JZ_GPIO_PAT1	0x00000030	/* pattern 1 register */
 #define JZ_GPIO_PAT1S	0x00000034	/* pattern 1 set register */
 #define JZ_GPIO_PAT1C	0x00000038	/* pattern 1 clear register */
 /*
  * INT == 1:
  *   PAT1 == 0: 0 - trigger on low, 1 - trigger on high
- *   PAT1 == 1: 0 - trigger on falling edge, 1 - trigger on rising edge
+ *   PAT0 == 1: 0 - trigger on falling edge, 1 - trigger on rising edge
  * INT == 0:
  *   MASK == 0:
  *     PAT1 == 0: 0 - device 0, 1 - device 1
- *     PAT1 == 1: 0 - device 2, 1 - device 3
+ *     PAT0 == 1: 0 - device 2, 1 - device 3
  *   MASK == 1:
  *     PAT1 == 0: set gpio output
  *     PAT1 == 1: pin is input
@@ -764,6 +784,5 @@ MFC0(uint32_t r, uint32_t s)
 # define JZ_NEMC_SACR_ADDR_MASK	(((1 << JZ_NEMC_SACR_ADDR_WIDTH) - 1) << JZ_NEMC_SACR_ADDR_SHIFT)
 
 #define JC_NEMC_NFSCR	0x50
-
 
 #endif /* INGENIC_REGS_H */
