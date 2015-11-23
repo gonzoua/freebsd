@@ -5,9 +5,13 @@ mips/ingenic/jz4780_pinctrl.c	optional fdt_pinctrl
 
 mips/ingenic/jz4780_fclock.c	standard
 mips/ingenic/jz4780_intr.c	standard
+mips/ingenic/jz4780_gpio.c	standard
 mips/ingenic/jz4780_machdep.c	standard
 mips/ingenic/jz4780_nemc.c	standard
 mips/ingenic/jz4780_timer.c	standard
+
+# Custom interface between pinctrl and gpio
+mips/ingenic/jz4780_gpio_if.m	standard
 
 #
 # Hack to reuse ARM intrng code
