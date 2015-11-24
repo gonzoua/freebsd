@@ -1255,6 +1255,7 @@ dev/digi/Xr.c			optional digi_Xr
 dev/digi/digi.c			optional digi
 dev/digi/digi_isa.c		optional digi isa
 dev/digi/digi_pci.c		optional digi pci
+dev/dme/if_dme.c		optional dme
 dev/dpt/dpt_eisa.c		optional dpt eisa
 dev/dpt/dpt_pci.c		optional dpt pci
 dev/dpt/dpt_scsi.c		optional dpt

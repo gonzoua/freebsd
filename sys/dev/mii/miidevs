@@ -210,6 +210,7 @@ model xxVITESSE VSC8601		0x0002 Vitesse VSC8601 10/100/1000TX PHY
 
 /* Davicom Semiconductor PHYs */
 /* AMD Am79C873 seems to be a relabeled DM9101 */
+model xxDAVICOM DM9000		0x000c DM9000 10/100 media interface
 model xxDAVICOM DM9101		0x0000 DM9101 (AMD Am79C873) 10/100 media interface
 model xxDAVICOM DM9102		0x0004 DM9102 10/100 media interface
 model yyDAVICOM DM9101		0x0000 DM9101 10/100 media interface
