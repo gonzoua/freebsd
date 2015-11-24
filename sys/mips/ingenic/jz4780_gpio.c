@@ -37,6 +37,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/module.h>
 #include <sys/lock.h>
 #include <sys/mutex.h>
+#include <sys/proc.h>
 #include <sys/resource.h>
 #include <sys/gpio.h>
 
@@ -166,19 +167,19 @@ jz4780_gpio_pin_set_direction(struct jz4780_gpio_softc *sc,
 		if (sc->pins[pin].pin_caps & dir)
 			CSR_WRITE_4(sc, JZ_GPIO_PAT1C, mask);
 		else
-			return EINVAL;
+			return (EINVAL);
 		break;
 	case GPIO_PIN_INPUT:
 		if (sc->pins[pin].pin_caps & dir)
 			CSR_WRITE_4(sc, JZ_GPIO_PAT1S, mask);
 		else
-			return EINVAL;
+			return (EINVAL);
 		break;
 	}
 
 	sc->pins[pin].pin_flags &= ~(GPIO_PIN_INPUT | GPIO_PIN_OUTPUT);
 	sc->pins[pin].pin_flags |= dir;
-	return 0;
+	return (0);
 }
 
 static int
@@ -193,18 +194,18 @@ jz4780_gpio_pin_set_bias(struct jz4780_gpio_softc *sc,
 		if (sc->pins[pin].pin_caps & bias)
 			CSR_WRITE_4(sc, JZ_GPIO_DPULLC, mask);
 		else
-			return EINVAL;
+			return (EINVAL);
 		break;
 	case 0:
 		CSR_WRITE_4(sc, JZ_GPIO_DPULLS, mask);
 		break;
 	default:
-		return ENOTSUP;
+		return (ENOTSUP);
 	}
 
 	sc->pins[pin].pin_flags &= ~(GPIO_PIN_PULLUP | GPIO_PIN_PULLDOWN);
 	sc->pins[pin].pin_flags |= bias;
-	return 0;
+	return (0);
 }
 
 /*
@@ -368,7 +369,7 @@ jz4780_gpio_configure_pin(device_t dev, uint32_t pin, uint32_t func,
 	if (retval == 0)
 		retval = jz4780_gpio_pin_set_bias(sc, pin, flags);
 	JZ4780_GPIO_UNLOCK(sc);
-	return retval;
+	return (retval);
 }
 
 static device_t
@@ -689,7 +690,22 @@ jz4780_gpio_pic_post_filter(device_t dev, struct arm_irqsrc *isrc)
 static int
 jz4780_gpio_intr(void *arg)
 {
-	return FILTER_HANDLED;
+	struct jz4780_gpio_softc *sc;
+	uint32_t i, interrupts;
+
+	sc = arg;
+	interrupts = CSR_READ_4(sc, JZ_GPIO_FLAG);
+
+	for (i = 0; interrupts != 0; i++, interrupts >>= 1) {
+		if ((interrupts & 0x1) == 0)
+			continue;
+		if (sc->pins[i].pin_irqsrc)
+			arm_irq_dispatch(sc->pins[i].pin_irqsrc, curthread->td_intr_frame);
+		else
+			device_printf(sc->dev, "spurious interrupt %d\n", i);
+	}
+
+	return (FILTER_HANDLED);
 }
 
 static device_method_t jz4780_gpio_methods[] = {

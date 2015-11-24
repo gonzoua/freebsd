@@ -153,7 +153,7 @@ struct jx4780_bias_prop {
 };
 
 static struct jx4780_bias_prop jx4780_bias_table[] = {
-	{ "bias-disable", GPIO_PIN_TRISTATE },
+	{ "bias-disable", 0 },
 	{ "bias-pull-up", GPIO_PIN_PULLUP },
 	{ "bias-pull-down", GPIO_PIN_PULLDOWN },
 };
