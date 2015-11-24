@@ -2880,10 +2880,12 @@ device_attach(device_t dev)
 	 * need to be adjusted on other platforms.
 	 */
 #define	RANDOM_PROBE_BIT_GUESS	4
+#if 0
 	if (bootverbose)
 		printf("random: harvesting attach, %zu bytes (%d bits) from %s%d\n",
 		    sizeof(attachtime), RANDOM_PROBE_BIT_GUESS,
 		    dev->driver->name, dev->unit);
+#endif
 	random_harvest_direct(&attachtime, sizeof(attachtime),
 	    RANDOM_PROBE_BIT_GUESS, RANDOM_ATTACH);
 	device_sysctl_update(dev);
