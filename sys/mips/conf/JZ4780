@@ -48,11 +48,11 @@ options 	INVARIANT_SUPPORT	#Extra sanity checks of internal structures, required
 device		loop
 device		ether
 #device		le
-#device		miibus
-#device		bpf
-#device		md
+device		miibus
+device		bpf
+device		md
 device		uart
-#device		random
+device		random
 
 device		fdt_clock
 device		fdt_pinctrl

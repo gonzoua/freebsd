@@ -12,3 +12,4 @@ makeoptions	FDT_DTS_FILE=ci20.dts
 makeoptions 	TRAMPLOADADDR=0x88000000
 
 #options		VERBOSE_SYSINIT
+device		dme
