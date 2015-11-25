@@ -267,19 +267,18 @@ jz4780_gpio_pin_probe(struct jz4780_gpio_softc *sc, uint32_t pin)
 		/* Check for bias */
 		val = CSR_READ_4(sc, JZ_GPIO_DPULL);
 		if ((val & mask) == 0)
-			sc->pins[pin].pin_flags = sc->pins[pin].pin_caps &
+			sc->pins[pin].pin_flags |= sc->pins[pin].pin_caps &
 				(GPIO_PIN_PULLUP | GPIO_PIN_PULLDOWN);
 		sc->pins[pin].pin_func = JZ_FUNC_GPIO;
 		return;
 	}
 	/* By exclusion, pin is in alternate function mode */
-	val = ((CSR_READ_4(sc, JZ_GPIO_PAT1) & mask) >> pin) << 1;
-	val = val | ((CSR_READ_4(sc, JZ_GPIO_PAT1) & mask) >> pin);
-	/* Check for bias */
 	val = CSR_READ_4(sc, JZ_GPIO_DPULL);
 	if ((val & mask) == 0)
 		sc->pins[pin].pin_flags = sc->pins[pin].pin_caps &
 			(GPIO_PIN_PULLUP | GPIO_PIN_PULLDOWN);
+	val = ((CSR_READ_4(sc, JZ_GPIO_PAT1) & mask) >> pin) << 1;
+	val = val | ((CSR_READ_4(sc, JZ_GPIO_PAT1) & mask) >> pin);
 	sc->pins[pin].pin_func = (enum pin_function)val;
 }
 
@@ -472,8 +471,7 @@ jz4780_gpio_pin_set(device_t dev, uint32_t pin, unsigned int value)
 	mask = (1u << pin);
 	sc = device_get_softc(dev);
 	JZ4780_GPIO_LOCK(sc);
-	if (sc->pins[pin].pin_func == JZ_FUNC_GPIO &&
-	    sc->pins[pin].pin_flags & GPIO_PIN_OUTPUT) {
+	if (sc->pins[pin].pin_func == JZ_FUNC_GPIO) {
 		CSR_WRITE_4(sc, value ? JZ_GPIO_PAT0S : JZ_GPIO_PAT0C, mask);
 		retval = 0;
 	}
