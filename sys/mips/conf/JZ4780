@@ -56,5 +56,7 @@ device		uart
 
 device		fdt_clock
 device		fdt_pinctrl
+device		fdt_regulator
+device		fdt_regulator_fixed
 
 device		gpio
