@@ -53,6 +53,28 @@ METHOD int get {
 	intptr_t	id;
 	int		*value;
 };
+
+#
+# set regulator voltage
+# Returns 0 on success or a standard errno value.
+#
+METHOD int set_voltage {
+	device_t	provider;
+	intptr_t	id;
+	int		min_uvolt;
+	int		max_uvolt;
+};
+
+#
+# get regulator voltage
+# Returns 0 on success or a standard errno value.
+#
+METHOD int get_voltage {
+	device_t	provider;
+	intptr_t	id;
+	int		*uvolt;
+};
+
 #
 # map fdt property cells to regulator number
 # Returns 0 on success or a standard errno value.

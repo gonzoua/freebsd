@@ -53,6 +53,10 @@ int fdt_regulator_status(device_t consumer, regulator_t reg, int *value);
  * get/set_current
  * get_load
  */
+int fdt_regulator_set_voltage(device_t consumer, regulator_t reg,
+    int min_uvolt, int max_uvolt);
+int fdt_regulator_get_voltage(device_t consumer, regulator_t reg, int *uvolt);
+
 /*
  *  Helper function for quick enable
  */

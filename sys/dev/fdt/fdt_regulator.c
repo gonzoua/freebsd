@@ -39,7 +39,7 @@
 
 struct regulator_handle {
 	device_t 	device;		/* provider device*/
-	uintptr_t	regulator_id;		/* regulator id */
+	uintptr_t	regulator_id;	/* regulator id */
 };
 
 int fdt_regulator_default_map(device_t provider, phandle_t xref, int ncells,
@@ -54,6 +54,23 @@ int fdt_regulator_default_map(device_t provider, phandle_t xref, int ncells,
 		return (0);
 	}
 	return (ERANGE);
+}
+
+int
+fdt_regulator_set_voltage(device_t consumer, regulator_t reg, int min_uvolt,
+    int max_uvolt)
+{
+
+	return (FDT_REGULATOR_SET_VOLTAGE(reg->device, reg->regulator_id,
+	    min_uvolt, max_uvolt));
+}
+
+int
+fdt_regulator_get_voltage(device_t consumer, regulator_t reg, int *uvolt)
+{
+
+	return (FDT_REGULATOR_GET_VOLTAGE(reg->device, reg->regulator_id,
+	    uvolt));
 }
 
 int

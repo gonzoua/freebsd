@@ -39,6 +39,7 @@
 #include <machine/fdt.h>
 
 #include <dev/fdt/fdt_regulator.h>
+#include <dev/gpio/gpiobusvar.h>
 #include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/ofw_bus_subr.h>
 
@@ -156,21 +157,20 @@ regulator_fixed_configure_gpio(struct regulator_fixed_softc *sc)
 
 	rv = GPIO_PIN_SET(sc->gpio_en->dev, sc->gpio_en->pin, init_val);
 	if (rv != 0) {
-		device_printf(sc->dev, "Cannot configure GPIO pin: %d\n",
-		    sc->gpio_en->pin);
+		device_printf(sc->dev, "Cannot configure GPIO pin %d on %s\n",
+		    sc->gpio_en->pin, device_get_nameunit(sc->gpio_en->dev));
 		return (rv);
 	}
 
 	rv = GPIO_PIN_SETFLAGS(sc->gpio_en->dev, sc->gpio_en->pin, flags);
 	if (rv != 0) {
-		device_printf(sc->dev, "Cannot configure GPIO pin: %d\n",
-		    sc->gpio_en->pin);
+		device_printf(sc->dev, "Cannot configure GPIO pin %d on %s\n",
+		    sc->gpio_en->pin, device_get_nameunit(sc->gpio_en->dev));
 		return (rv);
 	}
 
 	return (0);
 }
-
 static int
 regulator_fixed_probe(device_t dev)
 {
@@ -197,11 +197,22 @@ static int
 regulator_fixed_attach(device_t dev)
 {
 	struct regulator_fixed_softc * sc;
+	phandle_t node;
+	int rv;
 
 	sc = device_get_softc(dev);
 	sc->dev = dev;
-	fdt_regulator_register_provider(dev, 0);
+	node = ofw_bus_get_node(dev);
 
+	rv = regulator_fixed_parse(sc, node);
+	if (rv != 0)
+		return(ENXIO);
+	if (sc->gpio_en != NULL) {
+		rv = regulator_fixed_configure_gpio(sc);
+		if (rv != 0)
+			return(ENXIO);
+	}
+	fdt_regulator_register_provider(dev, 0);
 	return (0);
 }
 
