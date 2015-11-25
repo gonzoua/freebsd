@@ -257,4 +257,4 @@ static devclass_t jz4780_pinctrl_devclass;
 DEFINE_CLASS_1(pinctrl, jz4780_pinctrl_driver, jz4780_pinctrl_methods,
             sizeof(struct jz4780_pinctrl_softc), simplebus_driver);
 EARLY_DRIVER_MODULE(pinctrl, simplebus, jz4780_pinctrl_driver,
-    jz4780_pinctrl_devclass, 0, 0,  BUS_PASS_CPU + BUS_PASS_ORDER_LATE);
+    jz4780_pinctrl_devclass, 0, 0, BUS_PASS_INTERRUPT + BUS_PASS_ORDER_LATE);
