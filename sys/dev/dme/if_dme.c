@@ -50,6 +50,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/rman.h>
 #include <sys/socket.h>
 #include <sys/sockio.h>
+#include <sys/gpio.h>
 
 #include <machine/bus.h>
 #include <machine/resource.h>
@@ -68,6 +69,12 @@ __FBSDID("$FreeBSD$");
 #include <dev/dme/if_dmereg.h>
 #include <dev/dme/if_dmevar.h>
 
+#include <dev/fdt/fdt_regulator.h>
+#include <dev/ofw/ofw_bus.h>
+#include <dev/ofw/ofw_bus_subr.h>
+
+#include <dev/gpio/gpiobusvar.h>
+
 #include "miibus_if.h"
 
 struct dme_softc {
@@ -80,6 +87,7 @@ struct dme_softc {
 	struct resource		*dme_res;
 	struct mtx		dme_mtx;
 	struct callout		dme_tick_ch;
+	struct gpiobus_pin	*gpio_rset;
 };
 
 static int dme_probe(device_t);
@@ -89,10 +97,10 @@ static int dme_detach(device_t);
 static void dme_init_locked(struct dme_softc *);
 
 /* The bit on the address bus attached to the CMD pin */
-#define BASE_ADDR	0x300
+#define BASE_ADDR	0x000
 #define CMD_ADDR	BASE_ADDR
-#define	DATA_BIT	2
-#define	DATA_ADDR	(BASE_ADDR + (1 << DATA_BIT))
+#define	DATA_BIT	1
+#define	DATA_ADDR	0x002
 
 static uint8_t
 dme_read_reg(struct dme_softc *sc, uint8_t reg)
@@ -427,10 +435,17 @@ dme_ifmedia_sts(struct ifnet *ifp, struct ifmediareq *ifmr)
 	DME_UNLOCK(sc);
 }
 
+static struct ofw_compat_data compat_data[] = {
+	{ "davicom,dm9000", true  },
+	{ NULL,             false }
+};
+
 static int
 dme_probe(device_t dev)
 {
-	/* TODO: Probe to check we have a DM9000 */
+	if (!ofw_bus_search_compatible(dev, compat_data)->ocd_data)
+		return (ENXIO);
+	device_set_desc(dev, "Davicom DM9000");
 	return (0);
 }
 
@@ -441,6 +456,7 @@ dme_attach(device_t dev)
 	struct dme_softc *sc;
 	struct ifnet *ifp;
 	int error, rid;
+	uint32_t data;
 
 	sc = device_get_softc(dev);
 	sc->dme_dev = dev;
@@ -454,11 +470,56 @@ dme_attach(device_t dev)
 	rid = 0;
 	sc->dme_res = bus_alloc_resource_any(dev, SYS_RES_MEMORY, &rid,
 	    RF_ACTIVE);
-
 	if (sc->dme_res == NULL) {
 		device_printf(dev, "unable to map memory\n");
 		error = ENXIO;
 		goto fail;
+	}
+	/*
+	 * Ugh
+	 */
+	error = fdt_regulator_enable_by_name(dev, "vcc-supply");
+	if (error != 0) {
+		device_printf(dev, "unable to enable power supply\n");
+		error = ENXIO;
+		goto fail;
+	}
+
+	/* Bring controller out of reset */
+	error = ofw_gpiobus_parse_gpios(dev, "reset-gpios", &sc->gpio_rset);
+	if (error > 1) {
+		device_printf(dev, "too many reset gpios\n");
+		sc->gpio_rset = NULL;
+		error = ENXIO;
+		goto fail;
+	}
+
+	if (sc->gpio_rset != NULL) {
+		error = GPIO_PIN_SET(sc->gpio_rset->dev, sc->gpio_rset->pin, 0);
+		if (error != 0) {
+			device_printf(dev, "Cannot configure GPIO pin %d on %s\n",
+			    sc->gpio_rset->pin, device_get_nameunit(sc->gpio_rset->dev));
+			goto fail;
+		}
+
+		error = GPIO_PIN_SETFLAGS(sc->gpio_rset->dev, sc->gpio_rset->pin,
+		    GPIO_PIN_OUTPUT);
+		if (error != 0) {
+			device_printf(dev, "Cannot configure GPIO pin %d on %s\n",
+			    sc->gpio_rset->pin, device_get_nameunit(sc->gpio_rset->dev));
+			goto fail;
+		}
+
+		DELAY(2000);
+
+		error = GPIO_PIN_SET(sc->gpio_rset->dev, sc->gpio_rset->pin, 1);
+		if (error != 0) {
+			device_printf(dev, "Cannot configure GPIO pin %d on %s\n",
+			    sc->gpio_rset->pin, device_get_nameunit(sc->gpio_rset->dev));
+			goto fail;
+		}
+
+		DELAY(4000);
 	}
 
 	sc->dme_tag = rman_get_bustag(sc->dme_res);
@@ -481,6 +542,16 @@ dme_attach(device_t dev)
 		/* reserved */
 		return (ENODEV);
 	}
+
+	/* Read vendor and device id's */
+	data = dme_read_reg(sc, DME_VIDH) << 8;
+	data |= dme_read_reg(sc, DME_VIDL);
+	device_printf(dev, "Vendor ID: 0x%04x\n", data);
+
+	/* Read vendor and device id's */
+	data = dme_read_reg(sc, DME_PIDH) << 8;
+	data |= dme_read_reg(sc, DME_PIDL);
+	device_printf(dev, "Product ID: 0x%04x\n", data);
 
 	dme_reset(sc);
 
@@ -635,6 +706,6 @@ static devclass_t dme_devclass;
 
 MODULE_DEPEND(dme, ether, 1, 1, 1);
 MODULE_DEPEND(dme, miibus, 1, 1, 1);
-DRIVER_MODULE(dme, s3c24x0, dme_driver, dme_devclass, 0, 0);
+DRIVER_MODULE(dme, simplebus, dme_driver, dme_devclass, 0, 0);
 DRIVER_MODULE(miibus, dme, miibus_driver, miibus_devclass, 0, 0);
 
