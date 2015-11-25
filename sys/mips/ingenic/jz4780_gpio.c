@@ -447,6 +447,7 @@ jz4780_gpio_pin_setflags(device_t dev, uint32_t pin, uint32_t flags)
 		return (EINVAL);
 
 	sc = device_get_softc(dev);
+	JZ4780_GPIO_LOCK(sc);
 	retval = jz4780_gpio_pin_set_direction(sc, pin,
 	    flags & (GPIO_PIN_INPUT | GPIO_PIN_OUTPUT));
 	if (retval == 0)
@@ -749,5 +750,5 @@ static driver_t jz4780_gpio_driver = {
 
 static devclass_t jz4780_gpio_devclass;
 
-DRIVER_MODULE(jz4780_gpio, simplebus, jz4780_gpio_driver,
-    jz4780_gpio_devclass, 0, 0);
+EARLY_DRIVER_MODULE(jz4780_gpio, simplebus, jz4780_gpio_driver,
+    jz4780_gpio_devclass, 0, 0, BUS_PASS_INTERRUPT + BUS_PASS_ORDER_LATE);
