@@ -93,7 +93,7 @@ jz4780_nemc_probe(device_t dev)
 	return (BUS_PROBE_DEFAULT);
 }
 
-#define JZ4780_NEMC_NS_TO_TICKS(sc, val) howmany((val) * 100,  (sc)->clock_tick_psecs)
+#define JZ4780_NEMC_NS_TO_TICKS(sc, val) howmany((val) * 1000,  (sc)->clock_tick_psecs)
 
 /* Use table from JZ4780 programmers manual to convert ticks to tBP/tAW register values */
 static const uint8_t ticks_to_tBP_tAW[32] = {
@@ -123,7 +123,7 @@ jz4780_nemc_configure_bank(struct jz4780_nemc_softc *sc,
 	smcr |= JZ_NEMC_SMCR_SMT_NORMAL << JZ_NEMC_SMCR_SMT_SHIFT;
 
 	node = ndi->sinfo.obdinfo.obd_node;
-	if (OF_getencprop(node, "ingenic,nemc-tAS", &val, sizeof(val)) == 0) {
+	if (OF_getencprop(node, "ingenic,nemc-tAS", &val, sizeof(val)) > 0) {
 		cycles = JZ4780_NEMC_NS_TO_TICKS(sc, val);
 		if (cycles > 15) {
 			device_printf(sc->dev,
@@ -135,7 +135,7 @@ jz4780_nemc_configure_bank(struct jz4780_nemc_softc *sc,
 		smcr |= cycles << JZ_NEMC_SMCR_TAS_SHIFT;
 	}
 
-	if (OF_getencprop(node, "ingenic,nemc-tAH", &val, sizeof(val)) == 0) {
+	if (OF_getencprop(node, "ingenic,nemc-tAH", &val, sizeof(val)) > 0) {
 		cycles = JZ4780_NEMC_NS_TO_TICKS(sc, val);
 		if (cycles > 15) {
 			device_printf(sc->dev,
@@ -147,7 +147,8 @@ jz4780_nemc_configure_bank(struct jz4780_nemc_softc *sc,
 		smcr |= cycles << JZ_NEMC_SMCR_TAH_SHIFT;
 	}
 
-	if (OF_getencprop(node, "ingenic,nemc-tBP", &val, sizeof(val)) == 0) {
+	if (OF_getencprop(node, "ingenic,nemc-tBP", &val, sizeof(val)) > 0) {
+		cycles = JZ4780_NEMC_NS_TO_TICKS(sc, val);
 		if (cycles > 31) {
 			device_printf(sc->dev,
 			    "invalid value of %s %u (%u cycles), maximum %u cycles supported\n",
@@ -158,7 +159,8 @@ jz4780_nemc_configure_bank(struct jz4780_nemc_softc *sc,
 		smcr |= ticks_to_tBP_tAW[cycles] << JZ_NEMC_SMCR_TBP_SHIFT;
 	}
 
-	if (OF_getencprop(node, "ingenic,nemc-tAW", &val, sizeof(val)) == 0) {
+	if (OF_getencprop(node, "ingenic,nemc-tAW", &val, sizeof(val)) > 0) {
+		cycles = JZ4780_NEMC_NS_TO_TICKS(sc, val);
 		if (cycles > 31) {
 			device_printf(sc->dev,
 			    "invalid value of %s %u (%u cycles), maximum %u cycles supported\n",
@@ -169,7 +171,8 @@ jz4780_nemc_configure_bank(struct jz4780_nemc_softc *sc,
 		smcr |= ticks_to_tBP_tAW[cycles] << JZ_NEMC_SMCR_TAW_SHIFT;
 	}
 
-	if (OF_getencprop(node, "ingenic,nemc-tSTRV", &val, sizeof(val)) == 0) {
+	if (OF_getencprop(node, "ingenic,nemc-tSTRV", &val, sizeof(val)) > 0) {
+		cycles = JZ4780_NEMC_NS_TO_TICKS(sc, val);
 		if (cycles > 63) {
 			device_printf(sc->dev,
 			    "invalid value of %s %u (%u cycles), maximum %u cycles supported\n",
@@ -179,9 +182,8 @@ jz4780_nemc_configure_bank(struct jz4780_nemc_softc *sc,
 		smcr &= ~JZ_NEMC_SMCR_STRV_MASK;
 		smcr |= cycles << JZ_NEMC_SMCR_STRV_SHIFT;
 	}
-
 	CSR_WRITE_4(sc, JZ_NEMC_SMCR(ndi->bank), smcr);
-	sc->banks |=  (1 << ndi->bank);
+	sc->banks |= (1 << ndi->bank);
 	return 0;
 }
 
@@ -469,7 +471,8 @@ jz4780_nemc_attach(device_t dev)
 	/* Figure our underlying clock rate. */
 	if (fdt_clock_get_info(dev, 0, &clkinfo)) {
 		device_printf(dev, "could not determine clock speed\n");
-		goto error;
+		/* Assume something */
+		clkinfo.frequency = 200000000;
 	}
 
 	/* Convert clock frequency to picoseconds-per-tick value. */
