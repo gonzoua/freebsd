@@ -1,4 +1,5 @@
 /*
+ * Copyright (C) 2015 Alexander Kabaev
  * Copyright (C) 2010 Andrew Turner
  * All rights reserved.
  *
@@ -83,18 +84,30 @@ struct dme_softc {
 	device_t		dme_miibus;
 	bus_space_handle_t	dme_handle;
 	bus_space_tag_t		dme_tag;
+	int			dme_rev;
 	int			dme_bits;
 	struct resource		*dme_res;
+	struct resource		*dme_irq;
+	void			*dme_intrhand;
 	struct mtx		dme_mtx;
 	struct callout		dme_tick_ch;
 	struct gpiobus_pin	*gpio_rset;
+	uint32_t		dme_ticks;
 };
+
+#define DME_CHIP_DM9000		0x00
+#define DME_CHIP_DM9000A	0x19
+#define DME_CHIP_DM9000B	0x1a
 
 static int dme_probe(device_t);
 static int dme_attach(device_t);
 static int dme_detach(device_t);
 
+static void dme_intr(void *arg);
 static void dme_init_locked(struct dme_softc *);
+
+static int dme_miibus_writereg(device_t dev, int phy, int reg, int data);
+static int dme_miibus_readreg(device_t dev, int phy, int reg);
 
 /* The bit on the address bus attached to the CMD pin */
 #define BASE_ADDR	0x000
@@ -127,43 +140,75 @@ dme_write_reg(struct dme_softc *sc, uint8_t reg, uint8_t value)
 static void
 dme_reset(struct dme_softc *sc)
 {
+	u_int ncr;
+
+	/* Send a soft reset #1 */
+	dme_write_reg(sc, DME_NCR, NCR_RST | NCR_LBK_MAC);
+	DELAY(100); /* Wait for the MAC to reset */
+	ncr = dme_read_reg(sc, DME_NCR);
+	if (ncr & NCR_RST)
+		device_printf(sc->dme_dev, "device did not complete first reset\n");
+
+	/* Send a soft reset #2 per Application Notes v1.22 */
+	dme_write_reg(sc, DME_NCR, 0);
+	dme_write_reg(sc, DME_NCR, NCR_RST | NCR_LBK_MAC);
+	DELAY(100); /* Wait for the MAC to reset */
+	ncr = dme_read_reg(sc, DME_NCR);
+	if (ncr & NCR_RST)
+		device_printf(sc->dme_dev, "device did not complete second reset\n");
+}
+
+static void
+dme_config(struct dme_softc *sc)
+{
 	uint8_t eaddr[ETHER_ADDR_LEN];
 	int i;
 
-	/* Send a soft reset */
-	dme_write_reg(sc, DME_NCR, NCR_RST);
-	DELAY(1000); /* Wait for the MAC to reset */
-
-	/* TODO: Figure out if we have any external PHY's and use them */
+	/* Mask all interrupts and reset receive pointer */
+	dme_write_reg(sc, DME_IMR, IMR_PAR);
 
 	/* Disable GPIO0 to enable the internal PHY */
-	dme_write_reg(sc, DME_GPR, 0);
 	dme_write_reg(sc, DME_GPCR, 1);
 	dme_write_reg(sc, DME_GPR, 0);
+
+	if (sc->dme_rev == DME_CHIP_DM9000B) {
+		dme_miibus_writereg(sc->dme_dev, 0, MII_BMCR, BMCR_RESET);
+		dme_miibus_writereg(sc->dme_dev, 0, MII_DME_DSPCR, DSPCR_INIT);
+	}
 
 	/* Select the internal PHY and normal loopback */
 	dme_write_reg(sc, DME_NCR, NCR_LBK_NORMAL);
 	/* Clear any TX requests */
 	dme_write_reg(sc, DME_TCR, 0);
+	/* Setup backpressure thresholds to 4k and 600us */
+	dme_write_reg(sc, DME_BPTR, BPTR_BPHW(3) | BPTR_JPT(0x0f));
+	/* Setup flow control */
+	dme_write_reg(sc, DME_FCTR, FCTR_HWOT(0x3) | FCTR_LWOT(0x08));
+	/* Enable flow control */
+	dme_write_reg(sc, DME_FCR, 0xff);
+	/* Clear special modes */
+	dme_write_reg(sc, DME_SMCR, 0);
 	/* Clear TX status */
 	dme_write_reg(sc, DME_NSR, NSR_WAKEST | NSR_TX2END | NSR_TX1END);
-
-	/* Set the MAC address */
-	eaddr[0] = 0x08;
-	eaddr[1] = 0x08;
-	eaddr[2] = 0x11;
-	eaddr[3] = 0x18;
-	eaddr[4] = 0x12;
-	eaddr[5] = 0x27;
-	for (i = 0; i < ETHER_ADDR_LEN; i++)
-		dme_write_reg(sc, DME_PAR(i), eaddr[i]);
+	/* Clear interrrupts */
+	dme_write_reg(sc, DME_ISR, 0xff);
+	/* Set multicast address filter */
 	for (i = 0; i < 8; i++)
 		dme_write_reg(sc, DME_MAR(i), 0xff);
-
+	/* Set the MAC address */
+	eaddr[0] = 0xd0;
+	eaddr[1] = 0x31;
+	eaddr[2] = 0x10;
+	eaddr[3] = 0xff;
+	eaddr[4] = 0x72;
+	eaddr[5] = 0x1f;
+	for (i = 0; i < ETHER_ADDR_LEN; i++)
+		dme_write_reg(sc, DME_PAR(i), eaddr[i]);
 	/* Enable the RX buffer */
 	dme_write_reg(sc, DME_RCR, RCR_DIS_LONG | RCR_DIS_CRC | RCR_RXEN);
 
-	dme_write_reg(sc, DME_IMR, (1<<7) | (1<<0));
+	/* Enable interrupts we care about */
+	dme_write_reg(sc, DME_IMR, IMR_PAR | IMR_PRI/* | IMR_LNKCHGI*/);
 }
 
 
@@ -208,8 +253,13 @@ dme_start_locked(struct ifnet *ifp)
 
 			total_len += len;
 
+#if 0
 			bus_space_write_multi_2(sc->dme_tag, sc->dme_handle,
 			    DATA_ADDR, mtod(mp, uint16_t *), (len + 1) / 2);
+#else
+			bus_space_write_multi_1(sc->dme_tag, sc->dme_handle,
+			    DATA_ADDR, mtod(mp, uint8_t *), len);
+#endif
 		}
 
 		/* Send the data length */
@@ -239,8 +289,18 @@ dme_start(struct ifnet *ifp)
 static void
 dme_stop(struct dme_softc *sc)
 {
+	struct ifnet *ifp;
+
 	DME_ASSERT_LOCKED(sc);
+	/* Disable receiver */
+	dme_write_reg(sc, DME_RCR, 0x00);
+	/* Mask interrupts */
+	dme_write_reg(sc, DME_IMR, 0x00);
+	/* Stop poll */
 	callout_stop(&sc->dme_tick_ch);
+
+	ifp = sc->dme_ifp;
+	ifp->if_drv_flags &= ~(IFF_DRV_RUNNING | IFF_DRV_OACTIVE);
 }
 
 static int
@@ -248,32 +308,39 @@ dme_rxeof(struct dme_softc *sc)
 {
 	struct ifnet *ifp;
 	struct mbuf *m;
-	int len;
+	int len, i;
 
 	DME_ASSERT_LOCKED(sc);
 
  	ifp = sc->dme_ifp;
 
 	/* Read the first byte to check it correct */
-	dme_read_reg(sc, DME_MRCMDX);
+	(void)dme_read_reg(sc, DME_MRCMDX);
+	i = bus_space_read_1(sc->dme_tag, sc->dme_handle, DATA_ADDR);
 	switch(bus_space_read_1(sc->dme_tag, sc->dme_handle, DATA_ADDR)) {
 	case 1:
 		/* Correct value */
 		break;
 	case 0:
-		/* No packet */
 		return 1;
 	default:
 		/* Error */
 		return -1;
 	}
 
+	i = dme_read_reg(sc, DME_MRRL);
+	i |= dme_read_reg(sc, DME_MRRH) << 8;
+
+	len = dme_read_reg(sc, DME_ROCR);
+
 	bus_space_write_1(sc->dme_tag, sc->dme_handle, CMD_ADDR, DME_MRCMD);
 	len = 0;
 	switch(sc->dme_bits) {
 	case 8:
-		bus_space_read_1(sc->dme_tag, sc->dme_handle, DATA_ADDR);
-		bus_space_read_1(sc->dme_tag, sc->dme_handle, DATA_ADDR);
+		i = bus_space_read_1(sc->dme_tag, sc->dme_handle, DATA_ADDR);
+		i <<= 8;
+		i |= bus_space_read_1(sc->dme_tag, sc->dme_handle, DATA_ADDR);
+
 		len = bus_space_read_1(sc->dme_tag, sc->dme_handle, DATA_ADDR);
 		len |= bus_space_read_1(sc->dme_tag, sc->dme_handle,
 		    DATA_ADDR) << 8;
@@ -296,7 +363,7 @@ dme_rxeof(struct dme_softc *sc)
 	if (m == NULL)
 		return -1;
 
-	if (len > MHLEN) {
+	if (len > MHLEN - ETHER_ALIGN) {
 		MCLGET(m, M_NOWAIT);
 		if (!(m->m_flags & M_EXT)) {
 			m_freem(m);
@@ -309,9 +376,13 @@ dme_rxeof(struct dme_softc *sc)
 	m_adj(m, ETHER_ALIGN);
 
 	/* Read the data */
+#if 0
 	bus_space_read_multi_2(sc->dme_tag, sc->dme_handle, DATA_ADDR,
 	    mtod(m, uint16_t *), (len + 1) / 2);
-
+#else
+	bus_space_read_multi_1(sc->dme_tag, sc->dme_handle, DATA_ADDR,
+	    mtod(m, uint8_t *), len);
+#endif
 	if_inc_counter(ifp, IFCOUNTER_IPACKETS, 1);
 	DME_UNLOCK(sc);
 	(*ifp->if_input)(ifp, m);
@@ -324,14 +395,41 @@ static void
 dme_tick(void *arg)
 {
 	struct dme_softc *sc;
+	struct mii_data *mii;
 
 	sc = (struct dme_softc *)arg;
 
-	/* Read the packets off the device */
-	while (dme_rxeof(sc) == 0)
-		continue;
+	/* Probably too frequent? */
+	mii = device_get_softc(sc->dme_miibus);
+	mii_tick(mii);
 
-	callout_reset(&sc->dme_tick_ch, hz/100, dme_tick, sc);
+	callout_reset(&sc->dme_tick_ch, hz, dme_tick, sc);
+}
+
+static void
+dme_intr(void *arg)
+{
+	struct dme_softc *sc;
+	uint32_t intr_status;
+
+	sc = (struct dme_softc *)arg;
+
+	DME_LOCK(sc);
+
+	intr_status = dme_read_reg(sc, DME_ISR);
+	dme_write_reg(sc, DME_ISR, intr_status);
+
+	if (intr_status & ISR_PR) {
+		/* Read the packets off the device */
+		while (dme_rxeof(sc) == 0)
+			continue;
+	}
+
+	if (intr_status & ISR_LNKCHG) {
+		printf("Link change interrupt\n");
+	}
+
+	DME_UNLOCK(sc);
 }
 
 static void
@@ -365,7 +463,7 @@ dme_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 			if ((ifp->if_drv_flags & IFF_DRV_RUNNING) != 0) {
 				dme_stop(sc);
 			}
-		}		
+		}
 		dme_setmode(sc);
 		DME_UNLOCK(sc);
 		break;
@@ -385,12 +483,18 @@ static void dme_init_locked(struct dme_softc *sc)
 {
 	struct ifnet *ifp = sc->dme_ifp;
 
+	DME_ASSERT_LOCKED(sc);
+
+	if ((ifp->if_drv_flags & IFF_DRV_RUNNING) != 0)
+		return;
+
 	dme_reset(sc);
+	dme_config(sc);
 
 	ifp->if_drv_flags |= IFF_DRV_RUNNING;
 	ifp->if_drv_flags &= ~IFF_DRV_OACTIVE;
 
-	callout_reset(&sc->dme_tick_ch, hz/100, dme_tick, sc);
+	callout_reset(&sc->dme_tick_ch, hz, dme_tick, sc);
 }
 
 static void
@@ -475,8 +579,17 @@ dme_attach(device_t dev)
 		error = ENXIO;
 		goto fail;
 	}
+
+	rid = 0;
+	sc->dme_irq = bus_alloc_resource_any(dev, SYS_RES_IRQ, &rid,
+	    RF_ACTIVE);
+	if (sc->dme_irq == NULL) {
+		device_printf(dev, "unable to map memory\n");
+		error = ENXIO;
+		goto fail;
+	}
 	/*
-	 * Ugh
+	 * Power the chip up, if necessary
 	 */
 	error = fdt_regulator_enable_by_name(dev, "vcc-supply");
 	if (error != 0) {
@@ -525,6 +638,10 @@ dme_attach(device_t dev)
 	sc->dme_tag = rman_get_bustag(sc->dme_res);
 	sc->dme_handle = rman_get_bushandle(sc->dme_res);
 
+	/* Reset the chip as soon as possible */
+	dme_reset(sc);
+
+	/* Figure IO mode */
 	switch((dme_read_reg(sc, DME_ISR) >> 6) & 0x03) {
 	case 0:
 		/* 16 bit */
@@ -553,7 +670,15 @@ dme_attach(device_t dev)
 	data |= dme_read_reg(sc, DME_PIDL);
 	device_printf(dev, "Product ID: 0x%04x\n", data);
 
-	dme_reset(sc);
+	/* Chip revision */
+	data = dme_read_reg(sc, DME_CHIPR);
+	device_printf(dev, "Revision: 0x%04x\n", data);
+	if (data != DME_CHIP_DM9000A && data != DME_CHIP_DM9000B)
+		data = DME_CHIP_DM9000;
+	sc->dme_rev = data;
+
+	/* Configure chip after reset */
+	dme_config(sc);
 
 	ifp = sc->dme_ifp = if_alloc(IFT_ETHER);
 	if (ifp == NULL) {
@@ -580,14 +705,21 @@ dme_attach(device_t dev)
 	IFQ_SET_MAXLEN(&ifp->if_snd, IFQ_MAXLEN);
 
 	/* XXX: Hardcode the ethernet address for now */
-	eaddr[0] = 0x08;
-	eaddr[1] = 0x08;
-	eaddr[2] = 0x11;
-	eaddr[3] = 0x18;
-	eaddr[4] = 0x12;
-	eaddr[5] = 0x27;
+	eaddr[0] = 0xd0;
+	eaddr[1] = 0x31;
+	eaddr[2] = 0x10;
+	eaddr[3] = 0xff;
+	eaddr[4] = 0x72;
+	eaddr[5] = 0x1f;
 	ether_ifattach(ifp, eaddr);
 
+	error = bus_setup_intr(dev, sc->dme_irq, INTR_TYPE_NET | INTR_MPSAFE,
+	    NULL, dme_intr, sc, &sc->dme_intrhand);
+	if (error) {
+		device_printf(dev, "couldn't set up irq\n");
+		ether_ifdetach(ifp);
+		goto fail;
+	}
 fail:
 	if (error != 0)
 		dme_detach(dev);
@@ -598,13 +730,34 @@ static int
 dme_detach(device_t dev)
 {
 	struct dme_softc *sc;
+	struct ifnet *ifp;
 
 	sc = device_get_softc(dev);
 	KASSERT(mtx_initialized(&sc->dme_mtx), ("dme mutex not initialized"));
 
-	/* TODO: Cleanup correctly */
+	ifp = sc->dme_ifp;
+
+	if (device_is_attached(dev)) {
+		DME_LOCK(sc);
+		dme_stop(sc);
+		DME_UNLOCK(sc);
+		ether_ifdetach(ifp);
+		callout_drain(&sc->dme_tick_ch);
+	}
+
+	if (sc->dme_miibus)
+		device_delete_child(dev, sc->dme_miibus);
+	bus_generic_detach(dev);
+
+	if (sc->dme_intrhand)
+		bus_teardown_intr(dev, sc->dme_irq, sc->dme_intrhand);
+	if (sc->dme_irq)
+		bus_release_resource(dev, SYS_RES_IRQ, 0, sc->dme_irq);
 	if (sc->dme_res)
 		bus_release_resource(dev, SYS_RES_MEMORY, 0, sc->dme_res);
+
+	if (ifp != NULL)
+		if_free(ifp);
 
 	mtx_destroy(&sc->dme_mtx);
 

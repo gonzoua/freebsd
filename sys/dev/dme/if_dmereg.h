@@ -68,7 +68,11 @@
 #define DME_RSR		0x06
 #define DME_ROCR	0x07
 #define DME_BPTR	0x08
+#define  BPTR_BPHW(v)	(((v) & 0x0f) << 4)
+#define  BPTR_JPT(v)	(((v) & 0x0f) << 0)
 #define DME_FCTR	0x09
+#define  FCTR_HWOT(v)	(((v) & 0x0f) << 4)
+#define  FCTR_LWOT(v)	(((v) & 0x0f) << 0)
 #define DME_FCR		0x0A
 #define DME_EPCR	0x0B
 #define  EPCR_REEP	(1<<5)
@@ -108,7 +112,25 @@
 #define DME_TXPLL	0xFC
 #define DME_TXPLH	0xFD
 #define DME_ISR		0xFE
+#define  ISR_LNKCHG	(1<<5)
+#define  ISR_UDRUN	(1<<4)
+#define  ISR_ROO	(1<<3)
+#define  ISR_ROS	(1<<2)
+#define  ISR_PT		(1<<1)
+#define  ISR_PR		(1<<0)
+
 #define DME_IMR		0xFF
+#define  IMR_PAR	(1<<7)
+#define  IMR_LNKCHGI	(1<<5)
+#define  IMR_UDRUNI	(1<<4)
+#define  IMR_ROOI	(1<<3)
+#define  IMR_ROI	(1<<2)
+#define  IMR_PTI	(1<<1)
+#define  IMR_PRI	(1<<0)
+
+/* Extra PHY register from DM9000B */
+#define MII_DME_DSPCR	0x1B
+#define DSPCR_INIT	0xE100
 
 #endif /* __DMEREGS_H__ */
 
