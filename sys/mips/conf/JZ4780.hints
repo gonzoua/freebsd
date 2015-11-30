@@ -1,5 +1,12 @@
 # $FreeBSD$
 # device.hints
-# hint.uart.0.at="nexus"
-# hint.uart.0.maddr="0xb0030000"
-# hint.uart.0.flags="0x90"
+hint.uart.0.ier_mask="0xe0"
+hint.uart.0.ier_rxbits="0x1d"
+hint.uart.1.ier_mask="0xe0"
+hint.uart.1.ier_rxbits="0x1d"
+hint.uart.2.ier_mask="0xe0"
+hint.uart.2.ier_rxbits="0x1d"
+hint.uart.3.ier_mask="0xe0"
+hint.uart.3.ier_rxbits="0x1d"
+hint.uart.4.ier_mask="0xe0"
+hint.uart.4.ier_rxbits="0x1d"
