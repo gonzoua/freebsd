@@ -104,14 +104,14 @@ pic_irq_unmask(struct jz4780_pic_softc *sc, u_int irq)
 	if (irq < 32)
 		WRITE4(sc, JZ_ICMCR0, (1u << irq));
 	else
-		WRITE4(sc, JZ_ICMSR1, (1u << (irq - 32)));
+		WRITE4(sc, JZ_ICMCR1, (1u << (irq - 32)));
 }
 
 static inline void
 pic_irq_mask(struct jz4780_pic_softc *sc, u_int irq)
 {
 	if (irq < 32)
-		WRITE4(sc, JZ_ICMSR1, (1u << irq));
+		WRITE4(sc, JZ_ICMSR0, (1u << irq));
 	else
 		WRITE4(sc, JZ_ICMSR1, (1u << (irq - 32)));
 }
@@ -182,7 +182,6 @@ jz4780_pic_intr(void *arg)
 	td->td_intr_nesting_level--;
 
 	intr = READ4(sc, JZ_ICPR0);
-
 	while ((i = fls(intr)) != 0) {
 		i--;
 		intr &= ~(1u << i);
@@ -199,7 +198,6 @@ jz4780_pic_intr(void *arg)
 	KASSERT(i == 0, ("all interrupts handled"));
 
 	intr = READ4(sc, JZ_ICPR1);
-
 	while ((i = fls(intr)) != 0) {
 		i--;
 		intr &= ~(1u << i);
@@ -312,27 +310,24 @@ static void
 jz4780_pic_enable_source(device_t dev, struct arm_irqsrc *isrc)
 {
 	struct jz4780_pic_softc *sc = device_get_softc(dev);
-	u_int irq = isrc->isrc_data;
 
-	pic_irq_unmask(sc, irq);
+	pic_irq_unmask(sc, isrc->isrc_data);
 }
 
 static void
 jz4780_pic_disable_source(device_t dev, struct arm_irqsrc *isrc)
 {
 	struct jz4780_pic_softc *sc = device_get_softc(dev);
-	u_int irq = isrc->isrc_data;
 
-	pic_irq_mask(sc, irq);
+	pic_irq_mask(sc, isrc->isrc_data);
 }
 
 static int
 jz4780_pic_unregister(device_t dev, struct arm_irqsrc *isrc)
 {
 	struct jz4780_pic_softc *sc = device_get_softc(dev);
-	u_int irq = isrc->isrc_data;
 
-	return (pic_detach_isrc(sc, isrc, irq));
+	return (pic_detach_isrc(sc, isrc, isrc->isrc_data));
 }
 
 static void
