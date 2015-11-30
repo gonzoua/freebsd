@@ -174,7 +174,12 @@ jz4780_pic_intr(void *arg)
 {
 	struct jz4780_pic_softc *sc = arg;
 	struct arm_irqsrc *isrc;
+	struct thread *td;
 	uint32_t i, intr;
+
+	td = curthread;
+	/* Workaround: do not inflate intr nesting level */
+	td->td_intr_nesting_level--;
 
 	intr = READ4(sc, JZ_ICPR0);
 
@@ -188,7 +193,7 @@ jz4780_pic_intr(void *arg)
 			pic_irq_mask(sc, i);
 			continue;
 		}
-		arm_irq_dispatch(isrc, curthread->td_intr_frame);
+		arm_irq_dispatch(isrc, td->td_intr_frame);
 	}
 
 	KASSERT(i == 0, ("all interrupts handled"));
@@ -206,10 +211,11 @@ jz4780_pic_intr(void *arg)
 			pic_irq_mask(sc, i);
 			continue;
 		}
-		arm_irq_dispatch(isrc, curthread->td_intr_frame);
+		arm_irq_dispatch(isrc, td->td_intr_frame);
 	}
 
 	KASSERT(i == 0, ("all interrupts handled"));
+	td->td_intr_nesting_level++;
 
 	return (FILTER_HANDLED);
 }
