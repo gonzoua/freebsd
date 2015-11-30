@@ -422,23 +422,16 @@ nexus_activate_resource(device_t bus, device_t child, int type, int rid,
 		paddr = rman_get_start(r);
 		psize = rman_get_size(r);
 #ifdef FDT
-		err = bus_space_map(fdtbus_bs_tag, paddr, psize, 0,
+		rman_set_bustag(r, fdtbus_bs_tag);
+#else
+		rman_set_bustag(r, mips_bus_space_generic);
+#endif
+		err = bus_space_map(rman_get_bustag(r), paddr, psize, 0,
 		    (bus_space_handle_t *)&vaddr);
 		if (err != 0) {
 			rman_deactivate_resource(r);
 			return (err);
 		}
-		rman_set_bustag(r, fdtbus_bs_tag);
-#else
-		vaddr = (bus_space_handle_t)pmap_mapdev(paddr,
-		    (vm_size_t)psize);
-		if (vaddr == 0) {
-			rman_deactivate_resource(r);
-			return (ENOMEM);
-		}
-		rman_set_bustag(r, mips_bus_space_generic);
-#endif
-
 		rman_set_virtual(r, vaddr);
 		rman_set_bushandle(r, (bus_space_handle_t)(uintptr_t)vaddr);
 	}
@@ -457,11 +450,7 @@ nexus_deactivate_resource(device_t bus, device_t child, int type, int rid,
 
 	if (type == SYS_RES_MEMORY && vaddr != 0) {
 		psize = (bus_size_t)rman_get_size(r);
-#ifdef FDT
-		bus_space_unmap(fdtbus_bs_tag, vaddr, psize);
-#else
-		pmap_unmapdev((vm_offset_t)vaddr, psize);
-#endif
+		bus_space_unmap(rman_get_bustag(r), vaddr, psize);
 		rman_set_virtual(r, NULL);
 		rman_set_bushandle(r, 0);
 	}
