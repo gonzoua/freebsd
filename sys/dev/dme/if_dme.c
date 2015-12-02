@@ -99,6 +99,8 @@ struct dme_softc {
 #define DME_CHIP_DM9000A	0x19
 #define DME_CHIP_DM9000B	0x1a
 
+#define DME_INT_PHY		1
+
 static int dme_probe(device_t);
 static int dme_attach(device_t);
 static int dme_detach(device_t);
@@ -172,8 +174,10 @@ dme_config(struct dme_softc *sc)
 	dme_write_reg(sc, DME_GPR, 0);
 
 	if (sc->dme_rev == DME_CHIP_DM9000B) {
-		dme_miibus_writereg(sc->dme_dev, 0, MII_BMCR, BMCR_RESET);
-		dme_miibus_writereg(sc->dme_dev, 0, MII_DME_DSPCR, DSPCR_INIT);
+		dme_miibus_writereg(sc->dme_dev, DME_INT_PHY, MII_BMCR,
+		    BMCR_RESET);
+		dme_miibus_writereg(sc->dme_dev, DME_INT_PHY, MII_DME_DSPCR,
+		    DSPCR_INIT);
 	}
 
 	/* Select the internal PHY and normal loopback */
