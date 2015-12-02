@@ -63,9 +63,6 @@ struct imx_hdmi_softc {
 	device_t		sc_dev;
 	struct resource		*sc_mem_res;
 	int			sc_mem_rid;
-	struct resource		*sc_irq_res;
-	int			sc_irq_rid;
-	void			*sc_intr_hl;
 	struct intr_config_hook	sc_mode_hook;
 	struct videomode	sc_mode;
 	uint8_t			*sc_edid;
@@ -627,12 +624,6 @@ imx_hdmi_detect_cable(void *arg)
 	config_intrhook_disestablish(&sc->sc_mode_hook);
 }
 
-static void
-imx_hdmi_intr(void *arg)
-{
-	/* Do nothing */
-}
-
 static int
 imx_hdmi_detach(device_t dev)
 {
@@ -642,12 +633,6 @@ imx_hdmi_detach(device_t dev)
 
 	if (sc->sc_mem_res != NULL)
 		bus_release_resource(dev, SYS_RES_MEMORY, 0, sc->sc_mem_res);
-
-	if (sc->sc_intr_hl)
-		bus_teardown_intr(dev, sc->sc_irq_res, sc->sc_intr_hl);
-
-	if (sc->sc_irq_res != NULL)
-		bus_release_resource(dev, SYS_RES_IRQ, sc->sc_irq_rid, sc->sc_irq_res);
 
 	return (0);
 }
@@ -670,24 +655,6 @@ imx_hdmi_attach(device_t dev)
 	    RF_ACTIVE);
 	if (sc->sc_mem_res == NULL) {
 		device_printf(dev, "Cannot allocate memory resources\n");
-		err = ENXIO;
-		goto out;
-	}
-
-	/* Allocate bus_space resources. */
-	sc->sc_irq_rid = 0;
-	sc->sc_irq_res = bus_alloc_resource_any(dev, SYS_RES_IRQ, &sc->sc_irq_rid,
-	    RF_ACTIVE);
-	if (sc->sc_irq_res == NULL) {
-		device_printf(dev, "No IRQ\n");
-		err = ENXIO;
-		goto out;
-	}
-
-	if (bus_setup_intr(dev, sc->sc_irq_res, INTR_TYPE_MISC | INTR_MPSAFE,
-			NULL, imx_hdmi_intr, sc,
-			&sc->sc_intr_hl) != 0) {
-		device_printf(dev, "Unable to setup the irq handler.\n");
 		err = ENXIO;
 		goto out;
 	}
