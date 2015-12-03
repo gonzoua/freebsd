@@ -123,6 +123,9 @@ static struct videomode mode1024x768 = M("1024x768x60",1024,768,65000,1048,1184,
 #define	IPU_DI0_BS_CLKGEN0	0x240004
 #define	IPU_DI0_BS_CLKGEN1	0x240008
 #define	IPU_DI0_SW_GEN0_1	0x24000C
+#define		DI_RUN_VALUE_M1_SHIFT	19
+#define		DI_RUN_RESOLUTION_SHIFT	16
+#define		DI_OFFSET_VALUE_SHIFT	 3
 #define	IPU_DI0_SW_GEN1_1	0x240030
 #define	IPU_DI0_SYNC_AS_GEN	0x240054
 #define	IPU_DI0_DW_GEN_0	0x240058
@@ -451,8 +454,9 @@ ipu_config_wave_gen_0(struct ipu_softc *sc, int di,
 	addr = (di ? IPU_DI1_SW_GEN0_1 : IPU_DI0_SW_GEN0_1)
 	    + (wave_gen-1)*sizeof(uint32_t);
 	reg = IPU_READ4(sc, addr);
-	reg = (run_value << 19) | (run_res << 16) |
-	    (offset_value << 3) | offset_res;
+	reg = (run_value << DI_RUN_VALUE_M1_SHIFT) |
+	    (run_res << DI_RUN_RESOLUTION_SHIFT) |
+	    (offset_value << DI_OFFSET_VALUE_SHIFT) | offset_res;
 	IPU_WRITE4(sc, addr, reg);
 }
 
