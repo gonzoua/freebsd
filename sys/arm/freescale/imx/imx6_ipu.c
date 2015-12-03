@@ -196,6 +196,9 @@ static struct videomode mode1024x768 = M("1024x768x60",1024,768,65000,1048,1184,
 #define	DMFC_IC_CTRL		0x26001C
 
 #define	DC_WRITE_CH_CONF_1	0x0025801C
+#define		WRITE_CH_CONF_PROG_DISP_ID(v)	((v) << 2)
+#define		WRITE_CH_CONF_PROG_CHAN_TYP_MASK	(7 << 5)
+#define		WRITE_CH_CONF_PROG_CHAN_NORMAL		(4 << 5)
 #define	DC_WRITE_CH_ADDR_1	0x00258020
 #define	DC_WRITE_CH_CONF_5	0x0025805C
 #define	DC_WRITE_CH_ADDR_5	0x00258060
@@ -205,7 +208,9 @@ static struct videomode mode1024x768 = M("1024x768x60",1024,768,65000,1048,1184,
 #define	DC_MAP_CONF_0		0x00258108
 #define	DC_MAP_CONF_15		0x00258144
 #define	DC_MAP_CONF_VAL(map)	(DC_MAP_CONF_15 + ((map)/2)*sizeof(uint32_t))
+#define		MAP_CONF_VAL_MASK	0xffff
 #define	DC_MAP_CONF_PTR(ptr)	(DC_MAP_CONF_0 + ((ptr)/2)*sizeof(uint32_t))
+#define		MAP_CONF_PTR_MASK	0x1f
 
 struct ipu_cpmem_word {
 	uint32_t	data[5];
@@ -716,11 +721,11 @@ ipu_dc_enable(struct ipu_softc *sc)
 	uint32_t conf;
 
 	/* channel 1 uses DI1 */
-	IPU_WRITE4(sc, DC_WRITE_CH_CONF_1, 0x00000004);
+	IPU_WRITE4(sc, DC_WRITE_CH_CONF_1, WRITE_CH_CONF_PROG_DISP_ID(1));
 
 	conf = IPU_READ4(sc, DC_WRITE_CH_CONF_5);
-	conf &= ~(7 << 5); /* PROG_CHAN_TYP */
-	conf |= 4 << 5; /* ENABLED */
+	conf &= ~WRITE_CH_CONF_PROG_CHAN_TYP_MASK;
+	conf |= WRITE_CH_CONF_PROG_CHAN_NORMAL;
 	IPU_WRITE4(sc, DC_WRITE_CH_CONF_5, conf);
 
 	/* TODO: enable clock */
@@ -768,7 +773,7 @@ ipu_dc_setup_map(struct ipu_softc *sc, int map,
 		shift = 16  + 5*byte;
 	else
 		shift = 5*byte;
-	reg &= ~(0x1f << shift);
+	reg &= ~(MAP_CONF_PTR_MASK << shift);
 	reg |= (ptr) << shift;
 	IPU_WRITE4(sc, DC_MAP_CONF_PTR(map), reg);
 }
@@ -776,13 +781,15 @@ ipu_dc_setup_map(struct ipu_softc *sc, int map,
 static void
 ipu_dc_reset_map(struct ipu_softc *sc, int map)
 {
-	uint32_t reg;
-	reg = IPU_READ4(sc, DC_MAP_CONF_PTR(map));
+	uint32_t reg, shift;
+
+	reg = IPU_READ4(sc, DC_MAP_CONF_VAL(map));
 	if (map & 1)
-		reg &= 0x0000ffff;
+		shift = 16;
 	else
-		reg &= 0xffff0000;
-	IPU_WRITE4(sc, DC_MAP_CONF_PTR(map), reg);
+		shift = 0;
+	reg &= ~(MAP_CONF_VAL_MASK << shift);
+	IPU_WRITE4(sc, DC_MAP_CONF_VAL(map), reg);
 }
 
 static void
