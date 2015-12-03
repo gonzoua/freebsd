@@ -130,11 +130,14 @@ static struct videomode mode1024x768 = M("1024x768x60",1024,768,65000,1048,1184,
 #define	IPU_IDMAC_CH_PRI_2	0x208018
 
 #define	IPU_DI0_GENERAL		0x240000
+#define		DI_CLOCK_EXTERNAL	(1 << 20)
 #define		DI_GENERAL_POL_CLK	(1 << 17)
 #define		DI_GENERAL_POLARITY_3	(1 << 2)
 #define		DI_GENERAL_POLARITY_2	(1 << 1)
 #define	IPU_DI0_BS_CLKGEN0	0x240004
+#define		DI_BS_CLKGEN0(_int, _frac)	(((_int) << 4) | (_frac))
 #define	IPU_DI0_BS_CLKGEN1	0x240008
+#define		DI_BS_CLKGEN1_DOWN(_int, _frac)	((((_int) << 1) | (_frac)) << 16)
 #define	IPU_DI0_SW_GEN0_1	0x24000C
 #define		DI_RUN_VALUE_M1(v)	((v) << 19)
 #define		DI_RUN_RESOLUTION(v)	((v) << 16)
@@ -147,10 +150,19 @@ static struct videomode mode1024x768 = M("1024x768x60",1024,768,65000,1048,1184,
 #define		DI0_CNT_POLARITY_TRIGGER_SEL(v)	((v) << 12)
 #define		DI0_CNT_POLARITY_CLR_SEL(v)	((v) << 9)
 #define	IPU_DI0_SYNC_AS_GEN	0x240054
+#define		SYNC_AS_GEN_VSYNC_SEL(v)	((v) << 13)
+#define		SYNC_AS_GEN_SYNC_START(v)	((v) << 0)
 #define	IPU_DI0_DW_GEN_0	0x240058
+#define		DW_GEN_DI_ACCESS_SIZE(v)	((v) << 24)
+#define		DW_GEN_DI_COMPONENT_SIZE(v)	((v) << 16)
+#define		DW_GEN_DI_SET_MASK		3
+#define		DW_GEN_DI_PIN_15_SET(v)		((v) << 8)
 #define	IPU_DI0_DW_SET3_0	0x240118
+#define		DW_SET_DATA_CNT_DOWN(v)	((v) << 16)
+#define		DW_SET_DATA_CNT_UP(v)	((v) << 0)
 #define	IPU_DI0_STP_REP		0x240148
 #define	IPU_DI0_POL		0x240164
+#define		DI_POL_DRDY_POLARITY_15		(1 << 4)
 #define	IPU_DI0_SCR_CONF	0x240170
 
 #define	IPU_DI1_GENERAL		0x248000
@@ -591,8 +603,9 @@ ipu_config_timing(struct ipu_softc *sc, int di)
 	map = 0;
 
 	bs_clkgen_offset = di ? IPU_DI1_BS_CLKGEN0 : IPU_DI0_BS_CLKGEN0;
-	IPU_WRITE4(sc, bs_clkgen_offset, (div * 16));
-	IPU_WRITE4(sc, bs_clkgen_offset + 4, (div << 16));
+	IPU_WRITE4(sc, bs_clkgen_offset, DI_BS_CLKGEN0(div, 0));
+	/* half of the divider */
+	IPU_WRITE4(sc, bs_clkgen_offset + 4, DI_BS_CLKGEN1_DOWN(div/2, div % 2));
 
 	/*
 	 * TODO: Configure LLDB clock by changing following fields
@@ -605,17 +618,15 @@ ipu_config_timing(struct ipu_softc *sc, int di)
 	/* Setup wave generator */
 	dw_gen_offset = di ? IPU_DI1_DW_GEN_0 : IPU_DI0_DW_GEN_0;
 	dw_gen = IPU_READ4(sc, dw_gen_offset);
-	dw_gen = ((div - 1) << 24) | ((div - 1) << 16);
-	dw_gen &= ~(3 << 8); /* pin15  */
-	dw_gen |= (3 << 8); /* pin15, set 3 */
+	dw_gen = DW_GEN_DI_ACCESS_SIZE(div - 1) | DW_GEN_DI_COMPONENT_SIZE(div - 1);
+	dw_gen &= ~DW_GEN_DI_PIN_15_SET(DW_GEN_DI_SET_MASK);
+	dw_gen |= DW_GEN_DI_PIN_15_SET(3); /* set 3*/
 	IPU_WRITE4(sc, dw_gen_offset, dw_gen);
 
 	dw_set_offset = di ? IPU_DI1_DW_SET3_0 : IPU_DI0_DW_SET3_0;
 	dw_set = IPU_READ4(sc, dw_set_offset);
-	dw_set = (div*2 << 16) | 0;
+	dw_set = DW_SET_DATA_CNT_DOWN(div*2) | DW_SET_DATA_CNT_UP(0);
 	IPU_WRITE4(sc, dw_set_offset, dw_set);
-
-	div = 0;
 
 	/* DI_COUNTER_INT_HSYNC */
 	ipu_config_wave_gen_0(sc, di, DI_COUNTER_INT_HSYNC,
@@ -684,16 +695,17 @@ ipu_config_timing(struct ipu_softc *sc, int di)
 		gen |= DI_GENERAL_POL_CLK;
 
 	/* User LDB clock to drive pixel clock */
-	gen |= 0x00100000;
+	gen |= DI_CLOCK_EXTERNAL;
 
 	IPU_WRITE4(sc, gen_offset, gen);
 
 	as_gen_offset = di ?  IPU_DI1_SYNC_AS_GEN : IPU_DI0_SYNC_AS_GEN;
 	as_gen = IPU_READ4(sc, as_gen_offset);
-	as_gen = ((DI_COUNTER_VSYNC-1) << 13) | 2;
+	as_gen = SYNC_AS_GEN_VSYNC_SEL(DI_COUNTER_VSYNC-1) |
+	    SYNC_AS_GEN_SYNC_START(2);
 	IPU_WRITE4(sc, as_gen_offset, as_gen);
 
-	IPU_WRITE4(sc, (di ? IPU_DI1_POL : IPU_DI0_POL), 0x10);
+	IPU_WRITE4(sc, (di ? IPU_DI1_POL : IPU_DI0_POL), DI_POL_DRDY_POLARITY_15);
 
 	IPU_WRITE4(sc, DC_DISP_CONF2(di), sc->sc_mode->hdisplay);
 }
