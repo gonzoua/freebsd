@@ -99,6 +99,19 @@ static struct videomode mode1024x768 = M("1024x768x60",1024,768,65000,1048,1184,
 #define	CPMEM_BASE	0x300000
 #define	DC_TEMPL_BASE	0x380000
 
+/* Microcode */
+/* Word 1 */
+#define	TEMPLATE_SYNC(v)	((v) << 0)
+#define	TEMPLATE_GLUELOGIC(v)	((v) << 4)
+#define	TEMPLATE_MAPPING(v)	((v) << 15)
+#define	TEMPLATE_WAVEFORM(v)	((v) << 11)
+#define		GLUELOGIC_KEEP_ASSERTED	(1 << 3)
+#define		GLUELOGIC_KEEP_NEGATED	(1 << 2)
+/* Word 2 */
+#define	TEMPLATE_OPCODE(v)	((v) << 4)
+#define		OPCODE_WROD		0x18
+#define	TEMPLATE_STOP		(1 << 9)
+
 #define	IPU_CONF		0x200000
 #define	IPU_DISP_GEN		0x2000C4
 #define		DISP_GEN_DI1_CNTR_RELEASE	(1 << 25)
@@ -538,21 +551,21 @@ ipu_init_micorcode_template(struct ipu_softc *sc, int di, int map)
 
 	for (i = 0; i < 3; i++) {
 		if (i == 0)
-			glue = 8; /* keep asserted */
+			glue = GLUELOGIC_KEEP_ASSERTED;
 		else if (i == 1)
-			glue = 4; /* keep negated */
+			glue = GLUELOGIC_KEEP_NEGATED;
 		else if (i == 2)
 			glue = 0;
 
-		w1 = 5; /* sync */
-		w1 |= (glue << 4); /* glue */
-		w1 |= (1 << 11); /* wave unit 0 */
-		w1 |= ((map+1) << 15);
+		w1 = TEMPLATE_SYNC(5) |
+		    TEMPLATE_GLUELOGIC(glue) |
+		    TEMPLATE_WAVEFORM(1) | /* wave unit 0 */
+		    TEMPLATE_MAPPING(map+1);
 		/* operand is zero */
 
 		/* Write data to DI and Hold data in register */
-		w2 = 0x18 << 4; /* opcode: WROD 0x0 */
-		w2 |= (1 << 9); /* Stop */
+		w2 = TEMPLATE_OPCODE(OPCODE_WROD) |
+		    TEMPLATE_STOP;
 
 		addr = DC_TEMPL_BASE + (word+i)*2*sizeof(uint32_t);
 		IPU_WRITE4(sc, addr, w1);
