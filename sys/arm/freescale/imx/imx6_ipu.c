@@ -143,12 +143,12 @@ static struct videomode mode1024x768 = M("1024x768x60",1024,768,65000,1048,1184,
 #define		DI_RUN_RESOLUTION(v)	((v) << 16)
 #define		DI_OFFSET_VALUE(v)	((v) << 3)
 #define	IPU_DI0_SW_GEN1_1	0x240030
-#define		DI0_CNT_POLARITY_GEN_EN(v)	((v) << 29)
-#define		DI0_CNT_AUTO_RELOAD		(1 << 28)
-#define		DI0_CNT_CLR_SEL(v)		((v) << 25)
-#define		DI0_CNT_DOWN(v)			((v) << 16)
-#define		DI0_CNT_POLARITY_TRIGGER_SEL(v)	((v) << 12)
-#define		DI0_CNT_POLARITY_CLR_SEL(v)	((v) << 9)
+#define		DI_CNT_POLARITY_GEN_EN(v)	((v) << 29)
+#define		DI_CNT_AUTO_RELOAD		(1 << 28)
+#define		DI_CNT_CLR_SEL(v)		((v) << 25)
+#define		DI_CNT_DOWN(v)			((v) << 16)
+#define		DI_CNT_POLARITY_TRIGGER_SEL(v)	((v) << 12)
+#define		DI_CNT_POLARITY_CLR_SEL(v)	((v) << 9)
 #define	IPU_DI0_SYNC_AS_GEN	0x240054
 #define		SYNC_AS_GEN_VSYNC_SEL(v)	((v) << 13)
 #define		SYNC_AS_GEN_SYNC_START(v)	((v) << 0)
@@ -504,13 +504,13 @@ ipu_config_wave_gen_1(struct ipu_softc *sc, int di, int wave_gen,
 	addr = (di ? IPU_DI1_SW_GEN1_1 : IPU_DI0_SW_GEN1_1)
 	    + (wave_gen-1)*sizeof(uint32_t);
 	reg = IPU_READ4(sc, addr);
-	reg = DI0_CNT_POLARITY_GEN_EN(cnt_polarity_gen_en) |
-	    DI0_CNT_CLR_SEL(cnt_clr_src) |
-	    DI0_CNT_POLARITY_TRIGGER_SEL(cnt_polarity_trigger_src) |
-	    DI0_CNT_POLARITY_CLR_SEL(cnt_polarity_clr_src);
-	reg |= DI0_CNT_DOWN(cnt_down) | cnt_up;
+	reg = DI_CNT_POLARITY_GEN_EN(cnt_polarity_gen_en) |
+	    DI_CNT_CLR_SEL(cnt_clr_src) |
+	    DI_CNT_POLARITY_TRIGGER_SEL(cnt_polarity_trigger_src) |
+	    DI_CNT_POLARITY_CLR_SEL(cnt_polarity_clr_src);
+	reg |= DI_CNT_DOWN(cnt_down) | cnt_up;
 	if (repeat_count == 0)
-		reg |= DI0_CNT_AUTO_RELOAD;
+		reg |= DI_CNT_AUTO_RELOAD;
 	IPU_WRITE4(sc, addr, reg);
 
 	addr = (di ? IPU_DI1_STP_REP : IPU_DI0_STP_REP)
