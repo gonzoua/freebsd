@@ -196,14 +196,19 @@ static struct videomode mode1024x768 = M("1024x768x60",1024,768,65000,1048,1184,
 #define	DMFC_IC_CTRL		0x26001C
 
 #define	DC_WRITE_CH_CONF_1	0x0025801C
-#define		WRITE_CH_CONF_PROG_DISP_ID(v)	((v) << 2)
 #define		WRITE_CH_CONF_PROG_CHAN_TYP_MASK	(7 << 5)
 #define		WRITE_CH_CONF_PROG_CHAN_NORMAL		(4 << 5)
 #define	DC_WRITE_CH_ADDR_1	0x00258020
 #define	DC_WRITE_CH_CONF_5	0x0025805C
+#define		WRITE_CH_CONF_PROG_DISP_ID(v)	((v) << 3)
+#define		WRITE_CH_CONF_PROG_DI_ID(v)	((v) << 2)
+#define		WRITE_CH_CONF_PROG_W_SIZE(v)	(v)
 #define	DC_WRITE_CH_ADDR_5	0x00258060
 #define	DC_RL0_CH_5		0x00258064
 #define	DC_GEN			0x002580D4
+#define		DC_GEN_SYNC_PRIORITY	(1 << 7)
+#define		DC_GEN_ASYNC		(0 << 1)
+#define		DC_GEN_SYNC		(2 << 1)
 #define	DC_DISP_CONF2(di)	(0x002580E8 + (di)*4)
 #define	DC_MAP_CONF_0		0x00258108
 #define	DC_MAP_CONF_15		0x00258144
@@ -721,7 +726,7 @@ ipu_dc_enable(struct ipu_softc *sc)
 	uint32_t conf;
 
 	/* channel 1 uses DI1 */
-	IPU_WRITE4(sc, DC_WRITE_CH_CONF_1, WRITE_CH_CONF_PROG_DISP_ID(1));
+	IPU_WRITE4(sc, DC_WRITE_CH_CONF_1, WRITE_CH_CONF_PROG_DI_ID(1));
 
 	conf = IPU_READ4(sc, DC_WRITE_CH_CONF_5);
 	conf &= ~WRITE_CH_CONF_PROG_CHAN_TYP_MASK;
@@ -813,13 +818,13 @@ ipu_dc_init(struct ipu_softc *sc, int di_port)
 	ipu_dc_link_event(sc, DC_EVENT_NEW_CHAN, 0, 0);
 	ipu_dc_link_event(sc, DC_EVENT_NEW_ADDR, 0, 0);
 
-	conf = 0x02; /* W_SIZE */
-        conf |= DI_PORT << 3; /* PROG_DISP_ID */
-	conf |= DI_PORT << 2; /* PROG_DI_ID */
+	conf = WRITE_CH_CONF_PROG_W_SIZE(0x02) |
+            WRITE_CH_CONF_PROG_DISP_ID(DI_PORT) |
+	    WRITE_CH_CONF_PROG_DI_ID(DI_PORT);
 
 	IPU_WRITE4(sc, DC_WRITE_CH_CONF_5, conf);
 	IPU_WRITE4(sc, DC_WRITE_CH_ADDR_5, 0x00000000);
-	IPU_WRITE4(sc, DC_GEN, 0x84); /* High priority, sync */
+	IPU_WRITE4(sc, DC_GEN, DC_GEN_SYNC_PRIORITY | DC_GEN_SYNC); /* High priority, sync */
 }
 
 static void
