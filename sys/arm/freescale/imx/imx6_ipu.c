@@ -113,6 +113,8 @@ static struct videomode mode1024x768 = M("1024x768x60",1024,768,65000,1048,1184,
 #define	TEMPLATE_STOP		(1 << 9)
 
 #define	IPU_CONF		0x200000
+#define		IPU_CONF_DI1_EN		(1 << 7)
+#define		IPU_CONF_DI0_EN		(1 << 6)
 #define	IPU_DISP_GEN		0x2000C4
 #define		DISP_GEN_DI1_CNTR_RELEASE	(1 << 25)
 #define		DISP_GEN_DI0_CNTR_RELEASE	(1 << 24)
@@ -189,11 +191,42 @@ static struct videomode mode1024x768 = M("1024x768x60",1024,768,65000,1048,1184,
 
 #define	DMFC_RD_CHAN		0x260000
 #define	DMFC_WR_CHAN		0x260004
+#define		DMFC_WR_CHAN_BURST_SIZE_32	(0 << 6)
+#define		DMFC_WR_CHAN_BURST_SIZE_16	(1 << 6)
+#define		DMFC_WR_CHAN_BURST_SIZE_8	(2 << 6)
+#define		DMFC_WR_CHAN_BURST_SIZE_4	(3 << 6)
+#define		DMFC_WR_CHAN_BURST_SIZE_4	(3 << 6)
+#define		DMFC_WR_CHAN_FIFO_SIZE_128	(2 << 3)
 #define	DMFC_WR_CHAN_DEF	0x260008
+#define		DMFC_WR_CHAN_DEF_WM_CLR_2C(v)	((v) << 29)
+#define		DMFC_WR_CHAN_DEF_WM_CLR_1C(v)	((v) << 21)
+#define		DMFC_WR_CHAN_DEF_WM_CLR_2(v)	((v) << 13)
+#define		DMFC_WR_CHAN_DEF_WM_CLR_1(v)	((v) << 5)
+#define		DMFC_WR_CHAN_DEF_WM_SET_1(v)	((v) << 2)
+#define		DMFC_WR_CHAN_DEF_WM_EN_1	(1 << 1)
 #define	DMFC_DP_CHAN		0x26000C
+#define		DMFC_DP_CHAN_BURST_SIZE_8	2
+#define		DMFC_DP_CHAN_FIFO_SIZE_256	1
+#define		DMFC_DP_CHAN_FIFO_SIZE_128	2
+#define		DMFC_DP_CHAN_BURST_SIZE_5F(v)	((v) << 14)
+#define		DMFC_DP_CHAN_FIFO_SIZE_5F(v)	((v) << 11)
+#define		DMFC_DP_CHAN_ST_ADDR_SIZE_5F(v)	((v) << 8)
+#define		DMFC_DP_CHAN_BURST_SIZE_5B(v)	((v) << 6)
+#define		DMFC_DP_CHAN_FIFO_SIZE_5B(v)	((v) << 3)
+#define		DMFC_DP_CHAN_ST_ADDR_SIZE_5B(v)	((v) << 0)
 #define	DMFC_DP_CHAN_DEF	0x260010
+#define		DMFC_DP_CHAN_DEF_WM_CLR_6F(v)	((v) << 29)
+#define		DMFC_DP_CHAN_DEF_WM_CLR_6B(v)	((v) << 21)
+#define		DMFC_DP_CHAN_DEF_WM_CLR_5F(v)	((v) << 13)
+#define		DMFC_DP_CHAN_DEF_WM_SET_5F(v)	((v) << 10)
+#define		DMFC_DP_CHAN_DEF_WM_EN_5F	(1 << 9)
+#define		DMFC_DP_CHAN_DEF_WM_CLR_5B(v)	((v) << 5)
+#define		DMFC_DP_CHAN_DEF_WM_SET_5B(v)	((v) << 2)
+#define		DMFC_DP_CHAN_DEF_WM_EN_5B	(1 << 1)
 #define	DMFC_GENERAL_1		0x260014
+#define		DMFC_GENERAL_1_WAIT4EOT_5B	(1 << 20)
 #define	DMFC_IC_CTRL		0x26001C
+#define		DMFC_IC_CTRL_DISABLED	0x2
 
 #define	DC_WRITE_CH_CONF_1	0x0025801C
 #define		WRITE_CH_CONF_PROG_CHAN_TYP_MASK	(7 << 5)
@@ -315,6 +348,14 @@ struct ipu_cpmem_ch_param {
 	1, 125, 3)
 #define	CH_PARAM_GET_ALPHA_OFFSET(param) ipu_ch_param_get_value((param), \
 	1, 143, 5)
+
+#define	IPU_PIX_FORMAT_BPP_32	0
+#define	IPU_PIX_FORMAT_BPP_24	1
+#define	IPU_PIX_FORMAT_BPP_18	2
+#define	IPU_PIX_FORMAT_BPP_16	3
+#define	IPU_PIX_FORMAT_BPP_12	4
+#define	IPU_PIX_FORMAT_BPP_8	5
+#define	IPU_PIX_FORMAT_BPP_
 
 #define	IPU_PIX_FORMAT_RGB	7
 
@@ -846,9 +887,10 @@ ipu_init_buffer(struct ipu_softc *sc)
 	CH_PARAM_SET_EBA0(&param, (sc->sc_fb_phys >> 3));
 	CH_PARAM_SET_EBA1(&param, (sc->sc_fb_phys >> 3));
 
-	CH_PARAM_SET_BPP(&param, 3);
+	CH_PARAM_SET_BPP(&param, IPU_PIX_FORMAT_BPP_16);
 	CH_PARAM_SET_PFS(&param, IPU_PIX_FORMAT_RGB);
-	CH_PARAM_SET_NPB(&param, 15);
+	/* 16 pixels per burst access */
+	CH_PARAM_SET_NPB(&param, 16 - 1);
 
 	CH_PARAM_SET_RED_OFFSET(&param, 0);
 	CH_PARAM_SET_RED_WIDTH(&param, 5 - 1);
@@ -868,15 +910,36 @@ ipu_init_buffer(struct ipu_softc *sc)
 #endif
 
 	/* init DMFC */
-	IPU_WRITE4(sc, DMFC_IC_CTRL, 0x2);
+	IPU_WRITE4(sc, DMFC_IC_CTRL, DMFC_IC_CTRL_DISABLED);
 	/* High resolution DP */
-	IPU_WRITE4(sc, DMFC_WR_CHAN, 0x00000090);
-	IPU_WRITE4(sc, DMFC_WR_CHAN_DEF, 0x202020F6);
-	IPU_WRITE4(sc, DMFC_DP_CHAN, 0x0000968a);
-	IPU_WRITE4(sc, DMFC_DP_CHAN_DEF, 0x2020F6F6);
+	IPU_WRITE4(sc, DMFC_WR_CHAN, DMFC_WR_CHAN_BURST_SIZE_8 |
+	    DMFC_WR_CHAN_FIFO_SIZE_128);
+	IPU_WRITE4(sc, DMFC_WR_CHAN_DEF, DMFC_WR_CHAN_DEF_WM_CLR_2C(1) |
+	    DMFC_WR_CHAN_DEF_WM_CLR_1C(1) |
+	    DMFC_WR_CHAN_DEF_WM_CLR_2(1) |
+	    DMFC_WR_CHAN_DEF_WM_CLR_1(7) |
+	    DMFC_WR_CHAN_DEF_WM_SET_1(5) |
+	    DMFC_WR_CHAN_DEF_WM_EN_1);
+
+	IPU_WRITE4(sc, DMFC_DP_CHAN,
+	    DMFC_DP_CHAN_BURST_SIZE_5F(DMFC_DP_CHAN_BURST_SIZE_8) |
+	    DMFC_DP_CHAN_FIFO_SIZE_5F(DMFC_DP_CHAN_FIFO_SIZE_128) |
+	    DMFC_DP_CHAN_ST_ADDR_SIZE_5F(6) /* segment 6 */ |
+	    DMFC_DP_CHAN_BURST_SIZE_5B(DMFC_DP_CHAN_BURST_SIZE_8) |
+	    DMFC_DP_CHAN_FIFO_SIZE_5B(DMFC_DP_CHAN_FIFO_SIZE_256) |
+	    DMFC_DP_CHAN_ST_ADDR_SIZE_5B(2) /* segment 2 */);
+
+	IPU_WRITE4(sc, DMFC_DP_CHAN_DEF, DMFC_DP_CHAN_DEF_WM_CLR_6F(1) |
+	    DMFC_DP_CHAN_DEF_WM_CLR_6B(1) |
+	    DMFC_DP_CHAN_DEF_WM_CLR_5F(7) |
+	    DMFC_DP_CHAN_DEF_WM_SET_5F(5) |
+	    DMFC_DP_CHAN_DEF_WM_EN_5F |
+	    DMFC_DP_CHAN_DEF_WM_CLR_5B(7) |
+	    DMFC_DP_CHAN_DEF_WM_SET_5B(5) |
+	    DMFC_DP_CHAN_DEF_WM_EN_5B);
 
 	reg = IPU_READ4(sc, DMFC_GENERAL_1);
-	reg &= ~(1UL << 20);
+	reg &= ~(DMFC_GENERAL_1_WAIT4EOT_5B);
 	IPU_WRITE4(sc, DMFC_GENERAL_1, reg);
 
 	/* XXX: set priority? */
@@ -906,7 +969,7 @@ ipu_init(struct ipu_softc *sc)
 
 	reg = IPU_READ4(sc, IPU_CONF);
 
-	IPU_WRITE4(sc, IPU_CONF, 0x00000040);
+	IPU_WRITE4(sc, IPU_CONF, DI_PORT ? IPU_CONF_DI1_EN : IPU_CONF_DI0_EN);
 
 	IPU_WRITE4(sc, IPU_MEM_RST, 0x807FFFFF);
 	i = 1000;
