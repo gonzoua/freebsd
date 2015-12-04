@@ -793,12 +793,12 @@ ipu_dc_reset_map(struct ipu_softc *sc, int map)
 }
 
 static void
-ipu_dc_init(struct ipu_softc *sc)
+ipu_dc_init(struct ipu_softc *sc, int di_port)
 {
 	int addr;
 	uint32_t conf;
 
-	if (DI_PORT)
+	if (di_port)
 		addr = 2;
 	else
 		addr = 5;
@@ -962,7 +962,7 @@ ipu_init(struct ipu_softc *sc)
 	/* Calculate actual FB Size */
 	sc->sc_fb_size = sc->sc_mode->hdisplay*sc->sc_mode->vdisplay*MODE_BPP/8;
 
-	ipu_dc_init(sc);
+	ipu_dc_init(sc, DI_PORT);
 	IPU_WRITE4(sc, IPU_CONF, 0x00000660);
 
 	ipu_config_timing(sc, DI_PORT);
