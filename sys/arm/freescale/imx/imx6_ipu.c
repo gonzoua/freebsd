@@ -113,14 +113,19 @@ static struct videomode mode1024x768 = M("1024x768x60",1024,768,65000,1048,1184,
 #define	TEMPLATE_STOP		(1 << 9)
 
 #define	IPU_CONF		0x200000
+#define		IPU_CONF_DMFC_EN	(1 << 10)
+#define		IPU_CONF_DC_EN		(1 << 9)
 #define		IPU_CONF_DI1_EN		(1 << 7)
 #define		IPU_CONF_DI0_EN		(1 << 6)
+#define		IPU_CONF_DP_EN		(1 << 5)
 #define	IPU_DISP_GEN		0x2000C4
 #define		DISP_GEN_DI1_CNTR_RELEASE	(1 << 25)
 #define		DISP_GEN_DI0_CNTR_RELEASE	(1 << 24)
 #define		DISP_GEN_MCU_MAX_BURST_STOP	(1 << 22)
 #define		DISP_GEN_MCU_T_SHIFT		18
 #define	IPU_MEM_RST		0x2000DC
+#define		IPU_MEM_RST_START	(1 << 31)
+#define		IPU_MEM_RST_ALL		0x807FFFFF
 #define	IPU_CH_DB_MODE_SEL_0	0x200150
 #define	IPU_CH_DB_MODE_SEL_1	0x200154
 #define	IPU_CUR_BUF_0		0x20023C
@@ -971,10 +976,10 @@ ipu_init(struct ipu_softc *sc)
 
 	IPU_WRITE4(sc, IPU_CONF, DI_PORT ? IPU_CONF_DI1_EN : IPU_CONF_DI0_EN);
 
-	IPU_WRITE4(sc, IPU_MEM_RST, 0x807FFFFF);
+	IPU_WRITE4(sc, IPU_MEM_RST, IPU_MEM_RST_ALL);
 	i = 1000;
 	while (i-- > 0) {
-		if (!(IPU_READ4(sc, IPU_MEM_RST) & 0x80000000))
+		if (!(IPU_READ4(sc, IPU_MEM_RST) & IPU_MEM_RST_START))
 			break;
 		DELAY(1);
 	}
@@ -1031,7 +1036,9 @@ ipu_init(struct ipu_softc *sc)
 	sc->sc_fb_size = sc->sc_mode->hdisplay*sc->sc_mode->vdisplay*MODE_BPP/8;
 
 	ipu_dc_init(sc, DI_PORT);
-	IPU_WRITE4(sc, IPU_CONF, 0x00000660);
+	reg = IPU_READ4(sc, IPU_CONF);
+	reg |= IPU_CONF_DMFC_EN | IPU_CONF_DC_EN | IPU_CONF_DP_EN;
+	IPU_WRITE4(sc, IPU_CONF, reg);
 
 	ipu_config_timing(sc, DI_PORT);
 	ipu_init_buffer(sc);
