@@ -28,20 +28,29 @@
 # 	See ALL_SUBDIR_TARGETS for list of targets that will recurse.
 # 	Custom targets can be added to SUBDIR_TARGETS in src.conf.
 #
+# 	Targets defined in STANDALONE_SUBDIR_TARGETS will always be ran
+# 	with SUBDIR_PARALLEL and will not respect .WAIT or SUBDIR_DEPEND_
+# 	values.
+#
 
 .if !target(__<bsd.subdir.mk>__)
 __<bsd.subdir.mk>__:
 
-ALL_SUBDIR_TARGETS= all all-man buildconfig checkdpadd clean cleandepend \
-		    cleandir cleanilinks cleanobj depend distribute \
-		    installconfig lint maninstall manlint obj objlink \
-		    realinstall regress tags \
+ALL_SUBDIR_TARGETS= all all-man buildconfig buildfiles buildincludes \
+		    checkdpadd clean cleandepend cleandir cleanilinks \
+		    cleanobj depend distribute files includes installconfig \
+		    installfiles installincludes install lint maninstall \
+		    manlint obj objlink regress tags \
 		    ${SUBDIR_TARGETS}
+
+# Described above.
+STANDALONE_SUBDIR_TARGETS?= obj checkdpadd clean cleandepend cleandir \
+			    cleanilinks cleanobj
 
 .include <bsd.init.mk>
 
 .if !defined(NEED_SUBDIR)
-.if ${.MAKE.LEVEL} == 0 && ${MK_META_MODE} == "yes" && !empty(SUBDIR) && !(make(clean*) || make(destroy*))
+.if ${.MAKE.LEVEL} == 0 && ${MK_DIRDEPS_BUILD} == "yes" && !empty(SUBDIR) && !(make(clean*) || make(destroy*))
 .include <meta.subdir.mk>
 # ignore this
 _SUBDIR:
@@ -63,6 +72,27 @@ distribute: .MAKE
 .endfor
 .endif
 
+# Convenience targets to run 'build${target}' and 'install${target}' when
+# calling 'make ${target}'.
+.for __target in files includes
+.if !target(${__target})
+${__target}:	build${__target} install${__target}
+.ORDER:		build${__target} install${__target}
+.endif
+.endfor
+
+# Make 'install' supports a before and after target.  Actual install
+# hooks are placed in 'realinstall'.
+.if !target(install)
+.for __stage in before real after
+.if !target(${__stage}install)
+${__stage}install:
+.endif
+.endfor
+install:	beforeinstall realinstall afterinstall
+.ORDER:		beforeinstall realinstall afterinstall
+.endif
+
 # Subdir code shared among 'make <subdir>', 'make <target>' and SUBDIR_PARALLEL.
 _SUBDIR_SH=	\
 		if test -d ${.CURDIR}/$${dir}.${MACHINE_ARCH}; then \
@@ -72,10 +102,10 @@ _SUBDIR_SH=	\
 		cd ${.CURDIR}/$${dir}; \
 		${MAKE} $${target} DIRPRFX=${DIRPRFX}$${dir}/
 
-_SUBDIR: .USE .MAKE
+_SUBDIR: .USEBEFORE
 .if defined(SUBDIR) && !empty(SUBDIR) && !defined(NO_SUBDIR)
-	@${_+_}target=${.TARGET:S,realinstall,install,:S,^_sub.,,}; \
-	    for dir in ${SUBDIR:N.WAIT}; do ${_SUBDIR_SH}; done
+	@${_+_}target=${.TARGET}; \
+	    for dir in ${SUBDIR:N.WAIT}; do ( ${_SUBDIR_SH} ); done
 .endif
 
 ${SUBDIR:N.WAIT}: .PHONY .MAKE
@@ -86,7 +116,18 @@ ${SUBDIR:N.WAIT}: .PHONY .MAKE
 # Work around parsing of .if nested in .for by putting .WAIT string into a var.
 __wait= .WAIT
 .for __target in ${ALL_SUBDIR_TARGETS}
-.ifdef SUBDIR_PARALLEL
+# Can ordering be skipped for this and SUBDIR_PARALLEL forced?
+.if make(${__target}) && ${STANDALONE_SUBDIR_TARGETS:M${__target}}
+_is_standalone_target=	1
+SUBDIR:=	${SUBDIR:N.WAIT}
+.else
+_is_standalone_target=	0
+.endif
+# Only recurse on directly-called targets.  I.e., don't recurse on dependencies
+# such as 'install' becoming {before,real,after}install, just recurse
+# 'install'.
+.if make(${__target})
+.if defined(SUBDIR_PARALLEL) || ${_is_standalone_target} == 1
 __subdir_targets=
 .for __dir in ${SUBDIR}
 .if ${__wait} == ${__dir}
@@ -94,52 +135,28 @@ __subdir_targets+= .WAIT
 .else
 __subdir_targets+= ${__target}_subdir_${__dir}
 __deps=
+.if ${_is_standalone_target} == 0
 .for __dep in ${SUBDIR_DEPEND_${__dir}}
 __deps+= ${__target}_subdir_${__dep}
 .endfor
+.endif
 ${__target}_subdir_${__dir}: .PHONY .MAKE ${__deps}
 .if !defined(NO_SUBDIR)
-	@${_+_}target=${__target:realinstall=install}; \
+	@${_+_}target=${__target}; \
 	    dir=${__dir}; \
 	    ${_SUBDIR_SH};
 .endif
 .endif
-.endfor
+.endfor	# __dir in ${SUBDIR}
 ${__target}: ${__subdir_targets}
 .else
-${__target}: _sub.${__target}
-_sub.${__target}: _SUBDIR
-.endif
-.endfor
+${__target}: _SUBDIR
+.endif	# SUBDIR_PARALLEL || _is_standalone_target
+.elif !target(${__target})
+${__target}:
+.endif	# make(${__target})
+.endfor	# __target in ${ALL_SUBDIR_TARGETS}
 
-# This is to support 'make includes' calling 'make buildincludes' and
-# 'make installincludes' in the proper order, and to support these
-# targets as SUBDIR_TARGETS.
-.for __target in files includes
-.for __stage in build install
-${__stage}${__target}:
-.if make(${__stage}${__target})
-${__stage}${__target}: _sub.${__stage}${__target}
-_sub.${__stage}${__target}: _SUBDIR
-.endif
-.endfor
-.if !target(${__target})
-${__target}: .MAKE
-	${_+_}cd ${.CURDIR}; ${MAKE} build${__target}; ${MAKE} install${__target}
-.endif
-.endfor
-
-.endif
-
-.if !target(install)
-.if !target(beforeinstall)
-beforeinstall:
-.endif
-.if !target(afterinstall)
-afterinstall:
-.endif
-install: beforeinstall realinstall afterinstall
-.ORDER: beforeinstall realinstall afterinstall
-.endif
+.endif	# !target(_SUBDIR)
 
 .endif
