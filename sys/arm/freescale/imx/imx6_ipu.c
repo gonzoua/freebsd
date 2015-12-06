@@ -540,7 +540,6 @@ ipu_config_wave_gen_0(struct ipu_softc *sc, int di,
 
 	addr = (di ? IPU_DI1_SW_GEN0_1 : IPU_DI0_SW_GEN0_1)
 	    + (wave_gen-1)*sizeof(uint32_t);
-	reg = IPU_READ4(sc, addr);
 	reg = DI_RUN_VALUE_M1(run_value) |
 	    DI_RUN_RESOLUTION(run_res) |
 	    DI_OFFSET_VALUE(offset_value) | offset_res;
@@ -559,7 +558,6 @@ ipu_config_wave_gen_1(struct ipu_softc *sc, int di, int wave_gen,
 
 	addr = (di ? IPU_DI1_SW_GEN1_1 : IPU_DI0_SW_GEN1_1)
 	    + (wave_gen-1)*sizeof(uint32_t);
-	reg = IPU_READ4(sc, addr);
 	reg = DI_CNT_POLARITY_GEN_EN(cnt_polarity_gen_en) |
 	    DI_CNT_CLR_SEL(cnt_clr_src) |
 	    DI_CNT_POLARITY_TRIGGER_SEL(cnt_polarity_trigger_src) |
@@ -673,14 +671,12 @@ ipu_config_timing(struct ipu_softc *sc, int di)
 
 	/* Setup wave generator */
 	dw_gen_offset = di ? IPU_DI1_DW_GEN_0 : IPU_DI0_DW_GEN_0;
-	dw_gen = IPU_READ4(sc, dw_gen_offset);
 	dw_gen = DW_GEN_DI_ACCESS_SIZE(div - 1) | DW_GEN_DI_COMPONENT_SIZE(div - 1);
 	dw_gen &= ~DW_GEN_DI_PIN_15_SET(DW_GEN_DI_SET_MASK);
 	dw_gen |= DW_GEN_DI_PIN_15_SET(3); /* set 3*/
 	IPU_WRITE4(sc, dw_gen_offset, dw_gen);
 
 	dw_set_offset = di ? IPU_DI1_DW_SET3_0 : IPU_DI0_DW_SET3_0;
-	dw_set = IPU_READ4(sc, dw_set_offset);
 	dw_set = DW_SET_DATA_CNT_DOWN(div*2) | DW_SET_DATA_CNT_UP(0);
 	IPU_WRITE4(sc, dw_set_offset, dw_set);
 
@@ -756,7 +752,6 @@ ipu_config_timing(struct ipu_softc *sc, int di)
 	IPU_WRITE4(sc, gen_offset, gen);
 
 	as_gen_offset = di ?  IPU_DI1_SYNC_AS_GEN : IPU_DI0_SYNC_AS_GEN;
-	as_gen = IPU_READ4(sc, as_gen_offset);
 	as_gen = SYNC_AS_GEN_VSYNC_SEL(DI_COUNTER_VSYNC-1) |
 	    SYNC_AS_GEN_SYNC_START(2);
 	IPU_WRITE4(sc, as_gen_offset, as_gen);
@@ -971,8 +966,6 @@ ipu_init(struct ipu_softc *sc)
 	uint32_t reg, off;
 	int i, err;
 	size_t dma_size;
-
-	reg = IPU_READ4(sc, IPU_CONF);
 
 	IPU_WRITE4(sc, IPU_CONF, DI_PORT ? IPU_CONF_DI1_EN : IPU_CONF_DI0_EN);
 
