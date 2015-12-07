@@ -93,6 +93,7 @@ struct dme_softc {
 	struct callout		dme_tick_ch;
 	struct gpiobus_pin	*gpio_rset;
 	uint32_t		dme_ticks;
+	uint8_t			dme_macaddr[ETHER_ADDR_LEN];
 };
 
 #define DME_CHIP_DM9000		0x00
@@ -160,10 +161,67 @@ dme_reset(struct dme_softc *sc)
 		device_printf(sc->dme_dev, "device did not complete second reset\n");
 }
 
+/*
+ * Parse string MAC address into usable form
+ */
+static int
+dme_parse_macaddr(const char *str, uint8_t *mac)
+{
+	int count, i;
+	unsigned int amac[ETHER_ADDR_LEN];	/* Aligned version */
+
+	count = sscanf(str, "%x%*c%x%*c%x%*c%x%*c%x%*c%x",
+	    &amac[0], &amac[1], &amac[2],
+	    &amac[3], &amac[4], &amac[5]);
+	if (count < ETHER_ADDR_LEN) {
+		memset(mac, 0, ETHER_ADDR_LEN);
+		return (1);
+	}
+
+	/* Copy aligned to result */
+	for (i = 0; i < ETHER_ADDR_LEN; i ++)
+		mac[i] = (amac[i] & 0xff);
+
+	return (0);
+}
+
+/*
+ * Try to determine our own MAC address
+ */
+static void
+dme_get_macaddr(struct dme_softc *sc)
+{
+	char devid_str[32];
+	char *var;
+	int i;
+
+	/* Cannot use resource_string_value with static hints mode */
+	snprintf(devid_str, 32, "hint.%s.%d.macaddr",
+	    device_get_name(sc->dme_dev),
+	    device_get_unit(sc->dme_dev));
+
+	/* Try resource hints */
+	if ((var = kern_getenv(devid_str)) != NULL) {
+		if (!dme_parse_macaddr(var, sc->dme_macaddr)) {
+			device_printf(sc->dme_dev, "MAC address: %s (hints)\n", var);
+			return;
+		}
+	}
+
+	/*
+	 * Try to read MAC address from the device, in case U-Boot has
+	 * pre-programmed one for us.
+	 */
+	for (i = 0; i < ETHER_ADDR_LEN; i++)
+		sc->dme_macaddr[i] = dme_read_reg(sc, DME_PAR(i));
+
+	device_printf(sc->dme_dev, "MAC address %6D (existing)\n",
+	    sc->dme_macaddr, ":");
+}
+
 static void
 dme_config(struct dme_softc *sc)
 {
-	uint8_t eaddr[ETHER_ADDR_LEN];
 	int i;
 
 	/* Mask all interrupts and reset receive pointer */
@@ -173,12 +231,27 @@ dme_config(struct dme_softc *sc)
 	dme_write_reg(sc, DME_GPCR, 1);
 	dme_write_reg(sc, DME_GPR, 0);
 
+#if 0
+	/*
+	 * Supposedly requires special initialization for DSP PHYs
+	 * used by DM9000B. Maybe belongs in dedicated PHY driver?
+	 */
 	if (sc->dme_rev == DME_CHIP_DM9000B) {
 		dme_miibus_writereg(sc->dme_dev, DME_INT_PHY, MII_BMCR,
 		    BMCR_RESET);
 		dme_miibus_writereg(sc->dme_dev, DME_INT_PHY, MII_DME_DSPCR,
 		    DSPCR_INIT);
+		/* Wait 100ms for it to complete. */
+		for (i = 0; i < 100; i++) {
+			int reg;
+
+			reg = dme_miibus_readreg(sc->dme_dev, DME_INT_PHY, MII_BMCR);
+			if ((reg & BMCR_RESET) == 0)
+				break;
+			DELAY(1000);
+		}
 	}
+#endif
 
 	/* Select the internal PHY and normal loopback */
 	dme_write_reg(sc, DME_NCR, NCR_LBK_NORMAL);
@@ -200,14 +273,8 @@ dme_config(struct dme_softc *sc)
 	for (i = 0; i < 8; i++)
 		dme_write_reg(sc, DME_MAR(i), 0xff);
 	/* Set the MAC address */
-	eaddr[0] = 0xd0;
-	eaddr[1] = 0x31;
-	eaddr[2] = 0x10;
-	eaddr[3] = 0xff;
-	eaddr[4] = 0x72;
-	eaddr[5] = 0x1f;
 	for (i = 0; i < ETHER_ADDR_LEN; i++)
-		dme_write_reg(sc, DME_PAR(i), eaddr[i]);
+		dme_write_reg(sc, DME_PAR(i), sc->dme_macaddr[i]);
 	/* Enable the RX buffer */
 	dme_write_reg(sc, DME_RCR, RCR_DIS_LONG | RCR_DIS_CRC | RCR_RXEN);
 
@@ -560,7 +627,6 @@ dme_probe(device_t dev)
 static int
 dme_attach(device_t dev)
 {
-	uint8_t eaddr[ETHER_ADDR_LEN];
 	struct dme_softc *sc;
 	struct ifnet *ifp;
 	int error, rid;
@@ -661,7 +727,9 @@ dme_attach(device_t dev)
 		break;
 	default:
 		/* reserved */
-		return (ENODEV);
+		device_printf(dev, "Unable to determine device mode\n");
+		error = ENXIO;
+		goto fail;
 	}
 
 	/* Read vendor and device id's */
@@ -680,6 +748,9 @@ dme_attach(device_t dev)
 	if (data != DME_CHIP_DM9000A && data != DME_CHIP_DM9000B)
 		data = DME_CHIP_DM9000;
 	sc->dme_rev = data;
+
+	/* Try to figure our mac address */
+	dme_get_macaddr(sc);
 
 	/* Configure chip after reset */
 	dme_config(sc);
@@ -708,14 +779,7 @@ dme_attach(device_t dev)
 	ifp->if_init = dme_init;
 	IFQ_SET_MAXLEN(&ifp->if_snd, IFQ_MAXLEN);
 
-	/* XXX: Hardcode the ethernet address for now */
-	eaddr[0] = 0xd0;
-	eaddr[1] = 0x31;
-	eaddr[2] = 0x10;
-	eaddr[3] = 0xff;
-	eaddr[4] = 0x72;
-	eaddr[5] = 0x1f;
-	ether_ifattach(ifp, eaddr);
+	ether_ifattach(ifp, sc->dme_macaddr);
 
 	error = bus_setup_intr(dev, sc->dme_irq, INTR_TYPE_NET | INTR_MPSAFE,
 	    NULL, dme_intr, sc, &sc->dme_intrhand);
