@@ -11,6 +11,9 @@ mips/ingenic/jz4780_machdep.c	standard
 mips/ingenic/jz4780_nemc.c	standard
 mips/ingenic/jz4780_timer.c	standard
 
+# SMP
+mips/ingenic/jz4780_mp.c	optional smp
+
 # Custom interface between pinctrl and gpio
 mips/ingenic/jz4780_gpio_if.m	standard
 

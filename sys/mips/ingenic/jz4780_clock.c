@@ -247,6 +247,7 @@ static const apbus_dev_t apbus_devs[] = {
 	{ "jzmmc",	JZ_MSC2_BASE,   35, CLK_MSC2, 0, JZ_MSC2CDR},
 	{ "jzfb",	JZ_LCDC0_BASE,  31, CLK_LCD, CLK_HDMI, 0},
 	{ "dme",	0,		-1, CLK_MAC, 0, 0},
+	{ "core1",	0,		-1, 0, CLK_P1, 0},
 	{ NULL,		-1,             -1, 0, 0, 0}
 };
 

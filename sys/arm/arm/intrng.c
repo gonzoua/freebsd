@@ -1387,6 +1387,7 @@ arm_ipi_set_handler(u_int ipi, const char *name, arm_ipi_filter_t *filter,
 	return (0);
 }
 
+#if defined(__arm)
 /*
  *  Send IPI thru interrupt controller.
  */
@@ -1400,6 +1401,7 @@ pic_ipi_send(cpuset_t cpus, u_int ipi)
 	KASSERT(irq_root_dev != NULL, ("%s: no root attached", __func__));
 	PIC_IPI_SEND(irq_root_dev, isrc, cpus);
 }
+#endif
 
 /*
  *  Init interrupt controller on another CPU.

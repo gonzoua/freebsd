@@ -22,17 +22,10 @@
 #include <machine/pcb.h>
 
 #ifdef MIPS_INTRNG
-enum {
-	IPI_RENDEZVOUS,
-	IPI_AST,
-	IPI_STOP,
-	IPI_STOP_HARD, /* These are synonyms on arm. */
-	IPI_PREEMPT,
-	IPI_HARDCLOCK,
-	MIPS_IPI_COUNT,
-	ARM_IPI_COUNT = MIPS_IPI_COUNT /* For arm/intrng.c compatibility */
-};
-#else
+# define MIPS_IPI_COUNT	1
+# define ARM_IPI_COUNT	MIPS_IPI_COUNT /* For arm/intrng.c compatibility */
+#endif
+
 /*
  * Interprocessor interrupts for SMP.
  */
@@ -42,7 +35,6 @@ enum {
 #define	IPI_STOP_HARD		0x0008
 #define	IPI_PREEMPT		0x0010
 #define	IPI_HARDCLOCK		0x0020
-#endif
 
 #ifndef LOCORE
 

@@ -52,13 +52,14 @@ __FBSDID("$FreeBSD$");
 
 #include <machine/clock.h>
 #include <machine/cpu.h>
-#include <machine/cpuregs.h>
+#include <machine/cpufunc.h>
 #include <machine/hwfunc.h>
 #include <machine/md_var.h>
 #include <machine/trap.h>
 #include <machine/vmparam.h>
 
 #include <mips/ingenic/jz4780_regs.h>
+#include <mips/ingenic/jz4780_cpuregs.h>
 
 uint32_t * const led = (uint32_t *)0xb0010548;
 
@@ -66,9 +67,26 @@ extern char edata[], end[];
 static char boot1_env[4096];
 
 void
-platform_cpu_init()
+platform_cpu_init(void)
 {
-	/* Nothing special */
+	uint32_t reg;
+
+	/*
+	 * Do not expect mbox interrups while writing
+	 * mbox
+	 */
+	reg = mips_rd_xburst_reim();
+	reg &= ~JZ_REIM_MIRQ0M;
+	mips_wr_xburst_reim(reg);
+
+	/* Clean mailboxes */
+	mips_wr_xburst_mbox0(0);
+	mips_wr_xburst_mbox1(0);
+	mips_wr_xburst_core_sts(~JZ_CORESTS_MIRQ0P);
+
+	/* Unmask mbox interrupts */
+	reg |= JZ_REIM_MIRQ0M;
+	mips_wr_xburst_reim(reg);
 }
 
 void

@@ -35,6 +35,11 @@
 	.text
 	.set	noat
 	.set	noreorder
+#ifdef CPU_XBURST
+	/* Xburst CPUs need 16 bit aligned entry point */
+	.section .text.mpentry
+	.balign 0x10000
+#endif
 
 /* XXX move this to a header file */
 #if defined(CPU_CNMIPS)
@@ -53,7 +58,6 @@
 #define CLEAR_STATUS \
 	mtc0	zero, MIPS_COP_0_STATUS
 #endif
-
 GLOBAL(mpentry)
 	CLEAR_STATUS			/* disable interrupts */
 

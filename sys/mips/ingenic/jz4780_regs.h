@@ -26,8 +26,8 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef INGENIC_REGS_H
-#define INGENIC_REGS_H
+#ifndef JZ4780_REGS_H
+#define JZ4780_REGS_H
 
 /* for mips_wbflush() */
 #include <machine/locore.h>
@@ -133,43 +133,6 @@ readreg(uint32_t reg)
 	mips_wbflush();
 	return *(volatile int32_t *)MIPS_PHYS_TO_KSEG1(reg);
 }
-
-/* extra CP0 registers */
-static inline uint32_t
-MFC0(uint32_t r, uint32_t s)
-{
-	uint32_t ret = 0x12345678;
-
-	__asm volatile("mfc0 %0, $%1, %2; nop;" : "=r"(ret) : "i"(r), "i"(s));
-	return ret;
-}
-
-#define MTC0(v, r, s) __asm volatile("mtc0 %0, $%1, %2; nop;" :: "r"(v), "i"(r), "i"(s))
-
-#define CP0_CORE_CTRL	12	/* select 2 */
-	#define CC_SW_RST0	1	/* reset core 0 */
-	#define CC_SW_RST1	2	/* reset core 1 */
-	#define CC_RPC0		0x100	/* dedicated reset entry core 0 */
-	#define CC_RPC1		0x200	/* -- || -- core 1 */
-	#define CC_SLEEP0M	0x10000	/* mask sleep core 0 */
-	#define CC_SLEEP1M	0x20000	/* mask sleep core 1 */
-
-/* cores status, 12 select 3 */
-#define CS_MIRQ0_P	0x00001	/* mailbox IRQ for 0 pending */
-#define CS_MIRQ1_P	0x00002	/* || core 1 */
-#define CS_IRQ0_P	0x00100	/* peripheral IRQ for core 0 */
-#define CS_IRQ1_P	0x00200	/* || core 1 */
-#define CS_SLEEP0	0x10000	/* core 0 sleeping */
-#define CS_SLEEP1	0x20000	/* core 1 sleeping */
-
-/* cores reset entry & IRQ masks - 12 select 4 */
-#define REIM_MIRQ0_M	0x00001	/* allow mailbox IRQ for core 0 */
-#define REIM_MIRQ1_M	0x00002	/* allow mailbox IRQ for core 1 */
-#define REIM_IRQ0_M	0x00100	/* allow peripheral IRQ for core 0 */
-#define REIM_IRQ1_M	0x00200	/* allow peripheral IRQ for core 1 */
-#define REIM_ENTRY_M	0xffff0000	/* reset exception entry if RPCn=1 */
-
-#define CP0_CORE_MBOX	20	/* select 0 for core 0, 1 for 1 */
 
 /* Clock management */
 #define JZ_CGU_BASE	0x10000000
@@ -325,6 +288,24 @@ MFC0(uint32_t r, uint32_t s)
 	#define PCR_TXRISETUNE1	0x00000001	/* rise/fall wave adj. */
 
 /* power manager */
+#define JZ_LPCR		0x00000004
+	#define LPCR_PD_SCPU	(1u << 31)	/* CPU1 power down */
+	#define LPCR_PD_VPU	(1u << 30)	/* VPU power down */
+	#define LPCR_PD_GPU	(1u << 29)	/* GPU power down */
+	#define LPCR_PD_GPS	(1u << 28)	/* GPS power down */
+	#define LPCR_SCPUS	(1u << 27)	/* CPU1 power down status */
+	#define LPCR_VPUS	(1u << 26)	/* VPU power down status */
+	#define LPCR_GPUS	(1u << 25)	/* GPU power down status */
+	#define LPCR_GPSS	(1u << 24)	/* GPS power down status */
+	#define LPCR_GPU_IDLE	(1u << 20)	/* GPU idle status */
+	#define LPCR_PST_SHIFT	8		/* Power stability time */
+	#define LPCR_PST_MASK	(0xFFFu << 8)
+	#define LPCR_DUTY_SHIFT	3		/* CPU clock duty */
+	#define LPCR_DUTY_MASK	(0x1Fu << 3)
+	#define LPCR_DOZE	(1u << 2)	/* Doze mode */
+	#define LPCR_LPM_SHIFT	0		/* Low power mode */
+	#define LPCR_LPM_MASK	(0x03u << 0)
+
 #define JZ_OPCR		0x00000024	/* Oscillator Power Control Reg. */
 	#define OPCR_IDLE_DIS	0x80000000	/* don't stop CPU clk on idle */
 	#define OPCR_GPU_CLK_ST	0x40000000	/* stop GPU clock */
@@ -785,4 +766,4 @@ MFC0(uint32_t r, uint32_t s)
 
 #define JC_NEMC_NFSCR	0x50
 
-#endif /* INGENIC_REGS_H */
+#endif /* JZ4780_REGS_H */

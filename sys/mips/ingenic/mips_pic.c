@@ -48,7 +48,9 @@ __FBSDID("$FreeBSD$");
 #include <sys/mutex.h>
 #include <sys/smp.h>
 #include <sys/sched.h>
+
 #include <machine/bus.h>
+#include <machine/hwfunc.h>
 #include <machine/intr.h>
 #include <machine/smp.h>
 
@@ -63,15 +65,11 @@ __FBSDID("$FreeBSD$");
 #define NSOFT_IRQS	2
 #define NREAL_IRQS	(NHARD_IRQS + NSOFT_IRQS)
 
-#ifdef SMP
-static u_int pic_irq_cpu;
-static int mips_pic_bind(device_t dev, struct arm_irqsrc *isrc);
-#endif
 static int mips_pic_intr(void *);
 
 struct mips_pic_softc {
 	device_t		pic_dev;
-	struct arm_irqsrc *	pic_irqs[NREAL_IRQS + MIPS_IPI_COUNT];
+	struct arm_irqsrc *	pic_irqs[NREAL_IRQS];
 	struct mtx		mutex;
 	uint32_t		nirqs;
 };
@@ -157,7 +155,7 @@ mips_pic_attach(device_t dev)
 	}
 
 	/* Claim our root controller role */
-	if (arm_pic_claim_root(dev, xref, mips_pic_intr, sc, sc->nirqs) != 0) {
+	if (arm_pic_claim_root(dev, xref, mips_pic_intr, sc, 0) != 0) {
 		device_printf(dev, "could not set PIC as a root\n");
 		arm_pic_unregister(dev, xref);
 		goto cleanup;
@@ -232,7 +230,7 @@ pic_attach_isrc(struct mips_pic_softc *sc, struct arm_irqsrc *isrc, u_int irq)
 	else if (irq < NREAL_IRQS)
 		arm_irq_set_name(isrc, "int%u", irq - NSOFT_IRQS);
 	else
-		arm_irq_set_name(isrc, "ipi%u", irq - NREAL_IRQS);
+		panic("Invalid irq %u", irq);
 	return (0);
 }
 
@@ -269,10 +267,6 @@ pic_irq_from_nspc(struct mips_pic_softc *sc, u_int type, u_int num, u_int *irqp)
 	case ARM_IRQ_NSPC_IRQ:
 		*irqp = num + NSOFT_IRQS;
 		return (num < NHARD_IRQS ? 0 : EINVAL);
-
-	case ARM_IRQ_NSPC_IPI:
-		*irqp = num + NHARD_IRQS + NSOFT_IRQS;
-		return (num < MIPS_IPI_COUNT ? 0 : EINVAL);
 
 	default:
 		return (EINVAL);
@@ -344,20 +338,6 @@ mips_pic_enable_intr(device_t dev, struct arm_irqsrc *isrc)
 
 	if (isrc->isrc_trig == INTR_TRIGGER_CONFORM)
 		isrc->isrc_trig = INTR_TRIGGER_LEVEL;
-
-	/*
-	 * XXX - In case that per CPU interrupt is going to be enabled in time
-	 *       when SMP is already started, we need some IPI call which
-	 *       enables it on others CPUs. Further, it's more complicated as
-	 *       pic_enable_source() and pic_disable_source() should act on
-	 *       per CPU basis only. Thus, it should be solved here somehow.
-	 */
-	if (isrc->isrc_flags & ARM_ISRCF_PERCPU)
-		CPU_SET(PCPU_GET(cpuid), &isrc->isrc_cpu);
-
-#ifdef SMP
-	mips_pic_bind(dev, isrc);
-#endif
 }
 
 static void
@@ -410,27 +390,12 @@ mips_pic_post_filter(device_t dev, struct arm_irqsrc *isrc)
 static int
 mips_pic_bind(device_t dev, struct arm_irqsrc *isrc)
 {
-	struct mips_pic_softc *sc = device_get_softc(dev);
-	uint32_t irq = isrc->isrc_data;
-
-	if (CPU_EMPTY(&isrc->isrc_cpu)) {
-		pic_irq_cpu = arm_irq_next_cpu(gic_irq_cpu, &all_cpus);
-		CPU_SETOF(pic_irq_cpu, &isrc->isrc_cpu);
-	}
-	return (pic_bind(sc, irq, &isrc->isrc_cpu));
+	return (EOPNOTSUPP);
 }
 
 static void
 mips_pic_ipi_send(device_t dev, struct arm_irqsrc *isrc, cpuset_t cpus)
 {
-	struct mips_pic_softc *sc = device_get_softc(dev);
-	uint32_t irq, val = 0, i;
-
-	irq = isrc->isrc_data;
-
-	for (i = 0; i < MAXCPU; i++)
-		if (CPU_ISSET(i, &cpus))
-			val |= 1 << (16 + i);
 }
 #endif
 
@@ -475,11 +440,27 @@ void
 cpu_establish_hardintr(const char *name, driver_filter_t *filt,
     void (*handler)(void*), void *arg, int irq, int flags, void **cookiep)
 {
+	u_int vec;
+	int res;
+
 	/*
 	 * We have 6 levels, but thats 0 - 5 (not including 6)
 	 */
 	if (irq < 0 || irq >= NHARD_IRQS)
 		panic("%s called for unknown hard intr %d", __func__, irq);
+
+	KASSERT(pic_sc != NULL, ("%s: no pic", __func__));
+	vec = arm_namespace_map_irq(pic_sc->pic_dev, ARM_IRQ_NSPC_IRQ, irq);
+	KASSERT(vec != NIRQ, ("Unable to map hard IRQ %d\n", irq));
+
+	res = arm_irq_add_handler(pic_sc->pic_dev, filt, handler, arg, vec,
+	    flags, cookiep);
+	if (res != 0) panic("Unable to add hard IRQ %d handler", irq);
+
+	(void)pic_irq_from_nspc(pic_sc, ARM_IRQ_NSPC_IRQ, irq, &vec);
+	KASSERT(pic_sc->pic_irqs[vec] != NULL,
+	    ("Hard IRQ %d not registered\n", irq));
+	arm_irq_set_name(pic_sc->pic_irqs[vec], "%s", name);
 }
 
 void
@@ -487,10 +468,23 @@ cpu_establish_softintr(const char *name, driver_filter_t *filt,
     void (*handler)(void*), void *arg, int irq, int flags,
     void **cookiep)
 {
+	u_int vec;
+	int res;
 
 	if (irq < 0 || irq > NSOFT_IRQS)
-		panic("%s called for unknown hard intr %d", __func__, irq);
+		panic("%s called for unknown soft intr %d", __func__, irq);
 
 	KASSERT(pic_sc != NULL, ("%s: no pic", __func__));
+	vec = arm_namespace_map_irq(pic_sc->pic_dev, ARM_IRQ_NSPC_SWI, irq);
+	KASSERT(vec <= NIRQ, ("Unable to map soft IRQ %d\n", irq));
+
+	arm_irq_add_handler(pic_sc->pic_dev, filt, handler, arg, vec,
+	    flags, cookiep);
+	if (res != 0) panic("Unable to add soft IRQ %d handler", irq);
+
+	(void)pic_irq_from_nspc(pic_sc, ARM_IRQ_NSPC_SWI, irq, &vec);
+	KASSERT(pic_sc->pic_irqs[vec] != NULL,
+	    ("Soft IRQ %d not registered\n", irq));
+	arm_irq_set_name(pic_sc->pic_irqs[vec], "%s", name);
 }
 
