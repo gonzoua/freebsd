@@ -82,14 +82,6 @@ jz4780_ohci_probe(device_t dev)
 	return (BUS_PROBE_DEFAULT);
 }
 
-static void
-jz4780_ohci_intr(void *arg)
-{
-
-	printf("OHCI int\n");
-	ohci_interrupt(arg);
-}
-
 static int
 jz4780_ohci_vbus_gpio_enable(device_t dev, struct jz4780_ohci_softc *sc)
 {
@@ -173,7 +165,7 @@ jz4780_ohci_attach(device_t dev)
 
 	err = bus_setup_intr(dev, sc->sc_ohci.sc_irq_res,
 	    INTR_TYPE_BIO | INTR_MPSAFE, NULL,
-	    jz4780_ohci_intr, sc, &sc->sc_ohci.sc_intr_hdl);
+	    (driver_intr_t *)ohci_interrupt, sc, &sc->sc_ohci.sc_intr_hdl);
 	if (err) {
 		err = ENXIO;
 		goto error;
