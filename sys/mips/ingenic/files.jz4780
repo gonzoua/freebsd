@@ -1,6 +1,7 @@
 # $FreeBSD$
 
 mips/ingenic/jz4780_clock.c	optional fdt_clock
+mips/ingenic/jz4780_ohci.c	optional ohci
 mips/ingenic/jz4780_pinctrl.c	optional fdt_pinctrl
 
 mips/ingenic/jz4780_efuse.c	standard

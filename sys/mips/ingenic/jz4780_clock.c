@@ -283,6 +283,11 @@ apbus_attach(device_t dev)
 	reg &= ~CLK_AHB_MON;	/* AHB_MON clock */
 	CSR_WRITE_4(sc, JZ_CLKGR1, reg);
 
+	/* wake up the USB part */
+	reg = CSR_READ_4(sc, JZ_OPCR);
+	reg |= OPCR_SPENDN0 | OPCR_SPENDN1;
+	CSR_WRITE_4(sc, JZ_OPCR, reg);
+
 	for (const apbus_dev_t *adv = apbus_devs; adv->name != NULL; adv++) {
 		/* enable clocks as needed */
 		if (adv->clk0 != 0) {
