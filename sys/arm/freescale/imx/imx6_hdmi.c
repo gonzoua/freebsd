@@ -672,8 +672,6 @@ imx_hdmi_attach(device_t dev)
 	else
 		sc->sc_i2c_xref = i2c_xref;
 
-	err = 0;
-
 	sc->sc_edid = malloc(EDID_LENGTH, M_DEVBUF, M_WAITOK | M_ZERO);
 	sc->sc_edid_len = EDID_LENGTH;
 
