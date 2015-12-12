@@ -50,6 +50,7 @@ __FBSDID("$FreeBSD$");
 #include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/ofw_bus_subr.h>
 
+#include <mips/ingenic/jz4780_clock.h>
 #include <mips/ingenic/jz4780_regs.h>
 
 #include <gnu/dts/include/dt-bindings/clock/jz4780-cgu.h>
@@ -278,6 +279,16 @@ apbus_attach(device_t dev)
 	device_printf(dev, "pclk %d kHz\n", pclk);
 	device_printf(dev, "CPU clock %d kHz\n", cclk);
 
+#ifdef notyet
+	/* Set UHC clock to 48MHz */
+	reg = CSR_READ_4(sc, JZ_UHCCDR);
+	reg |= UHCCDR_CE;
+	CSR_WRITE_4(sc, JZ_UHCCDR, reg);
+	reg &= ~(UHCCDR_CLK_MASK | UHCCDR_DIV_M);
+	reg |= UHCCDR_MPLL | UHCCDR_DIV(25);
+	CSR_WRITE_4(sc, JZ_UHCCDR, reg);
+#endif
+
 	/* enable clocks */
 	reg = CSR_READ_4(sc, JZ_CLKGR1);
 	reg &= ~CLK_AHB_MON;	/* AHB_MON clock */
@@ -311,7 +322,84 @@ apbus_attach(device_t dev)
 	device_printf(dev, "JZ_SRBC   %08x\n", CSR_READ_4(sc, JZ_SRBC));
 	device_printf(dev, "JZ_OPCR   %08x\n", CSR_READ_4(sc, JZ_OPCR));
 	device_printf(dev, "JZ_UHCCDR %08x\n", CSR_READ_4(sc, JZ_UHCCDR));
+	device_printf(dev, "JZ_USBPCR1 %08x\n", CSR_READ_4(sc, JZ_USBPCR1));
 	device_printf(dev, "JZ_ERNG   %08x\n", CSR_READ_4(sc, JZ_ERNG));
 	device_printf(dev, "JZ_RNG    %08x\n", CSR_READ_4(sc, JZ_RNG));
 }
 
+int
+jz4780_ehci_enable(void)
+{
+	device_t dev;
+	struct jz4780_clock_softc *sc;
+	uint32_t reg;
+	static int usb_has_reset;
+
+	dev = devclass_get_device(jz4780_clock_devclass, 0);
+	if (dev == NULL)
+		return (-1);
+
+	sc = device_get_softc(dev);
+
+	CGU_LOCK(sc);
+
+	reg = CSR_READ_4(sc, JZ_USBPCR);
+	reg &= ~(PCR_OTG_DISABLE);
+	CSR_WRITE_4(sc, JZ_USBPCR, reg);
+
+	/* Use CLKCORE as a reference clock */
+	reg = CSR_READ_4(sc, JZ_USBPCR1);
+	reg &= ~(PCR_REFCLK_MASK);
+	reg |= PCR_REFCLK_CORE;
+	CSR_WRITE_4(sc, JZ_USBPCR1, reg);
+
+	/* Do not force port1 to suspend mode */
+	reg = CSR_READ_4(sc, JZ_OPCR);
+	reg |= OPCR_SPENDN1;
+	CSR_WRITE_4(sc, JZ_OPCR, reg);
+
+	/* D- pulldown */
+	reg = CSR_READ_4(sc, JZ_USBPCR1);
+	reg |= PCR_DMPD1;
+	CSR_WRITE_4(sc, JZ_USBPCR1, reg);
+
+	/* D+ pulldown */
+	reg = CSR_READ_4(sc, JZ_USBPCR1);
+	reg |= PCR_DPPD1;
+	CSR_WRITE_4(sc, JZ_USBPCR1, reg);
+
+	/* 16 bit bus witdth for port 1*/
+	reg = CSR_READ_4(sc, JZ_USBPCR1);
+	reg |= PCR_WORD_I_F1;
+	CSR_WRITE_4(sc, JZ_USBPCR1, reg);
+
+	CGU_UNLOCK(sc);
+
+	/* Reset USB */
+	reg = CSR_READ_4(sc, JZ_USBPCR);
+	reg |= PCR_POR;
+	CSR_WRITE_4(sc, JZ_USBPCR, reg);
+	DELAY(1);
+	reg = CSR_READ_4(sc, JZ_USBPCR);
+	reg &= ~(PCR_POR);
+	CSR_WRITE_4(sc, JZ_USBPCR, reg);
+
+	/* Soft-reset USB */
+	if (!usb_has_reset) {
+		reg = CSR_READ_4(sc, JZ_SRBC);
+		reg |= SRBC_UHC_SR;
+		CSR_WRITE_4(sc, JZ_SRBC, reg);
+		/* 300ms */
+		DELAY(300*hz/1000);
+
+		reg = CSR_READ_4(sc, JZ_SRBC);
+		reg &= ~(SRBC_UHC_SR);
+		CSR_WRITE_4(sc, JZ_SRBC, reg);
+
+		/* 300ms */
+		DELAY(300*hz/1000);
+		usb_has_reset = 1;
+	}
+
+	return (0);
+}

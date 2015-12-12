@@ -228,10 +228,12 @@ readreg(uint32_t reg)
 	#define UHCCDR_MPLL	0x40000000
 	#define UHCCDR_EPLL	0x80000000
 	#define UHCCDR_OTG_PHY	0xc0000000
+	#define UHCCDR_CLK_MASK	0xc0000000
 	#define UHCCDR_CE	0x20000000
 	#define UHCCDR_BUSY	0x10000000
 	#define UHCCDR_STOP	0x08000000
 	#define UHCCDR_DIV_M	0x000000ff
+	#define UHCCDR_DIV(d)	(d)
 #define JZ_SSICDR	0x00000074	/* SSI clock divider register */
 #define JZ_CIMCDR	0x0000007c	/* CIM MCLK clock divider register */
 #define JZ_PCMCDR	0x00000084	/* PCM device clock divider register */
@@ -242,7 +244,7 @@ readreg(uint32_t reg)
 #define JZ_CPM_INTRE	0x000000b4	/* CPM interrupt enable register */
 #define JZ_CPSPR	0x00000034	/* CPM scratch register */
 #define JZ_CPSRPR	0x00000038	/* CPM scratch protected register */
-#define JZ_USBPCR	0x1000003c	/* USB parameter control register */
+#define JZ_USBPCR	0x0000003c	/* USB parameter control register */
 	#define PCR_USB_MODE		0x80000000	/* 1 - otg */
 	#define PCR_AVLD_REG		0x40000000
 	#define PCR_IDPULLUP_MASK	0x30000000
@@ -265,6 +267,7 @@ readreg(uint32_t reg)
 #define JZ_USBVBFIL	0x00000044	/* USB jitter filter register */
 #define JZ_USBPCR1	0x00000048	/* USB parameter control register 1 */
 	#define PCR_SYNOPSYS	0x10000000	/* Mentor mode otherwise */
+	#define PCR_REFCLK_MASK	0x0c000000
 	#define PCR_REFCLK_CORE	0x0c000000
 	#define PCR_REFCLK_XO25	0x04000000
 	#define PCR_REFCLK_CO	0x00000000
@@ -325,6 +328,7 @@ readreg(uint32_t reg)
 #define JZ_SPCR0	0x000000b8	/* SRAM Power Control Registers */
 #define JZ_SPCR1	0x000000bc
 #define JZ_SRBC		0x000000c4	/* Soft Reset & Bus Control */
+	#define SRBC_UHC_SR	0x00004000	/* UHC soft reset*/
 
 /*
  * random number generator
