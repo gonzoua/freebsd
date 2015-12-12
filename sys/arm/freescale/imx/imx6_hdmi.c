@@ -430,7 +430,8 @@ imx_hdmi_enable_video_path(struct imx_hdmi_softc *sc)
 	WR1(sc, HDMI_FC_EXCTRLSPAC, 1);
 
 	/*
-	 * Set to fill TMDS data channels
+	 * Bits to fill data lines not used to transmit preamble
+	 * for channels 0, 1, and 2 respectively
 	 */
 	WR1(sc, HDMI_FC_CH0PREAM, 0x0B);
 	WR1(sc, HDMI_FC_CH1PREAM, 0x16);
