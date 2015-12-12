@@ -631,7 +631,8 @@ imx_hdmi_detach(device_t dev)
 	sc = device_get_softc(dev);
 
 	if (sc->sc_mem_res != NULL)
-		bus_release_resource(dev, SYS_RES_MEMORY, 0, sc->sc_mem_res);
+		bus_release_resource(dev, SYS_RES_MEMORY,
+		    sc->sc_mem_rid, sc->sc_mem_res);
 
 	return (0);
 }
