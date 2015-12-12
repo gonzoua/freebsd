@@ -93,7 +93,7 @@ WR1(struct imx_hdmi_softc *sc, bus_size_t off, uint8_t val)
 static void
 imx_hdmi_phy_wait_i2c_done(struct imx_hdmi_softc *sc, int msec)
 {
-	unsigned char val = 0;
+	uint8_t val;
 
 	val = RD1(sc, HDMI_IH_I2CMPHY_STAT0) &
 	    (HDMI_IH_I2CMPHY_STAT0_DONE | HDMI_IH_I2CMPHY_STAT0_ERROR);
