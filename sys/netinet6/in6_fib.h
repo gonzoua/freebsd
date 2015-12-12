@@ -1,6 +1,6 @@
-/*
- * Copyright (c) 1980, 1993
- *	The Regents of the University of California.  All rights reserved.
+/*-
+ * Copyright (c) 2015
+ * 	Alexander V. Chernikov <melifaro@FreeBSD.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,75 +29,33 @@
  * $FreeBSD$
  */
 
-#ifndef lint
-static char copyright[] =
-"@(#) Copyright (c) 1980, 1993\n\
-	The Regents of the University of California.  All rights reserved.\n";
-#endif /* not lint */
+#ifndef _NETINET6_IN6_FIB_H_
+#define	_NETINET6_IN6_FIB_H_
 
-#ifndef lint
-static char sccsid[] = "@(#)retest.c	8.1 (Berkeley) 6/6/93";
-#endif /* not lint */
+/* Basic nexthop info used for uRPF/mtu checks */
+struct nhop6_basic {
+	struct ifnet	*nh_ifp;	/* Logical egress interface */
+	uint16_t	nh_mtu;		/* nexthop mtu */
+	uint16_t	nh_flags;	/* nhop flags */
+	uint8_t		spare[4];
+	struct in6_addr	nh_addr;	/* GW/DST IPv4 address */
+};
 
-#include <ctype.h>
+/* Does not differ from nhop6_basic */
+struct nhop6_extended {
+	struct ifnet	*nh_ifp;	/* Logical egress interface */
+	uint16_t	nh_mtu;		/* nexthop mtu */
+	uint16_t	nh_flags;	/* nhop flags */
+	uint8_t		spare[4];
+	struct in6_addr	nh_addr;	/* GW/DST IPv6 address */
+	uint64_t	spare2[2];
+};
 
-int l_onecase = 0;
-char * _start;
-char * _escaped;
-char * convexp();
-char * expmatch();
-main()
-{
-    char reg[132];
-    char *ireg;
-    char str[132];
-    char *match;
-    char matstr[132];
-    char c;
+int fib6_lookup_nh_basic(uint32_t fibnum, const struct in6_addr *dst,
+    uint32_t scopeid, uint32_t flags, uint32_t flowid,struct nhop6_basic *pnh6);
+int fib6_lookup_nh_ext(uint32_t fibnum, const struct in6_addr *dst,
+    uint32_t scopeid, uint32_t flags, uint32_t flowid,
+    struct nhop6_extended *pnh6);
+void fib6_free_nh_ext(uint32_t fibnum, struct nhop6_extended *pnh6);
+#endif
 
-    while (1) {
-	printf ("\nexpr: ");
-	scanf ("%s", reg);
-	ireg = convexp(reg);
-	match = ireg;
-	while(*match) {
-	    switch (*match) {
-
-	    case '\\':
-	    case '(':
-	    case ')':
-	    case '|':
-		printf ("%c", *match);
-		break;
-
-	    default:
-		if (isalnum(*match))
-		    printf("%c", *match);
-		else
-		    printf ("<%03o>", *match);
-		break;
-	    }
-	    match++;
-	}
-	printf("\n");
-	getchar();
-	while(1) {
-	    printf ("string: ");
-	    match = str;
-	    while ((c = getchar()) != '\n')
-		*match++ = c;
-	    *match = 0;
-	    if (str[0] == '#')
-		break;
-	    matstr[0] = 0;
-	    _start = str;
-	    _escaped = 0;
-	    match = expmatch (str, ireg, matstr);
-	    if (match == 0)
-		printf ("FAILED\n");
-	    else
-		printf ("match\nmatstr = %s\n", matstr);
-	}
-
-    }
-}

@@ -2103,6 +2103,7 @@ sctp_process_cookie_new(struct mbuf *m, int iphlen, int offset,
 	 */
 	stcb = sctp_aloc_assoc(inp, init_src, &error,
 	    ntohl(initack_cp->init.initiate_tag), vrf_id,
+	    ntohs(initack_cp->init.num_outbound_streams),
 	    (struct thread *)NULL
 	    );
 	if (stcb == NULL) {
@@ -3651,6 +3652,7 @@ sctp_handle_stream_reset_response(struct sctp_tcb *stcb,
 					 * Set it up so we don't stop
 					 * retransmitting
 					 */
+					asoc->stream_reset_outstanding++;
 					stcb->asoc.str_reset_seq_out--;
 					asoc->stream_reset_out_is_outstanding = 1;
 					no_clear = 1;
@@ -5639,30 +5641,6 @@ next_chunk:
 }
 
 
-#ifdef INVARIANTS
-#ifdef __GNUC__
-__attribute__((noinline))
-#endif
-	void
-	     sctp_validate_no_locks(struct sctp_inpcb *inp)
-{
-	struct sctp_tcb *lstcb;
-
-	LIST_FOREACH(lstcb, &inp->sctp_asoc_list, sctp_tcblist) {
-		if (mtx_owned(&lstcb->tcb_mtx)) {
-			panic("Own lock on stcb at return from input");
-		}
-	}
-	if (mtx_owned(&inp->inp_create_mtx)) {
-		panic("Own create lock on inp");
-	}
-	if (mtx_owned(&inp->inp_mtx)) {
-		panic("Own inp lock on inp");
-	}
-}
-
-#endif
-
 /*
  * common input chunk processing (v4 and v6)
  */
@@ -6024,7 +6002,7 @@ trigger_send:
 	if (!TAILQ_EMPTY(&stcb->asoc.control_send_queue)) {
 		cnt_ctrl_ready = stcb->asoc.ctrl_queue_cnt - stcb->asoc.ecn_echo_cnt_onq;
 	}
-	if (cnt_ctrl_ready ||
+	if (cnt_ctrl_ready || stcb->asoc.trigger_reset ||
 	    ((un_sent) &&
 	    (stcb->asoc.peers_rwnd > 0 ||
 	    (stcb->asoc.peers_rwnd <= 0 && stcb->asoc.total_flight == 0)))) {
@@ -6046,11 +6024,6 @@ out:
 		SCTP_INP_DECR_REF(inp_decr);
 		SCTP_INP_WUNLOCK(inp_decr);
 	}
-#ifdef INVARIANTS
-	if (inp != NULL) {
-		sctp_validate_no_locks(inp);
-	}
-#endif
 	return;
 }
 

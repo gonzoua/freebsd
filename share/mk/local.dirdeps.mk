@@ -97,6 +97,8 @@ _have_depfile=
 .endif
 .endfor
 .if !defined(_have_depfile)
+# KMOD does not use any stdlibs.
+.if !defined(KMOD)
 # Has C files. The C_DIRDEPS are shared with C++ files as well.
 C_DIRDEPS= \
 	gnu/lib/csu \
@@ -121,7 +123,8 @@ DIRDEPS+= gnu/lib/libstdc++ gnu/lib/libsupc++
 .endif
 # XXX: Clang and GCC always adds -lm currently, even when not needed.
 DIRDEPS+= lib/msun
-.endif
+.endif	# CXX
+.endif	# !defined(KMOD)
 # Has yacc files.
 .if !empty(SRCS:M*.y)
 DIRDEPS+=	usr.bin/yacc.host
@@ -131,9 +134,11 @@ DIRDEPS+=	usr.bin/yacc.host
 # BUILD_AT_LEVEL0, which we don't use).
 # This only works for DPADD with full OBJ/SRC paths, which is mostly just
 # _INTERNALLIBS.
-DIRDEPS+= \
-	${DPADD:M${OBJTOP}*:H:C,${OBJTOP}[^/]*/,,:N.:O:u} \
+_DP_DIRDEPS+= \
+	${DPADD:M${OBJTOP}*:H:tA:C,${OBJTOP}[^/]*/,,:N.:O:u} \
 	${DPADD:M${OBJROOT}*:N${OBJTOP}*:N${STAGE_ROOT}/*:H:S,${OBJROOT},,:C,^([^/]+)/(.*),\2.\1,:S,${HOST_TARGET}$,host,:N.*:O:u}
+# Resolve the paths to RELDIRs
+DIRDEPS+= ${_DP_DIRDEPS:C,^,${SRCTOP}/,:tA:C,^${SRCTOP}/,,}
 .endif
 .if !empty(LIBADD)
 # Also handle LIBADD for non-internal libraries.
