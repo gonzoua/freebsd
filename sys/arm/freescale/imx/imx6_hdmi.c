@@ -718,7 +718,7 @@ imx_hdmi_get_edid(device_t dev, uint8_t **edid, uint32_t *edid_len)
 
 	sc = device_get_softc(dev);
 
-	return hdmi_edid_read(sc, edid, edid_len);
+	return (hdmi_edid_read(sc, edid, edid_len));
 }
 
 static int
