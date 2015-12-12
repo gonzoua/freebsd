@@ -115,8 +115,8 @@ imx_hdmi_phy_i2c_write(struct imx_hdmi_softc *sc, unsigned short data,
 	WR1(sc, HDMI_IH_I2CMPHY_STAT0,
 	    HDMI_IH_I2CMPHY_STAT0_DONE | HDMI_IH_I2CMPHY_STAT0_ERROR);
 	WR1(sc, HDMI_PHY_I2CM_ADDRESS_ADDR, addr);
-	WR1(sc, HDMI_PHY_I2CM_DATAO_1_ADDR, (unsigned char)(data >> 8));
-	WR1(sc, HDMI_PHY_I2CM_DATAO_0_ADDR, (unsigned char)(data >> 0));
+	WR1(sc, HDMI_PHY_I2CM_DATAO_1_ADDR, ((data >> 8) & 0xff));
+	WR1(sc, HDMI_PHY_I2CM_DATAO_0_ADDR, ((data >> 0) & 0xff));
 	WR1(sc, HDMI_PHY_I2CM_OPERATION_ADDR, HDMI_PHY_I2CM_OPERATION_ADDR_WRITE);
 	imx_hdmi_phy_wait_i2c_done(sc, 1000);
 }
