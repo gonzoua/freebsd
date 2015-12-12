@@ -26,7 +26,7 @@
  * $FreeBSD$
  */
 
-#ifndef	__IMX6__HDMI_REGS_H__
+#ifndef __IMX6__HDMI_REGS_H__
 #define	__IMX6__HDMI_REGS_H__
 #define	HDMI_DESIGN_ID		0x0000
 #define	HDMI_REVISION_ID	0x0001
