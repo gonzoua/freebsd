@@ -556,6 +556,7 @@ imx_hdmi_video_sample(struct imx_hdmi_softc *sc)
 static int
 imx_hdmi_set_mode(struct imx_hdmi_softc *sc)
 {
+
 	imx_hdmi_disable_overflow_interrupts(sc);
 	imx_hdmi_av_composer(sc);
 	imx_hdmi_phy_init(sc);
