@@ -1002,7 +1002,7 @@ ipu_init(struct ipu_softc *sc)
 		goto fail;
 
 	err = bus_dmamem_alloc(sc->sc_dma_tag, (void **)&sc->sc_fb_base,
-	    BUS_DMA_COHERENT, &sc->sc_dma_map);
+	    BUS_DMA_COHERENT | BUS_DMA_ZERO, &sc->sc_dma_map);
 
 	if (err) {
 		device_printf(sc->sc_dev, "cannot allocate framebuffer\n");
@@ -1016,9 +1016,6 @@ ipu_init(struct ipu_softc *sc)
 		device_printf(sc->sc_dev, "cannot load DMA map\n");
 		goto fail;
 	}
-
-	/* Make sure it's blank */
-	memset(sc->sc_fb_base, 0x00, dma_size);
 
 	/* Calculate actual FB Size */
 	sc->sc_fb_size = sc->sc_mode->hdisplay * sc->sc_mode->vdisplay * MODE_BPP / 8;
