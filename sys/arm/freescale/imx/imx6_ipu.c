@@ -601,7 +601,7 @@ ipu_reset_wave_gen(struct ipu_softc *sc, int di,
 }
 
 static void
-ipu_init_micorcode_template(struct ipu_softc *sc, int di, int map)
+ipu_init_microcode_template(struct ipu_softc *sc, int di, int map)
 {
 	uint32_t addr;
 	uint32_t w1, w2;
@@ -721,7 +721,7 @@ ipu_config_timing(struct ipu_softc *sc, int di)
 	ipu_reset_wave_gen(sc, di, 8);
 	ipu_reset_wave_gen(sc, di, 9);
 
-	ipu_init_micorcode_template(sc, di, map);
+	ipu_init_microcode_template(sc, di, map);
 
 	gen_offset = di ?  IPU_DI1_GENERAL : IPU_DI0_GENERAL;
 	gen = IPU_READ4(sc, gen_offset);
