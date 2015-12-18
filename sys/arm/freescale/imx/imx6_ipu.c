@@ -61,7 +61,7 @@ __FBSDID("$FreeBSD$");
 #include "fb_if.h"
 #include "hdmi_if.h"
 
-#undef EDID_DEBUG
+#define EDID_DEBUG_not
 
 static int have_ipu = 0;
 
@@ -183,17 +183,6 @@ static struct videomode mode1024x768 = M("1024x768x60",1024,768,65000,1048,1184,
 #define	IPU_DI1_DW_SET3_0	0x248118
 #define	IPU_DI1_STP_REP		0x248148
 #define	IPU_DI1_SCR_CONF	0x248170
-
-#define		DI_COUNTER_INT_HSYNC	1
-#define		DI_COUNTER_HSYNC	2
-#define		DI_COUNTER_VSYNC	3
-#define		DI_COUNTER_AD_0		4
-#define		DI_COUNTER_AD_1		5
-
-#define		DI_SYNC_NONE		0
-#define		DI_SYNC_CLK		1
-#define		DI_SYNC_COUNTER(c)	((c)+1)
-
 #define	DMFC_RD_CHAN		0x260000
 #define	DMFC_WR_CHAN		0x260004
 #define		DMFC_WR_CHAN_BURST_SIZE_32	(0 << 6)
@@ -247,13 +236,23 @@ static struct videomode mode1024x768 = M("1024x768x60",1024,768,65000,1048,1184,
 #define		DC_GEN_SYNC_PRIORITY	(1 << 7)
 #define		DC_GEN_ASYNC		(0 << 1)
 #define		DC_GEN_SYNC		(2 << 1)
-#define	DC_DISP_CONF2(di)	(0x002580E8 + (di)*4)
+#define	DC_DISP_CONF2(di)	(0x002580E8 + (di) * 4)
 #define	DC_MAP_CONF_0		0x00258108
 #define	DC_MAP_CONF_15		0x00258144
-#define	DC_MAP_CONF_VAL(map)	(DC_MAP_CONF_15 + ((map)/2)*sizeof(uint32_t))
+#define	DC_MAP_CONF_VAL(map)	(DC_MAP_CONF_15 + ((map) / 2) * sizeof(uint32_t))
 #define		MAP_CONF_VAL_MASK	0xffff
-#define	DC_MAP_CONF_PTR(ptr)	(DC_MAP_CONF_0 + ((ptr)/2)*sizeof(uint32_t))
+#define	DC_MAP_CONF_PTR(ptr)	(DC_MAP_CONF_0 + ((ptr) / 2) * sizeof(uint32_t))
 #define		MAP_CONF_PTR_MASK	0x1f
+
+#define	DI_COUNTER_INT_HSYNC	1
+#define	DI_COUNTER_HSYNC	2
+#define	DI_COUNTER_VSYNC	3
+#define	DI_COUNTER_AD_0		4
+#define	DI_COUNTER_AD_1		5
+
+#define	DI_SYNC_NONE		0
+#define	DI_SYNC_CLK		1
+#define	DI_SYNC_COUNTER(c)	((c) + 1)
 
 struct ipu_cpmem_word {
 	uint32_t	data[5];
@@ -266,11 +265,11 @@ struct ipu_cpmem_ch_param {
 
 #define	CH_PARAM_RESET(param) memset(param, 0, sizeof(*param))
 #define	IPU_READ_CH_PARAM(_sc, ch, param) bus_read_region_4( \
-	(_sc)->sc_mem_res, CPMEM_BASE + ch*(sizeof(*param)),\
-	(uint32_t*)param, sizeof(*param)/4)
+	(_sc)->sc_mem_res, CPMEM_BASE + ch * (sizeof(*param)),\
+	(uint32_t*)param, sizeof(*param) / 4)
 #define	IPU_WRITE_CH_PARAM(_sc, ch, param) bus_write_region_4( \
-	(_sc)->sc_mem_res, CPMEM_BASE + ch*(sizeof(*param)),\
-	(uint32_t*)param, sizeof(*param)/4)
+	(_sc)->sc_mem_res, CPMEM_BASE + ch * (sizeof(*param)),\
+	(uint32_t*)param, sizeof(*param) / 4)
 
 #define	CH_PARAM_SET_FW(param, v) ipu_ch_param_set_value((param), \
 	0, 125, 13, (v))
@@ -412,19 +411,17 @@ ipu_dmamap_cb(void *arg, bus_dma_segment_t *segs, int nseg, int err)
 
 static void
 ipu_ch_param_set_value(struct ipu_cpmem_ch_param *param,
-    int word, int offset, int len, uint32_t value)
+    int word, unsigned int offset, int len, uint32_t value)
 {
 	uint32_t datapos, bitpos, mask;
 	uint32_t data, data2;
 
+	KASSERT((len <= 32), ("%s: field len is more than 32", __func__));
+
 	datapos = offset / 32;
 	bitpos = offset % 32;
+
 	mask = (1 << len) - 1;
-
-	if (len > 32)
-		panic("%s: field len is more than 32",
-		    __func__);
-
 	data = param->word[word].data[datapos];
 	data &= ~(mask << bitpos);
 	data |= (value << bitpos);
@@ -433,35 +430,33 @@ ipu_ch_param_set_value(struct ipu_cpmem_ch_param *param,
 	if ((bitpos + len) > 32) {
 		len = bitpos + len - 32;
 		mask = (1UL << len) - 1;
-		data2 = param->word[word].data[datapos+1];
+		data2 = param->word[word].data[datapos + 1];
 		data2 &= mask;
 		data2 |= (value >> (32 - bitpos));
-		param->word[word].data[datapos+1] = data2;
+		param->word[word].data[datapos + 1] = data2;
 	}
 }
 
 #ifdef DEBUG
 static uint32_t
 ipu_ch_param_get_value(struct ipu_cpmem_ch_param *param,
-    int word, int offset, int len)
+    int word, unsigned int offset, int len)
 {
 	uint32_t datapos, bitpos, mask;
 	uint32_t data, data2;
 
+	KASSERT((len <= 32), ("%s: field len is more than 32", __func__));
+
 	datapos = offset / 32;
 	bitpos = offset % 32;
 	mask = (1UL << len) - 1;
-
-	if (len > 32)
-		panic("%s: field len is more than 32",
-		    __func__);
 	data = param->word[word].data[datapos];
 	data = data >> bitpos;
 	data &= mask;
 	if ((bitpos + len) > 32) {
 		len = bitpos + len - 32;
 		mask = (1UL << len) - 1;
-		data2 = param->word[word].data[datapos+1];
+		data2 = param->word[word].data[datapos + 1];
 		data2 &= mask;
 		data |= (data2 << (32 - bitpos));
 	}
@@ -483,16 +478,16 @@ ipu_print_channel(struct ipu_cpmem_ch_param *param)
 		param->word[1].data[2], param->word[1].data[3],
 		param->word[1].data[4]);
 
-	for (int i = 0; offset0[i+1] != -1; i++) {
-		int len = offset0[i+1] - offset0[i];
+	for (int i = 0; offset0[i + 1] != -1; i++) {
+		int len = offset0[i + 1] - offset0[i];
 		printf("W0[%d:%d] = %d\n", offset0[i],
 			offset0[i] + len - 1,
 			ipu_ch_param_get_value(param, 0, offset0[i], len)
 			);
 	}
 
-	for (int i = 0; offset1[i+1] != -1; i++) {
-		int len = offset1[i+1] - offset1[i];
+	for (int i = 0; offset1[i + 1] != -1; i++) {
+		int len = offset1[i + 1] - offset1[i];
 		printf("W1[%d:%d] = %d\n", offset1[i],
 			offset1[i] + len - 1,
 			ipu_ch_param_get_value(param, 1, offset1[i], len)
@@ -539,7 +534,7 @@ ipu_config_wave_gen_0(struct ipu_softc *sc, int di,
 	uint32_t addr, reg;
 
 	addr = (di ? IPU_DI1_SW_GEN0_1 : IPU_DI0_SW_GEN0_1)
-	    + (wave_gen-1)*sizeof(uint32_t);
+	    + (wave_gen - 1) * sizeof(uint32_t);
 	reg = DI_RUN_VALUE_M1(run_value) |
 	    DI_RUN_RESOLUTION(run_res) |
 	    DI_OFFSET_VALUE(offset_value) | offset_res;
@@ -557,7 +552,7 @@ ipu_config_wave_gen_1(struct ipu_softc *sc, int di, int wave_gen,
 	uint32_t addr, reg;
 
 	addr = (di ? IPU_DI1_SW_GEN1_1 : IPU_DI0_SW_GEN1_1)
-	    + (wave_gen-1)*sizeof(uint32_t);
+	    + (wave_gen - 1) * sizeof(uint32_t);
 	reg = DI_CNT_POLARITY_GEN_EN(cnt_polarity_gen_en) |
 	    DI_CNT_CLR_SEL(cnt_clr_src) |
 	    DI_CNT_POLARITY_TRIGGER_SEL(cnt_polarity_trigger_src) |
@@ -568,7 +563,7 @@ ipu_config_wave_gen_1(struct ipu_softc *sc, int di, int wave_gen,
 	IPU_WRITE4(sc, addr, reg);
 
 	addr = (di ? IPU_DI1_STP_REP : IPU_DI0_STP_REP)
-	    + (wave_gen-1)/2*sizeof(uint32_t);
+	    + (wave_gen - 1) / 2 * sizeof(uint32_t);
 	reg = IPU_READ4(sc, addr);
 	if (wave_gen % 2) {
 		reg &= ~(0xffff);
@@ -588,15 +583,15 @@ ipu_reset_wave_gen(struct ipu_softc *sc, int di,
 	uint32_t addr, reg;
 
 	addr = (di ? IPU_DI1_SW_GEN0_1 : IPU_DI0_SW_GEN0_1)
-	    + (wave_gen-1)*sizeof(uint32_t);
+	    + (wave_gen - 1) * sizeof(uint32_t);
 	IPU_WRITE4(sc, addr, 0);
 
 	addr = (di ? IPU_DI1_SW_GEN1_1 : IPU_DI0_SW_GEN1_1)
-	    + (wave_gen-1)*sizeof(uint32_t);
+	    + (wave_gen - 1) * sizeof(uint32_t);
 	IPU_WRITE4(sc, addr, 0);
 
 	addr = (di ? IPU_DI1_STP_REP : IPU_DI0_STP_REP)
-	    + (wave_gen-1)/2*sizeof(uint32_t);
+	    + (wave_gen - 1) / 2 * sizeof(uint32_t);
 	reg = IPU_READ4(sc, addr);
 	if (wave_gen % 2)
 		reg &= ~(0xffff);
@@ -626,14 +621,14 @@ ipu_init_micorcode_template(struct ipu_softc *sc, int di, int map)
 		w1 = TEMPLATE_SYNC(5) |
 		    TEMPLATE_GLUELOGIC(glue) |
 		    TEMPLATE_WAVEFORM(1) | /* wave unit 0 */
-		    TEMPLATE_MAPPING(map+1);
+		    TEMPLATE_MAPPING(map + 1);
 		/* operand is zero */
 
 		/* Write data to DI and Hold data in register */
 		w2 = TEMPLATE_OPCODE(OPCODE_WROD) |
 		    TEMPLATE_STOP;
 
-		addr = DC_TEMPL_BASE + (word+i)*2*sizeof(uint32_t);
+		addr = DC_TEMPL_BASE + (word + i) * 2 * sizeof(uint32_t);
 		IPU_WRITE4(sc, addr, w1);
 		IPU_WRITE4(sc, addr + sizeof(uint32_t), w2);
 	}
@@ -659,7 +654,7 @@ ipu_config_timing(struct ipu_softc *sc, int di)
 	bs_clkgen_offset = di ? IPU_DI1_BS_CLKGEN0 : IPU_DI0_BS_CLKGEN0;
 	IPU_WRITE4(sc, bs_clkgen_offset, DI_BS_CLKGEN0(div, 0));
 	/* half of the divider */
-	IPU_WRITE4(sc, bs_clkgen_offset + 4, DI_BS_CLKGEN1_DOWN(div/2, div % 2));
+	IPU_WRITE4(sc, bs_clkgen_offset + 4, DI_BS_CLKGEN1_DOWN(div / 2, div % 2));
 
 	/*
 	 * TODO: Configure LLDB clock by changing following fields
@@ -677,7 +672,7 @@ ipu_config_timing(struct ipu_softc *sc, int di)
 	IPU_WRITE4(sc, dw_gen_offset, dw_gen);
 
 	dw_set_offset = di ? IPU_DI1_DW_SET3_0 : IPU_DI0_DW_SET3_0;
-	dw_set = DW_SET_DATA_CNT_DOWN(div*2) | DW_SET_DATA_CNT_UP(0);
+	dw_set = DW_SET_DATA_CNT_DOWN(div * 2) | DW_SET_DATA_CNT_UP(0);
 	IPU_WRITE4(sc, dw_set_offset, dw_set);
 
 	/* DI_COUNTER_INT_HSYNC */
@@ -691,7 +686,7 @@ ipu_config_timing(struct ipu_softc *sc, int di)
 	    sc->sc_mode->htotal - 1, DI_SYNC_CLK, 0, DI_SYNC_CLK);
 	ipu_config_wave_gen_1(sc, di, DI_COUNTER_HSYNC,
 	    0, DI_SYNC_NONE, 1, DI_SYNC_NONE, DI_SYNC_CLK,
-	    0, MODE_HSW(sc->sc_mode)*2);
+	    0, MODE_HSW(sc->sc_mode) * 2);
 
 	/* DI_COUNTER_VSYNC */
 	ipu_config_wave_gen_0(sc, di, DI_COUNTER_VSYNC,
@@ -700,7 +695,7 @@ ipu_config_timing(struct ipu_softc *sc, int di)
 	ipu_config_wave_gen_1(sc, di, DI_COUNTER_VSYNC,
 	    0, DI_SYNC_NONE, 1, DI_SYNC_NONE,
 	    DI_SYNC_COUNTER(DI_COUNTER_INT_HSYNC),
-	    0, MODE_VSW(sc->sc_mode)*2);
+	    0, MODE_VSW(sc->sc_mode) * 2);
 
 	di_scr_conf = di ? IPU_DI1_SCR_CONF : IPU_DI0_SCR_CONF;
 	IPU_WRITE4(sc, di_scr_conf, sc->sc_mode->vtotal - 1);
@@ -752,7 +747,7 @@ ipu_config_timing(struct ipu_softc *sc, int di)
 	IPU_WRITE4(sc, gen_offset, gen);
 
 	as_gen_offset = di ?  IPU_DI1_SYNC_AS_GEN : IPU_DI0_SYNC_AS_GEN;
-	as_gen = SYNC_AS_GEN_VSYNC_SEL(DI_COUNTER_VSYNC-1) |
+	as_gen = SYNC_AS_GEN_VSYNC_SEL(DI_COUNTER_VSYNC - 1) |
 	    SYNC_AS_GEN_SYNC_START(2);
 	IPU_WRITE4(sc, as_gen_offset, as_gen);
 
@@ -789,7 +784,7 @@ ipu_dc_link_event(struct ipu_softc *sc, int event, int addr, int priority)
 	else
 		shift = 0;
 
-	offset = DC_RL0_CH_5 + (event/2)*sizeof(uint32_t);
+	offset = DC_RL0_CH_5 + (event / 2) * sizeof(uint32_t);
 
 	reg = IPU_READ4(sc, offset);
 	reg &= ~(0xFFFF << shift);
@@ -803,7 +798,7 @@ ipu_dc_setup_map(struct ipu_softc *sc, int map,
 {
 	uint32_t reg, shift, ptr;
 
-	ptr = map*3 + byte;
+	ptr = map * 3 + byte;
 
 	reg = IPU_READ4(sc, DC_MAP_CONF_VAL(ptr));
 	if (ptr & 1)
@@ -816,9 +811,9 @@ ipu_dc_setup_map(struct ipu_softc *sc, int map,
 
 	reg = IPU_READ4(sc, DC_MAP_CONF_PTR(map));
 	if (map & 1)
-		shift = 16  + 5*byte;
+		shift = 16  + 5 * byte;
 	else
-		shift = 5*byte;
+		shift = 5 * byte;
 	reg &= ~(MAP_CONF_PTR_MASK << shift);
 	reg |= (ptr) << shift;
 	IPU_WRITE4(sc, DC_MAP_CONF_PTR(map), reg);
@@ -850,8 +845,8 @@ ipu_dc_init(struct ipu_softc *sc, int di_port)
 		addr = 5;
 
 	ipu_dc_link_event(sc, DC_EVENT_NL, addr, 3);
-	ipu_dc_link_event(sc, DC_EVENT_EOL, addr+1, 2);
-	ipu_dc_link_event(sc, DC_EVENT_NEW_DATA, addr+2, 1);
+	ipu_dc_link_event(sc, DC_EVENT_EOL, addr + 1, 2);
+	ipu_dc_link_event(sc, DC_EVENT_NEW_DATA, addr + 2, 1);
 	ipu_dc_link_event(sc, DC_EVENT_NF, 0, 0);
 	ipu_dc_link_event(sc, DC_EVENT_NFIELD, 0, 0);
 	ipu_dc_link_event(sc, DC_EVENT_EOF, 0, 0);
@@ -875,7 +870,7 @@ ipu_init_buffer(struct ipu_softc *sc)
 	uint32_t stride;
 	uint32_t reg, db_mode_sel, cur_buf;
 
-	stride = sc->sc_mode->hdisplay*MODE_BPP/8;
+	stride = sc->sc_mode->hdisplay * MODE_BPP / 8;
 
 	/* init channel paramters */
 	CH_PARAM_RESET(&param);
@@ -988,7 +983,7 @@ ipu_init(struct ipu_softc *sc)
 	ipu_dc_setup_map(sc, 0, 1, 15, 0xff);
 	ipu_dc_setup_map(sc, 0, 2, 23, 0xff);
 
-	dma_size = round_page(sc->sc_mode->hdisplay*sc->sc_mode->vdisplay*(MODE_BPP/8));
+	dma_size = round_page(sc->sc_mode->hdisplay * sc->sc_mode->vdisplay * (MODE_BPP / 8));
 
 	/*
 	 * Now allocate framebuffer memory
@@ -1026,7 +1021,7 @@ ipu_init(struct ipu_softc *sc)
 	memset(sc->sc_fb_base, 0x00, dma_size);
 
 	/* Calculate actual FB Size */
-	sc->sc_fb_size = sc->sc_mode->hdisplay*sc->sc_mode->vdisplay*MODE_BPP/8;
+	sc->sc_fb_size = sc->sc_mode->hdisplay * sc->sc_mode->vdisplay * MODE_BPP / 8;
 
 	ipu_dc_init(sc, DI_PORT);
 	reg = IPU_READ4(sc, IPU_CONF);
@@ -1050,7 +1045,7 @@ ipu_init(struct ipu_softc *sc)
 	sc->sc_fb_info.fb_pbase = sc->sc_fb_phys;
 	sc->sc_fb_info.fb_size = sc->sc_fb_size;
 	sc->sc_fb_info.fb_bpp = sc->sc_fb_info.fb_depth = MODE_BPP;
-	sc->sc_fb_info.fb_stride = sc->sc_mode->hdisplay*MODE_BPP / 8;
+	sc->sc_fb_info.fb_stride = sc->sc_mode->hdisplay * MODE_BPP / 8;
 	sc->sc_fb_info.fb_width = sc->sc_mode->hdisplay;
 	sc->sc_fb_info.fb_height = sc->sc_mode->vdisplay;
 
