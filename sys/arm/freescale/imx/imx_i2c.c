@@ -293,8 +293,6 @@ static int
 i2c_attach(device_t dev)
 {
 	struct i2c_softc *sc;
-	phandle_t node;
-	device_t iic_dev;
 
 	sc = device_get_softc(dev);
 	sc->dev = dev;
@@ -315,12 +313,7 @@ i2c_attach(device_t dev)
 
 	bus_generic_attach(dev);
 
-	/* register actual iic access device */
-	node = ofw_bus_get_node(dev);
-	iic_dev = device_find_child(sc->iicbus, "iic", -1);
-	OF_device_register_xref(OF_xref_from_node(node), iic_dev);
-
-	return (IIC_NOERR);
+	return (0);
 }
 
 static int
