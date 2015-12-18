@@ -98,8 +98,9 @@ imx_hdmi_phy_wait_i2c_done(struct imx_hdmi_softc *sc, int msec)
 	val = RD1(sc, HDMI_IH_I2CMPHY_STAT0) &
 	    (HDMI_IH_I2CMPHY_STAT0_DONE | HDMI_IH_I2CMPHY_STAT0_ERROR);
 	while (val == 0) {
-		DELAY(1000);
-		if (msec-- == 0)
+		pause("HDMI_PHY", hz/100);
+		msec -= 10;
+		if (msec <= 0)
 			return;
 		val = RD1(sc, HDMI_IH_I2CMPHY_STAT0) &
 		    (HDMI_IH_I2CMPHY_STAT0_DONE | HDMI_IH_I2CMPHY_STAT0_ERROR);
@@ -716,11 +717,8 @@ imx_hdmi_probe(device_t dev)
 static int
 imx_hdmi_get_edid(device_t dev, uint8_t **edid, uint32_t *edid_len)
 {
-	struct imx_hdmi_softc *sc;
 
-	sc = device_get_softc(dev);
-
-	return (hdmi_edid_read(sc, edid, edid_len));
+	return (hdmi_edid_read(device_get_softc(dev), edid, edid_len));
 }
 
 static int
