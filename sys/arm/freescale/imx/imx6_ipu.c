@@ -741,7 +741,7 @@ ipu_config_timing(struct ipu_softc *sc, int di)
 	else
 		gen |= DI_GENERAL_POL_CLK;
 
-	/* User LDB clock to drive pixel clock */
+	/* Use LDB clock to drive pixel clock */
 	gen |= DI_CLOCK_EXTERNAL;
 
 	IPU_WRITE4(sc, gen_offset, gen);
