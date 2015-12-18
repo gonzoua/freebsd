@@ -602,7 +602,16 @@ hdmi_edid_read(struct imx_hdmi_softc *sc, uint8_t **edid, uint32_t *edid_len)
 	msg[1].slave = I2C_DDC_ADDR;
 	msg[1].buf = sc->sc_edid;
 
-	result =  iicbus_transfer_excl(i2c_dev, msg, 2, IIC_INTRWAIT);
+	result = iicbus_request_bus(i2c_dev, sc->sc_dev, IIC_INTRWAIT);
+
+	if (result) {
+		device_printf(sc->sc_dev, "failed to request i2c bus: %d\n", result);
+		return (result);
+	}
+
+	result = iicbus_transfer(i2c_dev, msg, 2);
+	iicbus_release_bus(i2c_dev, sc->sc_dev);
+
 	if (result) {
 		device_printf(sc->sc_dev, "i2c transfer failed: %d\n", result);
 		return (result);
