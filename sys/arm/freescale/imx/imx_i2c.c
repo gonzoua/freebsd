@@ -312,7 +312,6 @@ i2c_attach(device_t dev)
 	}
 
 	bus_generic_attach(dev);
-
 	return (0);
 }
 
