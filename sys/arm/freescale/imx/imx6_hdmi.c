@@ -134,6 +134,7 @@ static void
 imx_hdmi_av_composer(struct imx_hdmi_softc *sc)
 {
 	uint8_t inv_val;
+	int is_dvi;
 	int hblank, vblank, hsync_len, hbp, vbp;
 
 	/* Set up HDMI_FC_INVIDCONF */
@@ -155,7 +156,9 @@ imx_hdmi_av_composer(struct imx_hdmi_softc *sc)
 		HDMI_FC_INVIDCONF_IN_I_P_INTERLACED :
 		HDMI_FC_INVIDCONF_IN_I_P_PROGRESSIVE);
 
-	inv_val |= (1 /* TODO: DVI */ ?
+	/* TODO: implement HDMI part */
+	is_dvi = 1;
+	inv_val |= (is_dvi ?
 		HDMI_FC_INVIDCONF_DVI_MODEZ_DVI_MODE :
 		HDMI_FC_INVIDCONF_DVI_MODEZ_HDMI_MODE);
 
