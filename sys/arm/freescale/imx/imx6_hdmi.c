@@ -615,8 +615,7 @@ hdmi_edid_read(struct imx_hdmi_softc *sc, uint8_t **edid, uint32_t *edid_len)
 	if (result) {
 		device_printf(sc->sc_dev, "i2c transfer failed: %d\n", result);
 		return (result);
-	}
-	else {
+	} else {
 		*edid_len = sc->sc_edid_len;
 		*edid = sc->sc_edid;
 	}
