@@ -51,7 +51,7 @@ __FBSDID("$FreeBSD$");
 #define	AUTOREPEAT_DELAY	250
 #define	AUTOREPEAT_REPEAT	34
 
-struct gpiokey_softc 
+struct gpiokey_softc
 {
 	device_t	sc_dev;
 	device_t	sc_busdev;
