@@ -283,6 +283,7 @@ gpiokey_detach(device_t dev)
 
 	sc = device_get_softc(dev);
 
+	GPIOKEY_LOCK(sc);
 	if (sc->sc_intr_hl) {
 		bus_teardown_intr(dev, sc->sc_irq_res, sc->sc_intr_hl);
 		bus_release_resource(dev, SYS_RES_IRQ, sc->sc_irq_rid,
@@ -293,6 +294,7 @@ gpiokey_detach(device_t dev)
 		callout_stop(&sc->sc_repeat_callout);
 	if (callout_pending(&sc->sc_debounce_callout))
 		callout_stop(&sc->sc_debounce_callout);
+	GPIOKEY_UNLOCK(sc);
 
 	GPIOKEY_LOCK_DESTROY(sc);
 
