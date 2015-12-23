@@ -257,7 +257,7 @@ bool ld_library_path_rpath = false;
 /*
  * Globals for path names, and such
  */
-char *ld_path_elf_hints = _PATH_ELF_HINTS;
+char *ld_elf_hints_default = _PATH_ELF_HINTS;
 char *ld_path_libmap_conf = _PATH_LIBMAP_CONF;
 char *ld_path_rtld = _PATH_RTLD;
 char *ld_standard_library_path = STANDARD_LIBRARY_PATH;
@@ -458,7 +458,7 @@ _rtld(Elf_Addr *sp, func_ptr_type *exit_proc, Obj_Entry **objp)
     ld_utrace = getenv(LD_ "UTRACE");
 
     if ((ld_elf_hints_path == NULL) || strlen(ld_elf_hints_path) == 0)
-	ld_elf_hints_path = ld_path_elf_hints;
+	ld_elf_hints_path = ld_elf_hints_default;
 
     if (ld_debug != NULL && *ld_debug != '\0')
 	debug = 1;
@@ -1148,7 +1148,7 @@ digest_dynamic1(Obj_Entry *obj, int early, const Elf_Dyn **dyn_rpath,
 #ifdef __mips__
 	case DT_MIPS_LOCAL_GOTNO:
 		obj->local_gotno = dynp->d_un.d_val;
-	    break;
+		break;
 
 	case DT_MIPS_SYMTABNO:
 		obj->symtabno = dynp->d_un.d_val;
@@ -1160,6 +1160,12 @@ digest_dynamic1(Obj_Entry *obj, int early, const Elf_Dyn **dyn_rpath,
 
 	case DT_MIPS_RLD_MAP:
 		*((Elf_Addr *)(dynp->d_un.d_ptr)) = (Elf_Addr) &r_debug;
+		break;
+#endif
+
+#ifdef __powerpc64__
+	case DT_PPC64_GLINK:
+		obj->glink = (Elf_Addr) (obj->relocbase + dynp->d_un.d_ptr);
 		break;
 #endif
 
