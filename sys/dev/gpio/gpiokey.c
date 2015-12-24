@@ -180,16 +180,16 @@ gpiokey_intr(void *arg)
 static void
 gpiokey_identify(driver_t *driver, device_t bus)
 {
-	phandle_t child, leds, root;
+	phandle_t child, keys, root;
 
 	root = OF_finddevice("/");
 	if (root == 0)
 		return;
-	for (leds = OF_child(root); leds != 0; leds = OF_peer(leds)) {
-		if (!fdt_is_compatible_strict(leds, "gpio-keys"))
+	for (keys = OF_child(root); keys != 0; keys = OF_peer(keys)) {
+		if (!fdt_is_compatible_strict(keys, "gpio-keys"))
 			continue;
-		/* Traverse the 'gpio-leds' node and add its children. */
-		for (child = OF_child(leds); child != 0; child = OF_peer(child)) {
+		/* Traverse the 'gpio-keys' node and add its children. */
+		for (child = OF_child(keys); child != 0; child = OF_peer(child)) {
 			if (!OF_hasprop(child, "gpios"))
 				continue;
 			if (ofw_gpiobus_add_fdt_child(bus, driver->name, child) == NULL)
