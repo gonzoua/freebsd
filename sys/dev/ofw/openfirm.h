@@ -61,6 +61,7 @@
 #define _DEV_OPENFIRM_H_
 
 #include <sys/types.h>
+#include <machine/_bus.h>
 
 /*
  * Prototypes for Open Firmware Interface Routines
@@ -175,7 +176,7 @@ int		OF_interpret(const char *cmd, int nreturns, ...);
  */
 #ifndef __sparc64__
 int		OF_decode_addr(phandle_t dev, int regno, bus_space_tag_t *ptag,
-		    bus_space_handle_t *phandle);
+		    bus_space_handle_t *phandle, bus_size_t *sz);
 #endif
 
 #endif /* _KERNEL */

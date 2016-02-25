@@ -172,8 +172,8 @@ parse_ofw_memory(phandle_t node, const char *prop, struct mem_region *output)
 	i = 0;
 	j = 0;
 	while (i < sz/sizeof(cell_t)) {
-	      #ifndef __powerpc64__
-		/* On 32-bit PPC, ignore regions starting above 4 GB */
+	      #if !defined(__powerpc64__) && !defined(BOOKE)
+		/* On 32-bit PPC (OEA), ignore regions starting above 4 GB */
 		if (address_cells > 1 && OFmem[i] > 0) {
 			i += address_cells + size_cells;
 			continue;
@@ -182,21 +182,18 @@ parse_ofw_memory(phandle_t node, const char *prop, struct mem_region *output)
 
 		output[j].mr_start = OFmem[i++];
 		if (address_cells == 2) {
-			#ifdef __powerpc64__
 			output[j].mr_start <<= 32;
-			#endif
 			output[j].mr_start += OFmem[i++];
 		}
 			
 		output[j].mr_size = OFmem[i++];
 		if (size_cells == 2) {
-			#ifdef __powerpc64__
 			output[j].mr_size <<= 32;
-			#endif
 			output[j].mr_size += OFmem[i++];
 		}
 
-	      #ifndef __powerpc64__
+	      #if !defined(__powerpc64__) && !defined(BOOKE)
+		/* Book-E can support 36-bit addresses. */
 		/*
 		 * Check for memory regions extending above 32-bit
 		 * memory space, and restrict them to stay there.
@@ -568,7 +565,7 @@ OF_getetheraddr(device_t dev, u_char *addr)
  */
 int
 OF_decode_addr(phandle_t dev, int regno, bus_space_tag_t *tag,
-    bus_space_handle_t *handle)
+    bus_space_handle_t *handle, bus_size_t *sz)
 {
 	bus_addr_t addr;
 	bus_size_t size;
@@ -587,6 +584,9 @@ OF_decode_addr(phandle_t dev, int regno, bus_space_tag_t *tag,
 		flags = (pci_hi & OFW_PCI_PHYS_HI_PREFETCHABLE) ? 
 		    BUS_SPACE_MAP_PREFETCHABLE: 0;
 	}
+
+	if (sz != NULL)
+		*sz = size;
 
 	return (bus_space_map(*tag, addr, size, flags, handle));
 }

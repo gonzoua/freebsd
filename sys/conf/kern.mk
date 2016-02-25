@@ -104,6 +104,11 @@ CFLAGS += -mgeneral-regs-only
 CFLAGS += -ffixed-x18
 .endif
 
+.if ${MACHINE_CPUARCH} == "riscv"
+CFLAGS.gcc+=	-mcmodel=medany
+INLINE_LIMIT?=	8000
+.endif
+
 #
 # For sparc64 we want the medany code model so modules may be located
 # anywhere in the 64-bit address space.  We also tell GCC to use floating
@@ -160,7 +165,6 @@ CFLAGS.gcc+=	-mcall-aixdesc
 # For MIPS we also tell gcc to use floating point emulation
 #
 .if ${MACHINE_CPUARCH} == "mips"
-CFLAGS+=	-fno-pic -mno-abicalls -G0 
 CFLAGS+=	-msoft-float
 INLINE_LIMIT?=	8000
 .endif

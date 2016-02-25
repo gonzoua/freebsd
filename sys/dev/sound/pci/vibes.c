@@ -721,9 +721,10 @@ sv_probe(device_t dev)
 static int
 sv_attach(device_t dev) {
 	struct sc_info	*sc;
+	rman_res_t	count, midi_start, games_start;
 	u_int32_t	data;
 	char		status[SND_STATUSLEN];
-	u_long		midi_start, games_start, count, sdmaa, sdmac, ml, mu;
+	u_long		sdmaa, sdmac, ml, mu;
 
 	sc = malloc(sizeof(*sc), M_DEVBUF, M_WAITOK | M_ZERO);
 	sc->dev = dev;
@@ -758,8 +759,8 @@ sv_attach(device_t dev) {
 
 	/* Register IRQ handler */
 	sc->irqid = 0;
-        sc->irq   = bus_alloc_resource(dev, SYS_RES_IRQ, &sc->irqid,
-				       0, ~0, 1, RF_ACTIVE | RF_SHAREABLE);
+        sc->irq   = bus_alloc_resource_any(dev, SYS_RES_IRQ, &sc->irqid,
+					   RF_ACTIVE | RF_SHAREABLE);
         if (!sc->irq ||
 	    snd_setup_intr(dev, sc->irq, 0, sv_intr, sc, &sc->ih)) {
                 device_printf(dev, "sv_attach: Unable to map interrupt\n");

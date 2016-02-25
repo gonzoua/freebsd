@@ -38,13 +38,27 @@
 #ifndef __HV_NET_VSC_H__
 #define __HV_NET_VSC_H__
 
-#include <sys/types.h>
 #include <sys/param.h>
+#include <sys/kernel.h>
 #include <sys/lock.h>
 #include <sys/malloc.h>
+#include <sys/queue.h>
+#include <sys/taskqueue.h>
 #include <sys/sx.h>
 
+#include <machine/bus.h>
+#include <sys/bus.h>
+#include <sys/bus_dma.h>
+
+#include <netinet/in.h>
+#include <netinet/tcp_lro.h>
+
+#include <net/if.h>
+#include <net/if_media.h>
+
 #include <dev/hyperv/include/hyperv.h>
+
+#define HN_USE_TXDESC_BUFRING
 
 MALLOC_DECLARE(M_NETVSC);
 
@@ -851,7 +865,7 @@ typedef struct nvsp_msg_ {
 #define NETVSC_SEND_BUFFER_SIZE			(1024*1024*15)   /* 15M */
 #define NETVSC_SEND_BUFFER_ID			0xface
 
-
+#define NETVSC_RECEIVE_BUFFER_SIZE_LEGACY	(1024*1024*15) /* 15MB */
 #define NETVSC_RECEIVE_BUFFER_SIZE		(1024*1024*16) /* 16MB */
 
 #define NETVSC_RECEIVE_BUFFER_ID		0xcafe
@@ -978,11 +992,74 @@ typedef struct {
 	hv_bool_uint8_t	link_state;
 } netvsc_device_info;
 
+#ifndef HN_USE_TXDESC_BUFRING
+struct hn_txdesc;
+SLIST_HEAD(hn_txdesc_list, hn_txdesc);
+#else
+struct buf_ring;
+#endif
+
+struct hn_rx_ring {
+	struct lro_ctrl	hn_lro;
+
+	/* Trust csum verification on host side */
+	int		hn_trust_hcsum;	/* HN_TRUST_HCSUM_ */
+
+	u_long		hn_csum_ip;
+	u_long		hn_csum_tcp;
+	u_long		hn_csum_udp;
+	u_long		hn_csum_trusted;
+	u_long		hn_lro_tried;
+	u_long		hn_small_pkts;
+} __aligned(CACHE_LINE_SIZE);
+
+#define HN_TRUST_HCSUM_IP	0x0001
+#define HN_TRUST_HCSUM_TCP	0x0002
+#define HN_TRUST_HCSUM_UDP	0x0004
+
+struct hn_tx_ring {
+#ifndef HN_USE_TXDESC_BUFRING
+	struct mtx	hn_txlist_spin;
+	struct hn_txdesc_list hn_txlist;
+#else
+	struct buf_ring	*hn_txdesc_br;
+#endif
+	int		hn_txdesc_cnt;
+	int		hn_txdesc_avail;
+	int		hn_has_txeof;
+
+	int		hn_sched_tx;
+	void		(*hn_txeof)(struct hn_tx_ring *);
+	struct taskqueue *hn_tx_taskq;
+	struct task	hn_tx_task;
+	struct task	hn_txeof_task;
+
+	struct mtx	hn_tx_lock;
+	struct hn_softc	*hn_sc;
+
+	int		hn_direct_tx_size;
+	int		hn_tx_chimney_size;
+	bus_dma_tag_t	hn_tx_data_dtag;
+	uint64_t	hn_csum_assist;
+
+	u_long		hn_no_txdescs;
+	u_long		hn_send_failed;
+	u_long		hn_txdma_failed;
+	u_long		hn_tx_collapsed;
+	u_long		hn_tx_chimney;
+
+	/* Rarely used stuffs */
+	struct hn_txdesc *hn_txdesc;
+	bus_dma_tag_t	hn_tx_rndis_dtag;
+	struct sysctl_oid *hn_tx_sysctl_tree;
+} __aligned(CACHE_LINE_SIZE);
+
 /*
  * Device-specific softc structure
  */
 typedef struct hn_softc {
 	struct ifnet    *hn_ifp;
+	struct ifmedia	hn_media;
 	device_t        hn_dev;
 	uint8_t         hn_unit;
 	int             hn_carrier;
@@ -993,8 +1070,16 @@ typedef struct hn_softc {
 	int             temp_unusable;
 	struct hv_device  *hn_dev_obj;
 	netvsc_dev  	*net_dev;
-} hn_softc_t;
 
+	int		hn_rx_ring_cnt;
+	struct hn_rx_ring *hn_rx_ring;
+
+	int		hn_tx_ring_cnt;
+	struct hn_tx_ring *hn_tx_ring;
+	int		hn_tx_chimney_max;
+	struct taskqueue *hn_tx_taskq;
+	struct sysctl_oid *hn_tx_sysctl_tree;
+} hn_softc_t;
 
 /*
  * Externs
@@ -1002,7 +1087,6 @@ typedef struct hn_softc {
 extern int hv_promisc_mode;
 
 void netvsc_linkstatus_callback(struct hv_device *device_obj, uint32_t status);
-void netvsc_xmit_completion(void *context);
 void hv_nv_on_receive_completion(struct hv_device *device,
     uint64_t tid, uint32_t status);
 netvsc_dev *hv_nv_on_device_add(struct hv_device *device,

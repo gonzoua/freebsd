@@ -354,7 +354,7 @@ uipc_abort(struct socket *so)
 	unp2 = unp->unp_conn;
 	if (unp2 != NULL) {
 		UNP_PCB_LOCK(unp2);
-		unp_drop(unp2, ECONNABORTED);
+		unp_drop(unp2, ECONNRESET);
 		UNP_PCB_UNLOCK(unp2);
 	}
 	UNP_PCB_UNLOCK(unp);
@@ -981,7 +981,7 @@ uipc_send(struct socket *so, int flags, struct mbuf *m, struct sockaddr *nam,
 				    control))
 					control = NULL;
 			} else
-				sbappend_locked(&so2->so_rcv, m);
+				sbappend_locked(&so2->so_rcv, m, flags);
 			break;
 
 		case SOCK_SEQPACKET: {

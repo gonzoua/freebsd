@@ -164,10 +164,11 @@ SSP_CFLAGS?=	-fstack-protector
 CFLAGS+=	${SSP_CFLAGS}
 .endif # SSP && !ARM && !MIPS
 
-# Allow user-specified additional warning flags, plus compiler specific flag overrides.
-# Unless we've overriden this...
+# Allow user-specified additional warning flags, plus compiler and file
+# specific flag overrides, unless we've overriden this...
 .if ${MK_WARNS} != "no"
 CFLAGS+=	${CWARNFLAGS} ${CWARNFLAGS.${COMPILER_TYPE}}
+CFLAGS+=	${CWARNFLAGS.${.IMPSRC:T}}
 .endif
 
 CFLAGS+=	 ${CFLAGS.${COMPILER_TYPE}}
@@ -177,11 +178,11 @@ CXXFLAGS+=	 ${CXXFLAGS.${COMPILER_TYPE}}
 # or expect to ever be up-to-date.
 PHONY_NOTMAIN = afterdepend afterinstall all beforedepend beforeinstall \
 		beforelinking build build-tools buildconfig buildfiles \
-		buildincludes checkdpadd clean cleandepend cleandir cleanobj \
-		configure depend dependall distclean distribute exe \
+		buildincludes check checkdpadd clean cleandepend cleandir \
+		cleanobj configure depend dependall distclean distribute exe \
 		files html includes install installconfig installfiles \
 		installincludes lint obj objlink objs objwarn realall \
-		realdepend realinstall regress subdir-all subdir-depend \
+		realdepend realinstall subdir-all subdir-depend \
 		subdir-install tags whereobj
 
 # we don't want ${PROG} to be PHONY

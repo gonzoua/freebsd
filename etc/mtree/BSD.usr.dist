@@ -19,7 +19,7 @@
         aout
         ..
         clang
-            3.7.0
+            3.7.1
                 include
                     sanitizer
                     ..
@@ -1107,8 +1107,6 @@
             ..
             man9
             ..
-        ..
-        mdocml
         ..
         misc
             fonts

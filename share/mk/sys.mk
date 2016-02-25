@@ -44,11 +44,14 @@ __ENV_ONLY_OPTIONS:= \
 
 .if ${MK_DIRDEPS_BUILD} == "yes"
 .sinclude <meta.sys.mk>
-.elif ${MK_META_MODE} == "yes" && defined(.MAKEFLAGS)
-.if ${.MAKEFLAGS:M-B} == ""
+.elif ${MK_META_MODE} == "yes" && defined(.MAKEFLAGS) && ${.MAKEFLAGS:M-B} == ""
 .MAKE.MODE= meta verbose
+.if !exists(/dev/filemon)
+.MAKE.MODE+= nofilemon
 .endif
 .endif
+.MAKE.MODE?= normal
+
 .if ${MK_AUTO_OBJ} == "yes"
 # This needs to be done early - before .PATH is computed
 # Don't do this for 'make showconfig' as it enables all options where meta mode
@@ -69,6 +72,10 @@ __ENV_ONLY_OPTIONS:= \
 #
 # The rules below use this macro to distinguish between Posix-compliant
 # and default behaviour.
+#
+# This functionality is currently broken, since make(1) processes sys.mk
+# before reading any other files, and consequently has no opportunity to
+# set the %POSIX macro before we read this point.
 
 .if defined(%POSIX)
 .SUFFIXES:	.o .c .y .l .a .sh .f

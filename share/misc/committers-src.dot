@@ -200,6 +200,7 @@ jkim [label="Jung-uk Kim\njkim@FreeBSD.org\n2005/07/06"]
 jkoshy [label="A. Joseph Koshy\njkoshy@FreeBSD.org\n1998/05/13"]
 jlh [label="Jeremie Le Hen\njlh@FreeBSD.org\n2012/04/22"]
 jls [label="Jordan Sissel\njls@FreeBSD.org\n2006/12/06"]
+jmcneill [label="Jared McNeill\njmcneill@FreeBSD.org\n2016/02/24"]
 jmg [label="John-Mark Gurney\njmg@FreeBSD.org\n1997/02/13"]
 jmmv [label="Julio Merino\njmmv@FreeBSD.org\n2013/11/02"]
 joerg [label="Joerg Wunsch\njoerg@FreeBSD.org\n1993/11/14"]
@@ -288,7 +289,7 @@ sephe [label="Sepherosa Ziehau\nsephe@FreeBSD.org\n2007/03/28"]
 sepotvin [label="Stephane E. Potvin\nsepotvin@FreeBSD.org\n2007/02/15"]
 simon [label="Simon L. Nielsen\nsimon@FreeBSD.org\n2006/03/07"]
 sjg [label="Simon J. Gerraty\nsjg@FreeBSD.org\n2012/10/23"]
-skra [label="Svatopluk Kraus\nslm@FreeBSD.org\n2015/10/28"]
+skra [label="Svatopluk Kraus\nskra@FreeBSD.org\n2015/10/28"]
 slm [label="Stephen McConnell\nslm@FreeBSD.org\n2014/05/07"]
 smh [label="Steven Hartland\nsmh@FreeBSD.org\n2012/11/12"]
 sobomax [label="Maxim Sobolev\nsobomax@FreeBSD.org\n2001/07/25"]
@@ -316,6 +317,7 @@ weongyo [label="Weongyo Jeong\nweongyo@FreeBSD.org\n2007/12/21"]
 wes [label="Wes Peters\nwes@FreeBSD.org\n1998/11/25"]
 whu [label="Wei Hu\nwhu@FreeBSD.org\n2015/02/11"]
 wkoszek [label="Wojciech A. Koszek\nwkoszek@FreeBSD.org\n2006/02/21"]
+wma [label="Wojciech Macek\nwma@FreeBSD.org\n2016/01/18"]
 wollman [label="Garrett Wollman\nwollman@FreeBSD.org\n????/??/??"]
 wsalamon [label="Wayne Salamon\nwsalamon@FreeBSD.org\n2005/06/25"]
 yongari [label="Pyun YongHyeon\nyongari@FreeBSD.org\n2004/08/01"]
@@ -339,11 +341,13 @@ day1 -> alm
 day1 -> dg
 
 adrian -> avos
+adrian -> jmcneill
 adrian -> lidl
 adrian -> loos
 adrian -> monthadar
 adrian -> ray
 adrian -> rmh
+adrian -> sephe
 
 ae -> melifaro
 
@@ -390,6 +394,7 @@ cognet -> jceel
 cognet -> kevlo
 cognet -> ian
 cognet -> wkoszek
+cognet -> wma
 cognet -> zbb
 
 cperciva -> eadler
@@ -404,6 +409,7 @@ das -> rodrigc
 
 delphij -> gabor
 delphij -> rafan
+delphij -> sephe
 
 des -> anholt
 des -> hmp
@@ -465,6 +471,8 @@ gnn -> arybchik
 gnn -> erj
 gnn -> kp
 gnn -> jtl
+
+gonzo -> jmcneill
 
 grehan -> bryanv
 

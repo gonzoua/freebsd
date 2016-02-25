@@ -28,6 +28,9 @@
 #
 # KMODUNLOAD	Command to unload a kernel module [/sbin/kldunload]
 #
+# KMODISLOADED	Command to check whether a kernel module is
+#		loaded [/sbin/kldstat -q -n]
+#
 # PROG		The name of the kernel module to build.
 #		If not supplied, ${KMOD}.ko is used.
 #
@@ -56,10 +59,14 @@
 # 	unload:
 #		Unload a module.
 #
+#	reload:
+#		Unload if loaded, then load.
+#
 
 AWK?=		awk
 KMODLOAD?=	/sbin/kldload
 KMODUNLOAD?=	/sbin/kldunload
+KMODISLOADED?=	/sbin/kldstat -q -n
 OBJCOPY?=	objcopy
 
 .include <bsd.init.mk>
@@ -130,7 +137,7 @@ CFLAGS+=	-mlongcall -fno-omit-frame-pointer
 .endif
 
 .if ${MACHINE_CPUARCH} == mips
-CFLAGS+=	-mlong-calls
+CFLAGS+=	-G0 -fno-pic -mno-abicalls -mlong-calls
 .endif
 
 .if defined(DEBUG) || defined(DEBUG_FLAGS)
@@ -242,9 +249,10 @@ _ILINKS+=x86
 .endif
 CLEANFILES+=${_ILINKS}
 
-all: objwarn ${PROG}
+all: ${PROG}
 
 beforedepend: ${_ILINKS}
+beforebuild: ${_ILINKS}
 
 # Ensure that the links exist without depending on it when it exists which
 # causes all the modules to be rebuilt when the directory pointed to changes.
@@ -325,7 +333,11 @@ load: ${PROG}
 
 .if !target(unload)
 unload:
-	${KMODUNLOAD} -v ${PROG}
+	if ${KMODISLOADED} ${PROG} ; then ${KMODUNLOAD} -v ${PROG} ; fi
+.endif
+
+.if !target(reload)
+reload: unload load
 .endif
 
 .if defined(KERNBUILDDIR)
@@ -438,16 +450,16 @@ lint: ${SRCS}
 ${OBJS}: opt_global.h
 .endif
 
-.include <bsd.dep.mk>
-
-cleandepend: cleanilinks
+CLEANDEPENDFILES+=	${_ILINKS}
 # .depend needs include links so we remove them only together.
 cleanilinks:
 	rm -f ${_ILINKS}
 
-.if !exists(${.OBJDIR}/${DEPENDFILE})
-${OBJS}: ${SRCS:M*.h}
+OBJS_DEPEND_GUESS+= ${SRCS:M*.h}
+.if ${MK_FAST_DEPEND} == "no" && !exists(${.OBJDIR}/${DEPENDFILE})
+${OBJS}: ${OBJS_DEPEND_GUESS}
 .endif
 
+.include <bsd.dep.mk>
 .include <bsd.obj.mk>
 .include "kern.mk"

@@ -708,7 +708,7 @@ t4_attach(device_t dev)
 		sc->fw_msg_handler[i] = fw_msg_not_handled;
 	t4_register_cpl_handler(sc, CPL_SET_TCB_RPL, t4_filter_rpl);
 	t4_register_cpl_handler(sc, CPL_TRACE_PKT, t4_trace_pkt);
-	t4_register_cpl_handler(sc, CPL_TRACE_PKT_T5, t5_trace_pkt);
+	t4_register_cpl_handler(sc, CPL_T5_TRACE_PKT, t5_trace_pkt);
 	t4_init_sge_cpl_handlers(sc);
 
 	/* Prepare the adapter for operation */
@@ -3642,6 +3642,9 @@ setup_intr_handlers(struct adapter *sc)
 #ifdef DEV_NETMAP
 	struct sge_nm_rxq *nm_rxq;
 #endif
+#ifdef RSS
+	int nbuckets = rss_getnumbuckets();
+#endif
 
 	/*
 	 * Setup interrupts.
@@ -3700,6 +3703,10 @@ setup_intr_handlers(struct adapter *sc)
 					    t4_intr, rxq, s);
 					if (rc != 0)
 						return (rc);
+#ifdef RSS
+					bus_bind_intr(sc->dev, irq->res,
+					    rss_getcpu(q % nbuckets));
+#endif
 					irq++;
 					rid++;
 					vi->nintr++;
@@ -5491,6 +5498,9 @@ cxgbe_sysctls(struct port_info *pi)
 	SYSCTL_ADD_PROC(ctx, children, OID_AUTO, "pause_settings",
 	    CTLTYPE_STRING | CTLFLAG_RW, pi, PAUSE_TX, sysctl_pause_settings,
 	    "A", "PAUSE settings (bit 0 = rx_pause, bit 1 = tx_pause)");
+
+	SYSCTL_ADD_INT(ctx, children, OID_AUTO, "max_speed", CTLFLAG_RD, NULL,
+	    port_top_speed(pi), "max speed (in Gbps)");
 
 	/*
 	 * dev.cxgbe.X.stats.
@@ -8801,11 +8811,8 @@ t4_ioctl(struct cdev *dev, unsigned long cmd, caddr_t data, int fflag,
 
 #ifdef TCP_OFFLOAD
 void
-t4_iscsi_init(struct ifnet *ifp, unsigned int tag_mask,
-    const unsigned int *pgsz_order)
+t4_iscsi_init(struct adapter *sc, u_int tag_mask, const u_int *pgsz_order)
 {
-	struct vi_info *vi = ifp->if_softc;
-	struct adapter *sc = vi->pi->adapter;
 
 	t4_write_reg(sc, A_ULP_RX_ISCSI_TAGMASK, tag_mask);
 	t4_write_reg(sc, A_ULP_RX_ISCSI_PSZ, V_HPZ0(pgsz_order[0]) |
