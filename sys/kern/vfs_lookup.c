@@ -269,6 +269,8 @@ namei(struct nameidata *ndp)
 				AUDIT_ARG_ATFD2(ndp->ni_dirfd);
 			error = fgetvp_rights(td, ndp->ni_dirfd,
 			    &rights, &ndp->ni_filecaps, &dp);
+			if (error == EINVAL)
+				error = ENOTDIR;
 #ifdef CAPABILITIES
 			/*
 			 * If file descriptor doesn't have all rights,
@@ -297,16 +299,15 @@ namei(struct nameidata *ndp)
 		namei_cleanup_cnp(cnp);
 		return (error);
 	}
-	SDT_PROBE(vfs, namei, lookup, entry, dp, cnp->cn_pnbuf,
-	    cnp->cn_flags, 0, 0);
+	SDT_PROBE3(vfs, namei, lookup, entry, dp, cnp->cn_pnbuf,
+	    cnp->cn_flags);
 	for (;;) {
 		ndp->ni_startdir = dp;
 		error = lookup(ndp);
 		if (error != 0) {
 			vrele(ndp->ni_rootdir);
 			namei_cleanup_cnp(cnp);
-			SDT_PROBE(vfs, namei, lookup, return, error, NULL, 0,
-			    0, 0);
+			SDT_PROBE2(vfs, namei, lookup, return, error, NULL);
 			return (error);
 		}
 		/*
@@ -319,8 +320,7 @@ namei(struct nameidata *ndp)
 			} else
 				cnp->cn_flags |= HASBUF;
 
-			SDT_PROBE(vfs, namei, lookup, return, 0, ndp->ni_vp,
-			    0, 0, 0);
+			SDT_PROBE2(vfs, namei, lookup, return, 0, ndp->ni_vp);
 			return (0);
 		}
 		if (ndp->ni_loopcnt++ >= MAXSYMLINKS) {
@@ -395,7 +395,7 @@ namei(struct nameidata *ndp)
 	vput(ndp->ni_vp);
 	ndp->ni_vp = NULL;
 	vrele(ndp->ni_dvp);
-	SDT_PROBE(vfs, namei, lookup, return, error, NULL, 0, 0, 0);
+	SDT_PROBE2(vfs, namei, lookup, return, error, NULL);
 	return (error);
 }
 
@@ -495,6 +495,7 @@ lookup(struct nameidata *ndp)
 	int rdonly;			/* lookup read-only flag bit */
 	int error = 0;
 	int dpunlocked = 0;		/* dp has already been unlocked */
+	int relookup = 0;		/* do not consume the path component */
 	struct componentname *cnp = &ndp->ni_cnd;
 	int lkflags_save;
 	int ni_dvp_unlocked;
@@ -537,7 +538,6 @@ dirloop:
 	 * the name set the SAVENAME flag. When done, they assume
 	 * responsibility for freeing the pathname buffer.
 	 */
-	cnp->cn_consume = 0;
 	for (cp = cnp->cn_nameptr; *cp != 0 && *cp != '/'; cp++)
 		continue;
 	cnp->cn_namelen = cp - cnp->cn_nameptr;
@@ -726,8 +726,9 @@ unionlookup:
 	lkflags_save = cnp->cn_lkflags;
 	cnp->cn_lkflags = compute_cn_lkflags(dp->v_mount, cnp->cn_lkflags,
 	    cnp->cn_flags);
-	if ((error = VOP_LOOKUP(dp, &ndp->ni_vp, cnp)) != 0) {
-		cnp->cn_lkflags = lkflags_save;
+	error = VOP_LOOKUP(dp, &ndp->ni_vp, cnp);
+	cnp->cn_lkflags = lkflags_save;
+	if (error != 0) {
 		KASSERT(ndp->ni_vp == NULL, ("leaf should be empty"));
 #ifdef NAMEI_DIAGNOSTIC
 		printf("not found\n");
@@ -743,6 +744,14 @@ unionlookup:
 			    compute_cn_lkflags(dp->v_mount, cnp->cn_lkflags |
 			    LK_RETRY, cnp->cn_flags));
 			goto unionlookup;
+		}
+
+		if (error == ERELOOKUP) {
+			vref(dp);
+			ndp->ni_vp = dp;
+			error = 0;
+			relookup = 1;
+			goto good;
 		}
 
 		if (error != EJUSTRETURN)
@@ -775,22 +784,12 @@ unionlookup:
 			VREF(ndp->ni_startdir);
 		}
 		goto success;
-	} else
-		cnp->cn_lkflags = lkflags_save;
+	}
+
+good:
 #ifdef NAMEI_DIAGNOSTIC
 	printf("found\n");
 #endif
-	/*
-	 * Take into account any additional components consumed by
-	 * the underlying filesystem.
-	 */
-	if (cnp->cn_consume > 0) {
-		cnp->cn_nameptr += cnp->cn_consume;
-		ndp->ni_next += cnp->cn_consume;
-		ndp->ni_pathlen -= cnp->cn_consume;
-		cnp->cn_consume = 0;
-	}
-
 	dp = ndp->ni_vp;
 
 	/*
@@ -856,6 +855,14 @@ nextname:
 	 */
 	KASSERT((cnp->cn_flags & ISLASTCN) || *ndp->ni_next == '/',
 	    ("lookup: invalid path state."));
+	if (relookup) {
+		relookup = 0;
+		if (ndp->ni_dvp != dp)
+			vput(ndp->ni_dvp);
+		else
+			vrele(ndp->ni_dvp);
+		goto dirloop;
+	}
 	if (*ndp->ni_next == '/') {
 		cnp->cn_nameptr = ndp->ni_next;
 		while (*cnp->cn_nameptr == '/') {

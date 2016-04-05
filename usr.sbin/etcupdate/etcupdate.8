@@ -25,7 +25,7 @@
 .\"
 .\" $FreeBSD$
 .\"
-.Dd October 29, 2014
+.Dd September 29, 2015
 .Dt ETCUPDATE 8
 .Os
 .Sh NAME
@@ -233,6 +233,16 @@ is changed,
 is invoked if
 .Pa /etc/mail/aliases
 is changed,
+.Xr services_mkdb 8
+is invoked if
+.Pa /etc/services
+is changed,
+.Xr tzsetup 8
+is invoked if
+.Pa /etc/localtime
+is changed and if
+.Fa /var/db/zoneinfo
+exists,
 and
 .Pa /etc/rc.d/motd
 is invoked if
@@ -747,7 +757,7 @@ has been removed from the
 tree,
 but it has been locally modified.
 The modified version of the file remains in the destination directory.
-.It "Needs update: /etc/localtime (required manual update via tzsetup(1))"
+.It "Needs update: /etc/localtime (required manual update via tzsetup(8))"
 The
 .Fa /var/db/zoneinfo
 file does not exist,
@@ -758,7 +768,7 @@ was not able to refresh
 from its source file in
 .Fa /usr/share/zoneinfo .
 Running
-.Xr tzsetup 1
+.Xr tzsetup 8
 will both refresh
 .Fa /etc/localtime
 and generate
@@ -843,7 +853,9 @@ but it has been removed in the destination directory.
 .Xr make 1 ,
 .Xr newaliases 1 ,
 .Xr sh 1 ,
-.Xr pwd_mkdb 8
+.Xr pwd_mkdb 8 ,
+.Xr services_mkdb 8 ,
+.Xr tzsetup 8
 .Sh HISTORY
 The
 .Nm

@@ -55,6 +55,8 @@ class LLDB_API SBFunction;
 class LLDB_API SBHostOS;
 class LLDB_API SBInstruction;
 class LLDB_API SBInstructionList;
+class LLDB_API SBLanguageRuntime;
+class LLDB_API SBLaunchInfo;
 class LLDB_API SBLineEntry;
 class LLDB_API SBListener;
 class LLDB_API SBModule;
@@ -84,12 +86,11 @@ class LLDB_API SBTypeMemberFunction;
 class LLDB_API SBTypeNameSpecifier;
 class LLDB_API SBTypeSummary;
 class LLDB_API SBTypeSummaryOptions;
-#ifndef LLDB_DISABLE_PYTHON
 class LLDB_API SBTypeSynthetic;
-#endif
 class LLDB_API SBTypeList;
 class LLDB_API SBValue;
 class LLDB_API SBValueList;
+class LLDB_API SBVariablesOptions;
 class LLDB_API SBWatchpoint;
 class LLDB_API SBUnixSignals;
 

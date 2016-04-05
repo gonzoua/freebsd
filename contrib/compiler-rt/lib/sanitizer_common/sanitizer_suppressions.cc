@@ -30,18 +30,48 @@ SuppressionContext::SuppressionContext(const char *suppression_types[],
   internal_memset(has_suppression_type_, 0, suppression_types_num_);
 }
 
+static bool GetPathAssumingFileIsRelativeToExec(const char *file_path,
+                                                /*out*/char *new_file_path,
+                                                uptr new_file_path_size) {
+  InternalScopedString exec(kMaxPathLength);
+  if (ReadBinaryNameCached(exec.data(), exec.size())) {
+    const char *file_name_pos = StripModuleName(exec.data());
+    uptr path_to_exec_len = file_name_pos - exec.data();
+    internal_strncat(new_file_path, exec.data(),
+                     Min(path_to_exec_len, new_file_path_size - 1));
+    internal_strncat(new_file_path, file_path,
+                     new_file_path_size - internal_strlen(new_file_path) - 1);
+    return true;
+  }
+  return false;
+}
+
 void SuppressionContext::ParseFromFile(const char *filename) {
   if (filename[0] == '\0')
     return;
+
+  // If we cannot find the file, check if its location is relative to
+  // the location of the executable.
+  InternalScopedString new_file_path(kMaxPathLength);
+  if (!FileExists(filename) && !IsAbsolutePath(filename) &&
+      GetPathAssumingFileIsRelativeToExec(filename, new_file_path.data(),
+                                          new_file_path.size())) {
+    filename = new_file_path.data();
+  }
+
+  // Read the file.
+  VPrintf(1, "%s: reading suppressions file at %s\n",
+          SanitizerToolName, filename);
   char *file_contents;
   uptr buffer_size;
-  uptr contents_size = ReadFileToBuffer(filename, &file_contents, &buffer_size,
-                                        1 << 26 /* max_len */);
-  if (contents_size == 0) {
+  uptr contents_size;
+  if (!ReadFileToBuffer(filename, &file_contents, &buffer_size,
+                        &contents_size)) {
     Printf("%s: failed to read suppressions file '%s'\n", SanitizerToolName,
            filename);
     Die();
   }
+
   Parse(file_contents);
 }
 
@@ -82,7 +112,8 @@ void SuppressionContext::Parse(const char *str) {
       end = line + internal_strlen(line);
     if (line != end && line[0] != '#') {
       const char *end2 = end;
-      while (line != end2 && (end2[-1] == ' ' || end2[-1] == '\t'))
+      while (line != end2 &&
+             (end2[-1] == ' ' || end2[-1] == '\t' || end2[-1] == '\r'))
         end2--;
       int type;
       for (type = 0; type < suppression_types_num_; type++) {
@@ -101,8 +132,6 @@ void SuppressionContext::Parse(const char *str) {
       s.templ = (char*)InternalAlloc(end2 - line + 1);
       internal_memcpy(s.templ, line, end2 - line);
       s.templ[end2 - line] = 0;
-      s.hit_count = 0;
-      s.weight = 0;
       suppressions_.push_back(s);
       has_suppression_type_[type] = true;
     }
@@ -132,7 +161,7 @@ const Suppression *SuppressionContext::SuppressionAt(uptr i) const {
 void SuppressionContext::GetMatched(
     InternalMmapVector<Suppression *> *matched) {
   for (uptr i = 0; i < suppressions_.size(); i++)
-    if (suppressions_[i].hit_count)
+    if (atomic_load_relaxed(&suppressions_[i].hit_count))
       matched->push_back(&suppressions_[i]);
 }
 

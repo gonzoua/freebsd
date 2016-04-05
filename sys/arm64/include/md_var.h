@@ -36,9 +36,19 @@
 extern long Maxmem;
 extern char sigcode[];
 extern int szsigcode;
+extern uint64_t *vm_page_dump;
+extern int vm_page_dump_size;
 
 struct dumperinfo;
-int minidumpsys(struct dumperinfo *);
+
 void busdma_swi(void);
+void dump_add_page(vm_paddr_t);
+void dump_drop_page(vm_paddr_t);
+int minidumpsys(struct dumperinfo *);
+
+struct vdso_timehands;
+struct timecounter;
+extern uint32_t (*arm_cpu_fill_vdso_timehands)(struct vdso_timehands *,
+    struct timecounter *);
 
 #endif /* !_MACHINE_MD_VAR_H_ */

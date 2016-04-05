@@ -7,14 +7,11 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "lldb/lldb-python.h"
-
-#include "lldb/Target/ThreadPlan.h"
-
 // C Includes
 // C++ Includes
 // Other libraries and framework includes
 // Project includes
+#include "lldb/Target/ThreadPlan.h"
 #include "lldb/Core/Debugger.h"
 #include "lldb/Core/Log.h"
 #include "lldb/Core/State.h"
@@ -22,6 +19,7 @@
 #include "lldb/Target/Thread.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Target/Target.h"
+#include "lldb/Utility/ConvertEnum.h"
 
 using namespace lldb;
 using namespace lldb_private;
@@ -49,9 +47,7 @@ ThreadPlan::ThreadPlan(ThreadPlanKind kind, const char *name, Thread &thread, Vo
 //----------------------------------------------------------------------
 // Destructor
 //----------------------------------------------------------------------
-ThreadPlan::~ThreadPlan()
-{
-}
+ThreadPlan::~ThreadPlan() = default;
 
 bool
 ThreadPlan::PlanExplainsStop (Event *event_ptr)
@@ -131,10 +127,7 @@ ThreadPlan::StopOthers ()
 {
     ThreadPlan *prev_plan;
     prev_plan = GetPreviousPlan ();
-    if (prev_plan == NULL)
-        return false;
-    else
-        return prev_plan->StopOthers();
+    return (prev_plan == nullptr) ? false : prev_plan->StopOthers();
 }
 
 void
@@ -156,6 +149,7 @@ ThreadPlan::WillResume (StateType resume_state, bool current_plan)
         if (log)
         {
             RegisterContext *reg_ctx = m_thread.GetRegisterContext().get();
+            assert (reg_ctx);
             addr_t pc = reg_ctx->GetPC();
             addr_t sp = reg_ctx->GetSP();
             addr_t fp = reg_ctx->GetFP();
@@ -191,10 +185,7 @@ ThreadPlan::WillPop()
 bool
 ThreadPlan::OkayToDiscard()
 {
-    if (!IsMasterPlan())
-        return true;
-    else
-        return m_okay_to_discard;
+    return IsMasterPlan() ? m_okay_to_discard : true;
 }
 
 lldb::StateType
@@ -204,6 +195,23 @@ ThreadPlan::RunState ()
         return eStateStepping;
     else
         return GetPlanRunState();
+}
+
+bool
+ThreadPlan::IsUsuallyUnexplainedStopReason(lldb::StopReason reason)
+{
+    switch (reason)
+    {
+        case eStopReasonWatchpoint:
+        case eStopReasonSignal:
+        case eStopReasonException:
+        case eStopReasonExec:
+        case eStopReasonThreadExiting:
+        case eStopReasonInstrumentation:
+            return true;
+        default:
+            return false;
+    }
 }
 
 //----------------------------------------------------------------------
@@ -219,9 +227,7 @@ ThreadPlanNull::ThreadPlanNull (Thread &thread) :
 {
 }
 
-ThreadPlanNull::~ThreadPlanNull ()
-{
-}
+ThreadPlanNull::~ThreadPlanNull() = default;
 
 void
 ThreadPlanNull::GetDescription (Stream *s,

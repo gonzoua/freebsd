@@ -57,11 +57,12 @@ extern void	yyrestart(FILE *);
 %}
 
 %token ALIAS AUTH_GROUP AUTH_TYPE BACKEND BLOCKSIZE CHAP CHAP_MUTUAL
-%token CLOSING_BRACKET DEBUG DEVICE_ID DISCOVERY_AUTH_GROUP DISCOVERY_FILTER
+%token CLOSING_BRACKET CTL_LUN DEBUG DEVICE_ID DEVICE_TYPE
+%token DISCOVERY_AUTH_GROUP DISCOVERY_FILTER FOREIGN
 %token INITIATOR_NAME INITIATOR_PORTAL ISNS_SERVER ISNS_PERIOD ISNS_TIMEOUT
 %token LISTEN LISTEN_ISER LUN MAXPROC OFFLOAD OPENING_BRACKET OPTION
 %token PATH PIDFILE PORT PORTAL_GROUP REDIRECT SEMICOLON SERIAL SIZE STR
-%token TARGET TIMEOUT 
+%token TAG TARGET TIMEOUT
 
 %union
 {
@@ -337,13 +338,19 @@ portal_group_entry:
 	|
 	portal_group_discovery_filter
 	|
+	portal_group_foreign
+	|
 	portal_group_listen
 	|
 	portal_group_listen_iser
 	|
 	portal_group_offload
 	|
+	portal_group_option
+	|
 	portal_group_redirect
+	|
+	portal_group_tag
 	;
 
 portal_group_discovery_auth_group:	DISCOVERY_AUTH_GROUP STR
@@ -374,6 +381,13 @@ portal_group_discovery_filter:	DISCOVERY_FILTER STR
 		free($2);
 		if (error != 0)
 			return (1);
+	}
+	;
+
+portal_group_foreign:	FOREIGN
+	{
+
+		portal_group->pg_foreign = 1;
 	}
 	;
 
@@ -410,6 +424,18 @@ portal_group_offload:	OFFLOAD STR
 	}
 	;
 
+portal_group_option:	OPTION STR STR
+	{
+		struct option *o;
+
+		o = option_new(&portal_group->pg_options, $2, $3);
+		free($2);
+		free($3);
+		if (o == NULL)
+			return (1);
+	}
+	;
+
 portal_group_redirect:	REDIRECT STR
 	{
 		int error;
@@ -418,6 +444,20 @@ portal_group_redirect:	REDIRECT STR
 		free($2);
 		if (error != 0)
 			return (1);
+	}
+	;
+
+portal_group_tag:	TAG STR
+	{
+		uint64_t tmp;
+
+		if (expand_number($2, &tmp) != 0) {
+			yyerror("invalid numeric value");
+			free($2);
+			return (1);
+		}
+
+		portal_group->pg_tag = tmp;
 	}
 	;
 
@@ -829,6 +869,10 @@ lun_entry:
 	|
 	lun_device_id
 	|
+	lun_device_type
+	|
+	lun_ctl_lun
+	|
 	lun_option
 	|
 	lun_path
@@ -886,14 +930,59 @@ lun_device_id:	DEVICE_ID STR
 	}
 	;
 
+lun_device_type:	DEVICE_TYPE STR
+	{
+		uint64_t tmp;
+
+		if (strcasecmp($2, "disk") == 0 ||
+		    strcasecmp($2, "direct") == 0)
+			tmp = 0;
+		else if (strcasecmp($2, "processor") == 0)
+			tmp = 3;
+		else if (strcasecmp($2, "cd") == 0 ||
+		    strcasecmp($2, "cdrom") == 0 ||
+		    strcasecmp($2, "dvd") == 0 ||
+		    strcasecmp($2, "dvdrom") == 0)
+			tmp = 5;
+		else if (expand_number($2, &tmp) != 0 ||
+		    tmp > 15) {
+			yyerror("invalid numeric value");
+			free($2);
+			return (1);
+		}
+
+		lun_set_device_type(lun, tmp);
+	}
+	;
+
+lun_ctl_lun:	CTL_LUN STR
+	{
+		uint64_t tmp;
+
+		if (expand_number($2, &tmp) != 0) {
+			yyerror("invalid numeric value");
+			free($2);
+			return (1);
+		}
+
+		if (lun->l_ctl_lun >= 0) {
+			log_warnx("ctl_lun for lun \"%s\" "
+			    "specified more than once",
+			    lun->l_name);
+			return (1);
+		}
+		lun_set_ctl_lun(lun, tmp);
+	}
+	;
+
 lun_option:	OPTION STR STR
 	{
-		struct lun_option *clo;
+		struct option *o;
 
-		clo = lun_option_new(lun, $2, $3);
+		o = option_new(&lun->l_options, $2, $3);
 		free($2);
 		free($3);
-		if (clo == NULL)
+		if (o == NULL)
 			return (1);
 	}
 	;
@@ -955,70 +1044,18 @@ yyerror(const char *str)
 	    lineno, yytext, str);
 }
 
-static void
-check_perms(const char *path)
+int
+parse_conf(struct conf *newconf, const char *path)
 {
-	struct stat sb;
 	int error;
 
-	error = stat(path, &sb);
-	if (error != 0) {
-		log_warn("stat");
-		return;
-	}
-	if (sb.st_mode & S_IWOTH) {
-		log_warnx("%s is world-writable", path);
-	} else if (sb.st_mode & S_IROTH) {
-		log_warnx("%s is world-readable", path);
-	} else if (sb.st_mode & S_IXOTH) {
-		/*
-		 * Ok, this one doesn't matter, but still do it,
-		 * just for consistency.
-		 */
-		log_warnx("%s is world-executable", path);
-	}
-
-	/*
-	 * XXX: Should we also check for owner != 0?
-	 */
-}
-
-struct conf *
-conf_new_from_file(const char *path, struct conf *oldconf)
-{
-	struct auth_group *ag;
-	struct portal_group *pg;
-	struct pport *pp;
-	int error;
-
-	log_debugx("obtaining configuration from %s", path);
-
-	conf = conf_new();
-
-	TAILQ_FOREACH(pp, &oldconf->conf_pports, pp_next)
-		pport_copy(pp, conf);
-
-	ag = auth_group_new(conf, "default");
-	assert(ag != NULL);
-
-	ag = auth_group_new(conf, "no-authentication");
-	assert(ag != NULL);
-	ag->ag_type = AG_TYPE_NO_AUTHENTICATION;
-
-	ag = auth_group_new(conf, "no-access");
-	assert(ag != NULL);
-	ag->ag_type = AG_TYPE_DENY;
-
-	pg = portal_group_new(conf, "default");
-	assert(pg != NULL);
-
+	conf = newconf;
 	yyin = fopen(path, "r");
 	if (yyin == NULL) {
 		log_warn("unable to open configuration file %s", path);
-		conf_delete(conf);
-		return (NULL);
+		return (1);
 	}
-	check_perms(path);
+
 	lineno = 1;
 	yyrestart(yyin);
 	error = yyparse();
@@ -1027,35 +1064,6 @@ conf_new_from_file(const char *path, struct conf *oldconf)
 	target = NULL;
 	lun = NULL;
 	fclose(yyin);
-	if (error != 0) {
-		conf_delete(conf);
-		return (NULL);
-	}
 
-	if (conf->conf_default_ag_defined == false) {
-		log_debugx("auth-group \"default\" not defined; "
-		    "going with defaults");
-		ag = auth_group_find(conf, "default");
-		assert(ag != NULL);
-		ag->ag_type = AG_TYPE_DENY;
-	}
-
-	if (conf->conf_default_pg_defined == false) {
-		log_debugx("portal-group \"default\" not defined; "
-		    "going with defaults");
-		pg = portal_group_find(conf, "default");
-		assert(pg != NULL);
-		portal_group_add_listen(pg, "0.0.0.0:3260", false);
-		portal_group_add_listen(pg, "[::]:3260", false);
-	}
-
-	conf->conf_kernel_port_on = true;
-
-	error = conf_verify(conf);
-	if (error != 0) {
-		conf_delete(conf);
-		return (NULL);
-	}
-
-	return (conf);
+	return (error);
 }

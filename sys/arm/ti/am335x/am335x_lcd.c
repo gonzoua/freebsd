@@ -52,7 +52,6 @@ __FBSDID("$FreeBSD$");
 #include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/ofw_bus_subr.h>
 
-#include <arm/ti/am335x/hdmi.h>
 #include <dev/videomode/videomode.h>
 #include <dev/videomode/edidvar.h>
 
@@ -801,7 +800,7 @@ done:
 }
 
 static void
-am335x_lcd_hdmi_event(void *arg)
+am335x_lcd_hdmi_event(void *arg, device_t hdmi, int event)
 {
 	struct am335x_lcd_softc *sc;
 	const struct videomode *videomode;
@@ -998,8 +997,11 @@ am335x_lcd_attach(device_t dev)
 	    PWM_PERIOD, PWM_PERIOD) == 0)
 		sc->sc_backlight = 100;
 
-	sc->sc_hdmi_evh = EVENTHANDLER_REGISTER(hdmi_event,
-	    am335x_lcd_hdmi_event, sc, 0);
+	if (panel_node != 0)
+		am335x_lcd_configure(sc);
+	else
+		sc->sc_hdmi_evh = EVENTHANDLER_REGISTER(hdmi_event,
+		    am335x_lcd_hdmi_event, sc, EVENTHANDLER_PRI_ANY);
 
 	return (0);
 }

@@ -42,6 +42,8 @@
 #define	STACKALIGNBYTES	(16 - 1)
 #define	STACKALIGN(p)	((uint64_t)(p) & ~STACKALIGNBYTES)
 
+#define	__PCI_REROUTE_INTERRUPT
+
 #ifndef MACHINE
 #define	MACHINE		"arm64"
 #endif
@@ -51,7 +53,7 @@
 
 #if defined(SMP) || defined(KLD_MODULE)
 #ifndef MAXCPU
-#define	MAXCPU		2
+#define	MAXCPU		96
 #endif
 #else
 #define	MAXCPU		1

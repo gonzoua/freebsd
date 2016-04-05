@@ -10,12 +10,18 @@
 #ifndef LLDB_SBCommandInterpreter_h_
 #define LLDB_SBCommandInterpreter_h_
 
+// C Includes
+// C++ Includes
+#include <memory>
+
+// Other libraries and framework includes
+// Project includes
 #include "lldb/API/SBDefines.h"
 #include "lldb/API/SBDebugger.h"
 
 namespace lldb {
 
-class SBCommandInterpreterRunOptions
+class LLDB_API SBCommandInterpreterRunOptions
 {
 friend class SBDebugger;
 friend class SBCommandInterpreter;
@@ -59,6 +65,7 @@ public:
 
     void
     SetAddToHistory (bool);
+
 private:
     lldb_private::CommandInterpreterRunOptions *
     get () const;
@@ -84,16 +91,19 @@ public:
 
     SBCommandInterpreter (const lldb::SBCommandInterpreter &rhs);
     
+    ~SBCommandInterpreter ();
+
     const lldb::SBCommandInterpreter &
     operator = (const lldb::SBCommandInterpreter &rhs);
-
-    ~SBCommandInterpreter ();
 
     static const char * 
     GetArgumentTypeAsCString (const lldb::CommandArgumentType arg_type);
     
     static const char *
     GetArgumentDescriptionAsCString (const lldb::CommandArgumentType arg_type);
+
+    static bool
+    EventIsCommandInterpreterEvent (const lldb::SBEvent &event);
     
     bool
     IsValid() const;
@@ -184,7 +194,7 @@ public:
                                 lldb::CommandOverrideCallback callback,
                                 void *baton);
     
-    SBCommandInterpreter (lldb_private::CommandInterpreter *interpreter_ptr = NULL);   // Access using SBDebugger::GetCommandInterpreter();
+    SBCommandInterpreter(lldb_private::CommandInterpreter *interpreter_ptr = nullptr);   // Access using SBDebugger::GetCommandInterpreter();
     
     //----------------------------------------------------------------------
     /// Return true if the command interpreter is the active IO handler.
@@ -210,14 +220,26 @@ public:
     ///
     /// @return
     ///     The string that should be written into the file handle that is
-    ///     feeding the input stream for the debugger, or NULL if there is
+    ///     feeding the input stream for the debugger, or nullptr if there is
     ///     no string for this control key.
     //----------------------------------------------------------------------
     const char *
     GetIOHandlerControlSequence(char ch);
 
-protected:
+    bool
+    GetPromptOnQuit();
 
+    void
+    SetPromptOnQuit(bool b);
+
+    //----------------------------------------------------------------------
+    /// Resolve the command just as HandleCommand would, expanding abbreviations
+    /// and aliases.  If successful, result->GetOutput has the full expansion.
+    //----------------------------------------------------------------------
+    void
+    ResolveCommand(const char *command_line, SBCommandReturnObject &result);
+
+protected:
     lldb_private::CommandInterpreter &
     ref ();
 
@@ -226,6 +248,7 @@ protected:
 
     void
     reset (lldb_private::CommandInterpreter *);
+
 private:
     friend class SBDebugger;
 
@@ -238,6 +261,9 @@ private:
 class SBCommandPluginInterface
 {
 public:
+    virtual
+    ~SBCommandPluginInterface() = default;
+
     virtual bool
     DoExecute (lldb::SBDebugger /*debugger*/,
                char** /*command*/,
@@ -245,16 +271,11 @@ public:
     {
         return false;
     }
-    
-    virtual
-    ~SBCommandPluginInterface ()
-    {}
 };
     
 class SBCommand
 {
 public:
-    
     SBCommand ();
     
     bool
@@ -266,14 +287,28 @@ public:
     const char*
     GetHelp ();
     
-    lldb::SBCommand
-    AddMultiwordCommand (const char* name, const char* help = NULL);
+    const char*
+    GetHelpLong ();
+    
+    void
+    SetHelp (const char*);
+    
+    void
+    SetHelpLong (const char*);
+    
+    uint32_t
+    GetFlags ();
+    
+    void
+    SetFlags (uint32_t flags);
     
     lldb::SBCommand
-    AddCommand (const char* name, lldb::SBCommandPluginInterface* impl, const char* help = NULL);
+    AddMultiwordCommand(const char* name, const char* help = nullptr);
+    
+    lldb::SBCommand
+    AddCommand(const char* name, lldb::SBCommandPluginInterface* impl, const char* help = nullptr);
     
 private:
-    
     friend class SBDebugger;
     friend class SBCommandInterpreter;
     

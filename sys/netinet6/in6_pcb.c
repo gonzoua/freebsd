@@ -328,7 +328,6 @@ in6_pcbladdr(register struct inpcb *inp, struct sockaddr *nam,
 {
 	register struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)nam;
 	int error = 0;
-	struct ifnet *ifp = NULL;
 	int scope_ambiguous = 0;
 	struct in6_addr in6a;
 
@@ -358,20 +357,15 @@ in6_pcbladdr(register struct inpcb *inp, struct sockaddr *nam,
 	if ((error = prison_remote_ip6(inp->inp_cred, &sin6->sin6_addr)) != 0)
 		return (error);
 
-	error = in6_selectsrc(sin6, inp->in6p_outputopts,
-	    inp, NULL, inp->inp_cred, &ifp, &in6a);
+	error = in6_selectsrc_socket(sin6, inp->in6p_outputopts,
+	    inp, inp->inp_cred, scope_ambiguous, &in6a, NULL);
 	if (error)
 		return (error);
-
-	if (ifp && scope_ambiguous &&
-	    (error = in6_setscope(&sin6->sin6_addr, ifp, NULL)) != 0) {
-		return(error);
-	}
 
 	/*
 	 * Do not update this earlier, in case we return with an error.
 	 *
-	 * XXX: this in6_selectsrc result might replace the bound local
+	 * XXX: this in6_selectsrc_socket result might replace the bound local
 	 * address with the address specified by setsockopt(IPV6_PKTINFO).
 	 * Is it the intended behavior?
 	 */
@@ -789,7 +783,7 @@ in6_pcbpurgeif0(struct inpcbinfo *pcbinfo, struct ifnet *ifp)
 	struct ip6_moptions *im6o;
 	int i, gap;
 
-	INP_INFO_RLOCK(pcbinfo);
+	INP_INFO_WLOCK(pcbinfo);
 	LIST_FOREACH(in6p, pcbinfo->ipi_listhead, inp_list) {
 		INP_WLOCK(in6p);
 		im6o = in6p->in6p_moptions;
@@ -820,7 +814,7 @@ in6_pcbpurgeif0(struct inpcbinfo *pcbinfo, struct ifnet *ifp)
 		}
 		INP_WUNLOCK(in6p);
 	}
-	INP_INFO_RUNLOCK(pcbinfo);
+	INP_INFO_WUNLOCK(pcbinfo);
 }
 
 /*
@@ -833,9 +827,10 @@ void
 in6_losing(struct inpcb *in6p)
 {
 
-	/*
-	 * We don't store route pointers in the routing table anymore
-	 */
+	if (in6p->inp_route6.ro_rt) {
+		RTFREE(in6p->inp_route6.ro_rt);
+		in6p->inp_route6.ro_rt = (struct rtentry *)NULL;
+	}
 	return;
 }
 
@@ -846,9 +841,11 @@ in6_losing(struct inpcb *in6p)
 struct inpcb *
 in6_rtchange(struct inpcb *inp, int errno)
 {
-	/*
-	 * We don't store route pointers in the routing table anymore
-	 */
+
+	if (inp->inp_route6.ro_rt) {
+		RTFREE(inp->inp_route6.ro_rt);
+		inp->inp_route6.ro_rt = (struct rtentry *)NULL;
+	}
 	return inp;
 }
 

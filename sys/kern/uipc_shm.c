@@ -68,6 +68,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/resourcevar.h>
 #include <sys/rwlock.h>
 #include <sys/stat.h>
+#include <sys/syscallsubr.h>
 #include <sys/sysctl.h>
 #include <sys/sysproto.h>
 #include <sys/systm.h>
@@ -108,15 +109,10 @@ static dev_t shm_dev_ino;
 
 #define	SHM_HASH(fnv)	(&shm_dictionary[(fnv) & shm_hash])
 
-static int	shm_access(struct shmfd *shmfd, struct ucred *ucred, int flags);
-static struct shmfd *shm_alloc(struct ucred *ucred, mode_t mode);
 static void	shm_init(void *arg);
-static void	shm_drop(struct shmfd *shmfd);
-static struct shmfd *shm_hold(struct shmfd *shmfd);
 static void	shm_insert(char *path, Fnv32_t fnv, struct shmfd *shmfd);
 static struct shmfd *shm_lookup(char *path, Fnv32_t fnv);
 static int	shm_remove(char *path, Fnv32_t fnv, struct ucred *ucred);
-static int	shm_dotruncate(struct shmfd *shmfd, off_t length);
 
 static fo_rdwr_t	shm_read;
 static fo_rdwr_t	shm_write;
@@ -130,7 +126,7 @@ static fo_fill_kinfo_t	shm_fill_kinfo;
 static fo_mmap_t	shm_mmap;
 
 /* File descriptor operations. */
-static struct fileops shm_ops = {
+struct fileops shm_ops = {
 	.fo_read = shm_read,
 	.fo_write = shm_write,
 	.fo_truncate = shm_truncate,
@@ -188,7 +184,7 @@ uiomove_object_page(vm_object_t obj, size_t len, struct uio *uio)
 	m = vm_page_grab(obj, idx, VM_ALLOC_NORMAL);
 	if (m->valid != VM_PAGE_BITS_ALL) {
 		if (vm_pager_has_page(obj, idx, NULL, NULL)) {
-			rv = vm_pager_get_pages(obj, &m, 1, 0);
+			rv = vm_pager_get_pages(obj, &m, 1, NULL, NULL);
 			if (rv != VM_PAGER_OK) {
 				printf(
 	    "uiomove_object: vm_obj %p idx %jd valid %x pager error %d\n",
@@ -411,7 +407,7 @@ shm_close(struct file *fp, struct thread *td)
 	return (0);
 }
 
-static int
+int
 shm_dotruncate(struct shmfd *shmfd, off_t length)
 {
 	vm_object_t object;
@@ -459,7 +455,7 @@ retry:
 					goto retry;
 				} else if (m->valid != VM_PAGE_BITS_ALL)
 					rv = vm_pager_get_pages(object, &m, 1,
-					    0);
+					    NULL, NULL);
 				else
 					/* A cached page was reactivated. */
 					rv = VM_PAGER_OK;
@@ -520,7 +516,7 @@ retry:
  * shmfd object management including creation and reference counting
  * routines.
  */
-static struct shmfd *
+struct shmfd *
 shm_alloc(struct ucred *ucred, mode_t mode)
 {
 	struct shmfd *shmfd;
@@ -558,7 +554,7 @@ shm_alloc(struct ucred *ucred, mode_t mode)
 	return (shmfd);
 }
 
-static struct shmfd *
+struct shmfd *
 shm_hold(struct shmfd *shmfd)
 {
 
@@ -566,7 +562,7 @@ shm_hold(struct shmfd *shmfd)
 	return (shmfd);
 }
 
-static void
+void
 shm_drop(struct shmfd *shmfd)
 {
 
@@ -587,7 +583,7 @@ shm_drop(struct shmfd *shmfd)
  * Determine if the credentials have sufficient permissions for a
  * specified combination of FREAD and FWRITE.
  */
-static int
+int
 shm_access(struct shmfd *shmfd, struct ucred *ucred, int flags)
 {
 	accmode_t accmode;
@@ -683,9 +679,9 @@ shm_remove(char *path, Fnv32_t fnv, struct ucred *ucred)
 	return (ENOENT);
 }
 
-/* System calls. */
 int
-sys_shm_open(struct thread *td, struct shm_open_args *uap)
+kern_shm_open(struct thread *td, const char *userpath, int flags, mode_t mode,
+    struct filecaps *fcaps)
 {
 	struct filedesc *fdp;
 	struct shmfd *shmfd;
@@ -699,28 +695,27 @@ sys_shm_open(struct thread *td, struct shm_open_args *uap)
 	/*
 	 * shm_open(2) is only allowed for anonymous objects.
 	 */
-	if (IN_CAPABILITY_MODE(td) && (uap->path != SHM_ANON))
+	if (IN_CAPABILITY_MODE(td) && (userpath != SHM_ANON))
 		return (ECAPMODE);
 #endif
 
-	if ((uap->flags & O_ACCMODE) != O_RDONLY &&
-	    (uap->flags & O_ACCMODE) != O_RDWR)
+	if ((flags & O_ACCMODE) != O_RDONLY && (flags & O_ACCMODE) != O_RDWR)
 		return (EINVAL);
 
-	if ((uap->flags & ~(O_ACCMODE | O_CREAT | O_EXCL | O_TRUNC | O_CLOEXEC)) != 0)
+	if ((flags & ~(O_ACCMODE | O_CREAT | O_EXCL | O_TRUNC | O_CLOEXEC)) != 0)
 		return (EINVAL);
 
 	fdp = td->td_proc->p_fd;
-	cmode = (uap->mode & ~fdp->fd_cmask) & ACCESSPERMS;
+	cmode = (mode & ~fdp->fd_cmask) & ACCESSPERMS;
 
-	error = falloc(td, &fp, &fd, O_CLOEXEC);
+	error = falloc_caps(td, &fp, &fd, O_CLOEXEC, fcaps);
 	if (error)
 		return (error);
 
 	/* A SHM_ANON path pointer creates an anonymous object. */
-	if (uap->path == SHM_ANON) {
+	if (userpath == SHM_ANON) {
 		/* A read-only anonymous object is pointless. */
-		if ((uap->flags & O_ACCMODE) == O_RDONLY) {
+		if ((flags & O_ACCMODE) == O_RDONLY) {
 			fdclose(td, fp, fd);
 			fdrop(fp, td);
 			return (EINVAL);
@@ -728,7 +723,7 @@ sys_shm_open(struct thread *td, struct shm_open_args *uap)
 		shmfd = shm_alloc(td->td_ucred, cmode);
 	} else {
 		path = malloc(MAXPATHLEN, M_SHMFD, M_WAITOK);
-		error = copyinstr(uap->path, path, MAXPATHLEN, NULL);
+		error = copyinstr(userpath, path, MAXPATHLEN, NULL);
 #ifdef KTRACE
 		if (error == 0 && KTRPOINT(curthread, KTR_NAMEI))
 			ktrnamei(path);
@@ -748,7 +743,7 @@ sys_shm_open(struct thread *td, struct shm_open_args *uap)
 		shmfd = shm_lookup(path, fnv);
 		if (shmfd == NULL) {
 			/* Object does not yet exist, create it if requested. */
-			if (uap->flags & O_CREAT) {
+			if (flags & O_CREAT) {
 #ifdef MAC
 				error = mac_posixshm_check_create(td->td_ucred,
 				    path);
@@ -769,17 +764,16 @@ sys_shm_open(struct thread *td, struct shm_open_args *uap)
 			 * reference if requested and permitted.
 			 */
 			free(path, M_SHMFD);
-			if ((uap->flags & (O_CREAT | O_EXCL)) ==
-			    (O_CREAT | O_EXCL))
+			if ((flags & (O_CREAT | O_EXCL)) == (O_CREAT | O_EXCL))
 				error = EEXIST;
 			else {
 #ifdef MAC
 				error = mac_posixshm_check_open(td->td_ucred,
-				    shmfd, FFLAGS(uap->flags & O_ACCMODE));
+				    shmfd, FFLAGS(flags & O_ACCMODE));
 				if (error == 0)
 #endif
 				error = shm_access(shmfd, td->td_ucred,
-				    FFLAGS(uap->flags & O_ACCMODE));
+				    FFLAGS(flags & O_ACCMODE));
 			}
 
 			/*
@@ -788,7 +782,7 @@ sys_shm_open(struct thread *td, struct shm_open_args *uap)
 			 * opened with read/write.
 			 */
 			if (error == 0 &&
-			    (uap->flags & (O_ACCMODE | O_TRUNC)) ==
+			    (flags & (O_ACCMODE | O_TRUNC)) ==
 			    (O_RDWR | O_TRUNC)) {
 #ifdef MAC
 				error = mac_posixshm_check_truncate(
@@ -809,12 +803,20 @@ sys_shm_open(struct thread *td, struct shm_open_args *uap)
 		}
 	}
 
-	finit(fp, FFLAGS(uap->flags & O_ACCMODE), DTYPE_SHM, shmfd, &shm_ops);
+	finit(fp, FFLAGS(flags & O_ACCMODE), DTYPE_SHM, shmfd, &shm_ops);
 
 	td->td_retval[0] = fd;
 	fdrop(fp, td);
 
 	return (0);
+}
+
+/* System calls. */
+int
+sys_shm_open(struct thread *td, struct shm_open_args *uap)
+{
+
+	return (kern_shm_open(td, uap->path, uap->flags, uap->mode, NULL));
 }
 
 int

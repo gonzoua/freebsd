@@ -50,6 +50,7 @@ __<bsd.opts.mk>__:
 
 __DEFAULT_YES_OPTIONS = \
     ASSERT_DEBUG \
+    DEBUG_FILES \
     DOCCOMPRESS \
     INCLUDES \
     INSTALLLIB \
@@ -66,8 +67,8 @@ __DEFAULT_YES_OPTIONS = \
     WARNS
 
 __DEFAULT_NO_OPTIONS = \
+    CCACHE_BUILD \
     CTF \
-    DEBUG_FILES \
     INSTALL_AS_USER \
     STALE_STAGED
 
@@ -75,7 +76,8 @@ __DEFAULT_NO_OPTIONS = \
 __DEFAULT_DEPENDENT_OPTIONS = \
     STAGING_MAN/STAGING \
     STAGING_PROG/STAGING \
-    
+
+
 .include <bsd.mkopt.mk>
 
 #
@@ -92,8 +94,7 @@ __DEFAULT_DEPENDENT_OPTIONS = \
     PROFILE \
     WARNS
 .if defined(NO_${var})
-# This warning may be premature...
-#.warning "NO_${var} is defined, but deprecated. Please use MK_${var}=no instead."
+.warning "NO_${var} is defined, but deprecated. Please use MK_${var}=no instead."
 MK_${var}:=no
 .endif
 .endfor
@@ -101,6 +102,8 @@ MK_${var}:=no
 .if ${MK_STAGING} == "no"
 MK_STALE_STAGED= no
 .endif
+
+.include <bsd.cpu.mk>
 
 .endif # !_WITHOUT_SRCCONF
 

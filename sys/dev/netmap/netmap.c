@@ -542,6 +542,7 @@ SYSCTL_INT(_dev_netmap, OID_AUTO, generic_ringsize, CTLFLAG_RW, &netmap_generic_
 SYSCTL_INT(_dev_netmap, OID_AUTO, generic_rings, CTLFLAG_RW, &netmap_generic_rings, 0 , "");
 
 NMG_LOCK_T	netmap_global_lock;
+int netmap_use_count = 0; /* number of active netmap instances */
 
 /*
  * mark the ring as stopped, and run through the locks
@@ -588,7 +589,7 @@ netmap_set_all_rings(struct netmap_adapter *na, int stopped)
 /*
  * Convenience function used in drivers.  Waits for current txsync()s/rxsync()s
  * to finish and prevents any new one from starting.  Call this before turning
- * netmap mode off, or before removing the harware rings (e.g., on module
+ * netmap mode off, or before removing the hardware rings (e.g., on module
  * onload).  As a rule of thumb for linux drivers, this should be placed near
  * each napi_disable().
  */
@@ -975,11 +976,11 @@ netmap_dtor_locked(struct netmap_priv_d *priv)
 {
 	struct netmap_adapter *na = priv->np_na;
 
-	/* number of active mmaps on this fd (FreeBSD only) */
+	/* number of active references to this fd */
 	if (--priv->np_refs > 0) {
 		return 0;
 	}
-
+	netmap_use_count--;
 	if (!na) {
 		return 1; //XXX is it correct?
 	}
@@ -2840,10 +2841,12 @@ void
 netmap_detach(struct ifnet *ifp)
 {
 	struct netmap_adapter *na = NA(ifp);
+	int skip;
 
 	if (!na)
 		return;
 
+	skip = 0;
 	NMG_LOCK();
 	netmap_disable_all_rings(ifp);
 	na->ifp = NULL;
@@ -2855,10 +2858,11 @@ netmap_detach(struct ifnet *ifp)
 	 * the driver is gone.
 	 */
 	if (na->na_flags & NAF_NATIVE) {
-	        netmap_adapter_put(na);
+		skip = netmap_adapter_put(na);
 	}
 	/* give them a chance to notice */
-	netmap_enable_all_rings(ifp);
+	if (skip == 0)
+		netmap_enable_all_rings(ifp);
 	NMG_UNLOCK();
 }
 

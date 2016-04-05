@@ -5,11 +5,7 @@
 PROG=	ssh-agent
 SRCS=	ssh-agent.c
 CFLAGS+=-I${SSHDIR} -include ssh_namespace.h
-
-.if !defined(NO_SHARED)
-# required when linking with a dynamic libssh
-SRCS+=	roaming_dummy.c
-.endif
+SRCS+=	ssh_namespace.h
 
 LIBADD=	ssh
 
@@ -17,7 +13,6 @@ LIBADD=	ssh
 CFLAGS+=	-DHAVE_LDNS=1
 #DPADD+=	${LIBLDNS}
 #LDADD+=	-lldns
-#USEPRIVATELIB+= ldns
 .endif
 
 LIBADD+=	crypto
@@ -25,5 +20,3 @@ LIBADD+=	crypto
 .include <bsd.prog.mk>
 
 .PATH:	${SSHDIR}
-
-${OBJS} ${POBJS} ${SOBJS}: ssh_namespace.h

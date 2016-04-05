@@ -62,9 +62,9 @@ SRCS+=	tbdata.c tbfadt.c tbinstal.c tbprint.c tbutils.c	\
 SRCS+=	utaddress.c utalloc.c utbuffer.c utcache.c utcopy.c	\
 	utdebug.c utdecode.c utdelete.c uterror.c utexcep.c	\
 	utfileio.c utglobal.c uthex.c utinit.c utlock.c		\
-	utmath.c utmisc.c utmutex.c utobject.c utownerid.c	\
-	utpredef.c utprint.c utresrc.c utstate.c utstring.c	\
-	utuuid.c utxface.c utxferror.c
+	utmath.c utmisc.c utmutex.c utnonansi.c utobject.c	\
+	utownerid.c utpredef.c utprint.c utresrc.c utstate.c	\
+	utstring.c utuuid.c utxface.c utxferror.c
 
 # os_specific/service_layers
 SRCS+=	oslibcfs.c osunixxf.c
@@ -95,7 +95,7 @@ aslcompiler.y: aslparser.y aslrules.y aslsupport.y asltokens.y asltypes.y
 aslcompilerparse.c aslcompilerparse.h: aslcompiler.y
 	${YACC} ${YFLAGS} -pAslCompiler -oaslcompilerparse.c ${.ALLSRC}
 
-aslcompiler.y.h: aslcompilerparse.h
+aslcompiler.y.h: aslcompilerparse.h .NOMETA
 	ln -f ${.ALLSRC} ${.TARGET}
 
 dtparserlex.c: dtparser.l
@@ -105,7 +105,7 @@ dtparserlex.c: dtparser.l
 dtparserparse.c dtparserparse.h: dtparser.y
 	${YACC} ${YFLAGS} -pDtParser -odtparserparse.c ${.ALLSRC}
 
-dtparser.y.h: dtparserparse.h
+dtparser.y.h: dtparserparse.h .NOMETA
 	ln -f ${.ALLSRC} ${.TARGET}
 
 prparserlex.c: prparser.l
@@ -115,7 +115,7 @@ prparserlex.c: prparser.l
 prparserparse.c prparserparse.h: prparser.y
 	${YACC} ${YFLAGS} -pPrParser -oprparserparse.c ${.ALLSRC}
 
-prparser.y.h: prparserparse.h
+prparser.y.h: prparserparse.h .NOMETA
 	ln -f ${.ALLSRC} ${.TARGET}
 
 .include <bsd.prog.mk>

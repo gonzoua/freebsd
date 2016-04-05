@@ -23,6 +23,7 @@
 #include "lldb/Symbol/ObjectFile.h"
 #include "lldb/Symbol/SymbolVendor.h"
 #include "lldb/Symbol/Symtab.h"
+#include "lldb/Symbol/TypeSystem.h"
 #include "lldb/Symbol/VariableList.h"
 #include "lldb/Target/Target.h"
 
@@ -211,34 +212,28 @@ SBModule::GetUUIDString () const
 {
     Log *log(lldb_private::GetLogIfAllCategoriesSet (LIBLLDB_LOG_API));
 
-    static char uuid_string_buffer[80];
-    const char *uuid_c_string = NULL;
-    std::string uuid_string;
+    const char *uuid_cstr = NULL;
     ModuleSP module_sp (GetSP ());
     if (module_sp)
-        uuid_string = module_sp->GetUUID().GetAsString();
-
-    if (!uuid_string.empty())
     {
-        strncpy (uuid_string_buffer, uuid_string.c_str(), sizeof (uuid_string_buffer));
-        uuid_string_buffer[sizeof (uuid_string_buffer) - 1] = '\0';
-        uuid_c_string = uuid_string_buffer;
+        // We are going to return a "const char *" value through the public
+        // API, so we need to constify it so it gets added permanently the
+        // string pool and then we don't need to worry about the lifetime of the
+        // string as it will never go away once it has been put into the ConstString
+        // string pool
+        uuid_cstr = ConstString(module_sp->GetUUID().GetAsString()).GetCString();
+    }
+
+    if (uuid_cstr && uuid_cstr[0])
+    {
+        if (log)
+            log->Printf ("SBModule(%p)::GetUUIDString () => %s", static_cast<void*>(module_sp.get()), uuid_cstr);
+        return uuid_cstr;
     }
 
     if (log)
-    {
-        if (!uuid_string.empty())
-        {
-            StreamString s;
-            module_sp->GetUUID().Dump (&s);
-            log->Printf ("SBModule(%p)::GetUUIDString () => %s",
-                         static_cast<void*>(module_sp.get()), s.GetData());
-        }
-        else
-            log->Printf ("SBModule(%p)::GetUUIDString () => NULL",
-                         static_cast<void*>(module_sp.get()));
-    }
-    return uuid_c_string;
+        log->Printf ("SBModule(%p)::GetUUIDString () => NULL", static_cast<void*>(module_sp.get()));
+    return NULL;
 }
 
 
@@ -526,7 +521,11 @@ SBModule::FindFirstType (const char *name_cstr)
         sb_type = SBType (module_sp->FindFirstType(sc, name, exact_match));
         
         if (!sb_type.IsValid())
-            sb_type = SBType (ClangASTContext::GetBasicType (module_sp->GetClangASTContext().getASTContext(), name));
+        {
+            TypeSystem *type_system = module_sp->GetTypeSystemForLanguage(eLanguageTypeC);
+            if (type_system)
+                sb_type = SBType (type_system->GetBuiltinTypeByName(name));
+        }
     }
     return sb_type;
 }
@@ -536,7 +535,11 @@ SBModule::GetBasicType(lldb::BasicType type)
 {
     ModuleSP module_sp (GetSP ());
     if (module_sp)
-        return SBType (ClangASTContext::GetBasicType (module_sp->GetClangASTContext().getASTContext(), type));
+    {
+        TypeSystem *type_system = module_sp->GetTypeSystemForLanguage(eLanguageTypeC);
+        if (type_system)
+            return SBType (type_system->GetBasicTypeFromAST(type));
+    }
     return SBType();
 }
 
@@ -569,9 +572,13 @@ SBModule::FindTypes (const char *type)
         }
         else
         {
-            SBType sb_type(ClangASTContext::GetBasicType (module_sp->GetClangASTContext().getASTContext(), name));
-            if (sb_type.IsValid())
-                retval.Append(sb_type);
+            TypeSystem *type_system = module_sp->GetTypeSystemForLanguage(eLanguageTypeC);
+            if (type_system)
+            {
+                CompilerType compiler_type = type_system->GetBuiltinTypeByName(name);
+                if (compiler_type)
+                    retval.Append(SBType(compiler_type));
+            }
         }
     }
 
@@ -690,3 +697,30 @@ SBModule::GetVersion (uint32_t *versions, uint32_t num_versions)
     }
 }
 
+lldb::SBFileSpec
+SBModule::GetSymbolFileSpec() const
+{
+    lldb::SBFileSpec sb_file_spec;
+    ModuleSP module_sp(GetSP());
+    if (module_sp)
+    {
+        SymbolVendor *symbol_vendor_ptr = module_sp->GetSymbolVendor();
+        if (symbol_vendor_ptr)
+            sb_file_spec.SetFileSpec(symbol_vendor_ptr->GetMainFileSpec());
+    }
+    return sb_file_spec;
+}
+
+lldb::SBAddress
+SBModule::GetObjectFileHeaderAddress() const
+{
+    lldb::SBAddress sb_addr;
+    ModuleSP module_sp (GetSP ());
+    if (module_sp)
+    {
+        ObjectFile *objfile_ptr = module_sp->GetObjectFile();
+        if (objfile_ptr)
+            sb_addr.ref() = objfile_ptr->GetHeaderAddress();
+    }
+    return sb_addr;
+}

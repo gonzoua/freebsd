@@ -78,6 +78,10 @@ struct config_file {
 	int do_tcp;
 	/** tcp upstream queries (no UDP upstream queries) */
 	int tcp_upstream;
+	/** maximum segment size of tcp socket which queries are answered */
+	int tcp_mss;
+	/** maximum segment size of tcp socket for outgoing queries */
+	int outgoing_tcp_mss;
 
 	/** private key file for dnstcp-ssl service (enabled if not NULL) */
 	char* ssl_service_key;
@@ -136,6 +140,8 @@ struct config_file {
 	size_t so_sndbuf;
 	/** SO_REUSEPORT requested on port 53 sockets */
 	int so_reuseport;
+	/** IP_TRANSPARENT socket option requested on port 53 sockets */
+	int ip_transparent;
 
 	/** number of interfaces to open. If 0 default all interfaces. */
 	int num_ifs;
@@ -173,8 +179,12 @@ struct config_file {
 	int harden_below_nxdomain;
 	/** harden the referral path, query for NS,A,AAAA and validate */
 	int harden_referral_path;
+	/** harden against algorithm downgrade */
+	int harden_algo_downgrade;
 	/** use 0x20 bits in query as random ID bits */
 	int use_caps_bits_for_id;
+	/** 0x20 whitelist, domains that do not use capsforid */
+	struct config_strlist* caps_whitelist;
 	/** strip away these private addrs from answers, no DNS Rebinding */
 	struct config_strlist* private_address;
 	/** allow domain (and subdomains) to use private address space */
@@ -185,6 +195,8 @@ struct config_file {
 	int max_ttl;
 	/** the number of seconds minimum TTL used for RRsets and messages */
 	int min_ttl;
+	/** the number of seconds maximal negative TTL for SOA in auth */
+	int max_negative_ttl;
 	/** if prefetching of messages should be performed. */
 	int prefetch;
 	/** if prefetching of DNSKEYs should be performed. */
@@ -261,6 +273,8 @@ struct config_file {
 	unsigned int del_holddown;
 	/** autotrust keep_missing time, in seconds. 0 is forever. */
 	unsigned int keep_missing;
+	/** permit small holddown values, allowing 5011 rollover very fast */
+	int permit_small_holddown;
 
 	/** size of the key cache */
 	size_t key_cache_size;
@@ -273,10 +287,12 @@ struct config_file {
 	struct config_str2list* local_zones;
 	/** local zones nodefault list */
 	struct config_strlist* local_zones_nodefault;
-	/** local data RRs configged */
+	/** local data RRs configured */
 	struct config_strlist* local_data;
-	/** unblock lan zones (reverse lookups for 10/8 and so on) */
+	/** unblock lan zones (reverse lookups for AS112 zones) */
 	int unblock_lan_zones;
+	/** insecure lan zones (don't validate AS112 zones) */
+	int insecure_lan_zones;
 
 	/** remote control section. enable toggle. */
 	int remote_control_enable;
@@ -341,12 +357,29 @@ struct config_file {
 	int dnstap_log_forwarder_query_messages;
 	/** true to log dnstap FORWARDER_RESPONSE message events */
 	int dnstap_log_forwarder_response_messages;
+
+	/** ratelimit 0 is off, otherwise qps (unless overridden) */
+	int ratelimit;
+	/** number of slabs for ratelimit cache */
+	size_t ratelimit_slabs;
+	/** memory size in bytes for ratelimit cache */
+	size_t ratelimit_size;
+	/** ratelimits for domain (exact match) */
+	struct config_str2list* ratelimit_for_domain;
+	/** ratelimits below domain */
+	struct config_str2list* ratelimit_below_domain;
+	/** ratelimit factor, 0 blocks all, 10 allows 1/10 of traffic */
+	int ratelimit_factor;
+	/** minimise outgoing QNAME and hide original QTYPE if possible */
+	int qname_minimisation;
 };
 
 /** from cfg username, after daemonise setup performed */
 extern uid_t cfg_uid;
 /** from cfg username, after daemonise setup performed */
 extern gid_t cfg_gid;
+/** debug and enable small timeouts */
+extern int autr_permit_small_holddown;
 
 /**
  * Stub config options
@@ -527,6 +560,17 @@ int cfg_strlist_insert(struct config_strlist** head, char* item);
 int cfg_str2list_insert(struct config_str2list** head, char* item, char* i2);
 
 /**
+ * Find stub in config list, also returns prevptr (for deletion).
+ * @param pp: call routine with pointer to a pointer to the start of the list,
+ * 	if the stub is found, on exit, the value contains a pointer to the
+ * 	next pointer that points to the found element (or to the list start
+ * 	pointer if it is the first element).
+ * @param nm: name of stub to find.
+ * @return: pointer to config_stub if found, or NULL if not found.
+ */
+struct config_stub* cfg_stub_find(struct config_stub*** pp, const char* nm);
+
+/**
  * Delete items in config string list.
  * @param list: list.
  */
@@ -537,6 +581,12 @@ void config_delstrlist(struct config_strlist* list);
  * @param list: list.
  */
 void config_deldblstrlist(struct config_str2list* list);
+
+/**
+ * Delete a stub item
+ * @param p: stub item
+ */
+void config_delstub(struct config_stub* p);
 
 /**
  * Delete items in config stub list.
@@ -714,6 +764,9 @@ void ub_c_error_msg(const char* fmt, ...) ATTR_FORMAT(printf, 1, 2);
  * 	exist on an error (logged with log_err) was encountered.
  */
 char* w_lookup_reg_str(const char* key, const char* name);
+
+/** Modify directory in options for module file name */
+void w_config_adjust_directory(struct config_file* cfg);
 #endif /* UB_ON_WINDOWS */
 
 #endif /* UTIL_CONFIG_FILE_H */

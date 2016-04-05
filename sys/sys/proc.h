@@ -161,6 +161,8 @@ struct pargs {
  * for write access.
  */
 struct cpuset;
+struct filecaps;
+struct filemon;
 struct kaioinfo;
 struct kaudit_record;
 struct kdtrace_proc;
@@ -173,6 +175,7 @@ struct procdesc;
 struct racct;
 struct sbuf;
 struct sleepqueue;
+struct syscall_args;
 struct td_sched;
 struct thread;
 struct trapframe;
@@ -233,11 +236,9 @@ struct thread {
 	int		td_sqqueue;	/* (t) Sleepqueue queue blocked on. */
 	void		*td_wchan;	/* (t) Sleep address. */
 	const char	*td_wmesg;	/* (t) Reason for sleep. */
-	int		td_lastcpu;	/* (t) Last cpu we were on. */
-	int		td_oncpu;	/* (t) Which cpu we are on. */
 	volatile u_char td_owepreempt;  /* (k*) Preempt on last critical_exit */
 	u_char		td_tsqueue;	/* (t) Turnstile queue blocked on. */
-	short		td_locks;	/* (k) Count of non-spin locks. */
+	short		td_locks;	/* (k) Debug: count of non-spin locks */
 	short		td_rw_rlocks;	/* (k) Count of rwlock read locks. */
 	short		td_lk_slocks;	/* (k) Count of lockmgr shared locks. */
 	short		td_stopsched;	/* (k) Scheduler stopped. */
@@ -253,6 +254,7 @@ struct thread {
 	int		td_slptick;	/* (t) Time at sleep. */
 	int		td_blktick;	/* (t) Time spent blocked. */
 	int		td_swvoltick;	/* (t) Time at last SW_VOL switch. */
+	int		td_swinvoltick;	/* (t) Time at last SW_INVOL switch. */
 	u_int		td_cow;		/* (*) Number of copy-on-write faults */
 	struct rusage	td_ru;		/* (t) rusage information. */
 	struct rusage_ext td_rux;	/* (t) Internal rusage information. */
@@ -292,6 +294,8 @@ struct thread {
 	u_char		td_pri_class;	/* (t) Scheduling class. */
 	u_char		td_user_pri;	/* (t) User pri from estcpu and nice. */
 	u_char		td_base_user_pri; /* (t) Base user pri */
+	u_int		td_dbg_sc_code;	/* (c) Syscall code to debugger. */
+	u_int		td_dbg_sc_narg;	/* (c) Syscall arg count to debugger.*/
 #define	td_endcopy td_pcb
 
 /*
@@ -331,6 +335,8 @@ struct thread {
 	struct vm_page	**td_ma;	/* (k) uio pages held */
 	int		td_ma_cnt;	/* (k) size of *td_ma */
 	void		*td_emuldata;	/* Emulator state data */
+	int		td_lastcpu;	/* (t) Last cpu we were on. */
+	int		td_oncpu;	/* (t) Which cpu we are on. */
 };
 
 struct mtx *thread_lock_block(struct thread *);
@@ -350,8 +356,14 @@ do {									\
 	KASSERT((__m == &blocked_lock || __m == (lock)),		\
 	    ("Thread %p lock %p does not match %p", td, __m, (lock)));	\
 } while (0)
+
+#define	TD_LOCKS_INC(td)	((td)->td_locks++)
+#define	TD_LOCKS_DEC(td)	((td)->td_locks--)
 #else
 #define	THREAD_LOCKPTR_ASSERT(td, lock)
+
+#define	TD_LOCKS_INC(td)
+#define	TD_LOCKS_DEC(td)
 #endif
 
 /*
@@ -402,6 +414,8 @@ do {									\
 #define	TDB_STOPATFORK	0x00000080 /* Stop at the return from fork (child
 				      only) */
 #define	TDB_CHILD	0x00000100 /* New child indicator for ptrace() */
+#define	TDB_BORN	0x00000200 /* New LWP indicator for ptrace() */
+#define	TDB_EXIT	0x00000400 /* Exiting LWP indicator for ptrace() */
 
 /*
  * "Private" flags kept in td_pflags:
@@ -436,7 +450,7 @@ do {									\
 #define	TDP_RESETSPUR	0x04000000 /* Reset spurious page fault history. */
 #define	TDP_NERRNO	0x08000000 /* Last errno is already in td_errno */
 #define	TDP_UIOHELD	0x10000000 /* Current uio has pages held in td_ma */
-#define	TDP_UNUSED29	0x20000000 /* --available-- */
+#define	TDP_FORKING	0x20000000 /* Thread is being created through fork() */
 #define	TDP_EXECVMSPC	0x40000000 /* Execve destroyed old vmspace */
 
 /*
@@ -567,6 +581,8 @@ struct proc {
 	struct itimers	*p_itimers;	/* (c) POSIX interval timers. */
 	struct procdesc	*p_procdesc;	/* (e) Process descriptor, if any. */
 	u_int		p_treeflag;	/* (e) P_TREE flags */
+	int		p_pendingexits; /* (c) Count of pending thread exits. */
+	struct filemon	*p_filemon;	/* (c) filemon-specific data. */
 /* End area that is zeroed on creation. */
 #define	p_endzero	p_magic
 
@@ -576,7 +592,6 @@ struct proc {
 	int		p_osrel;	/* (x) osreldate for the
 					       binary (from ELF note, if any) */
 	char		p_comm[MAXCOMLEN + 1];	/* (b) Process name. */
-	struct pgrp	*p_pgrp;	/* (c + e) Pointer to process group. */
 	struct sysentvec *p_sysent;	/* (b) Syscall dispatch info. */
 	struct pargs	*p_args;	/* (c) Process arguments. */
 	rlim_t		p_cpulimit;	/* (c) Current CPU limit in seconds. */
@@ -589,6 +604,7 @@ struct proc {
 	u_int		p_xsig;		/* (c) Stop/kill sig. */
 /* End area that is copied on creation. */
 #define	p_endcopy	p_xsig
+	struct pgrp	*p_pgrp;	/* (c + e) Pointer to process group. */
 	struct knlist	p_klist;	/* (c) Knotes attached to this proc. */
 	int		p_numthreads;	/* (c) Number of threads. */
 	struct mdproc	p_md;		/* Any machine-dependent fields. */
@@ -645,7 +661,7 @@ struct proc {
 /* These flags are kept in p_flag. */
 #define	P_ADVLOCK	0x00001	/* Process may hold a POSIX advisory lock. */
 #define	P_CONTROLT	0x00002	/* Has a controlling terminal. */
-#define	P_KTHREAD	0x00004	/* Kernel thread (*). */
+#define	P_KPROC		0x00004	/* Kernel process. */
 #define	P_FOLLOWFORK	0x00008	/* Attach parent debugger to children. */
 #define	P_PPWAIT	0x00010	/* Parent is waiting for child to exec/exit. */
 #define	P_PROFIL	0x00020	/* Has started profiling. */
@@ -685,6 +701,7 @@ struct proc {
 #define	P2_NOTRACE	0x00000002	/* No ptrace(2) attach or coredumps. */
 #define	P2_NOTRACE_EXEC 0x00000004	/* Keep P2_NOPTRACE on exec(2). */
 #define	P2_AST_SU	0x00000008	/* Handles SU ast for kthreads. */
+#define	P2_LWP_EVENTS	0x00000010	/* Report LWP events via ptrace(2). */
 
 /* Flags protected by proctree_lock, kept in p_treeflags. */
 #define	P_TREE_ORPHANED		0x00000001	/* Reparented, on orphan list */
@@ -814,13 +831,13 @@ extern pid_t pid_max;
 #define	_PHOLD(p) do {							\
 	PROC_LOCK_ASSERT((p), MA_OWNED);				\
 	KASSERT(!((p)->p_flag & P_WEXIT) || (p) == curproc,		\
-	    ("PHOLD of exiting process"));				\
+	    ("PHOLD of exiting process %p", p));			\
 	(p)->p_lock++;							\
 	if (((p)->p_flag & P_INMEM) == 0)				\
 		faultin((p));						\
 } while (0)
-#define PROC_ASSERT_HELD(p) do {					\
-	KASSERT((p)->p_lock > 0, ("process not held"));			\
+#define	PROC_ASSERT_HELD(p) do {					\
+	KASSERT((p)->p_lock > 0, ("process %p not held", p));		\
 } while (0)
 
 #define	PRELE(p) do {							\
@@ -835,8 +852,8 @@ extern pid_t pid_max;
 	if (((p)->p_flag & P_WEXIT) && (p)->p_lock == 0)		\
 		wakeup(&(p)->p_lock);					\
 } while (0)
-#define PROC_ASSERT_NOT_HELD(p) do {					\
-	KASSERT((p)->p_lock == 0, ("process held"));			\
+#define	PROC_ASSERT_NOT_HELD(p) do {					\
+	KASSERT((p)->p_lock == 0, ("process %p held", p));		\
 } while (0)
 
 #define	PROC_UPDATE_COW(p) do {						\
@@ -893,6 +910,16 @@ struct	proc *pfind_locked(pid_t pid);
 struct	pgrp *pgfind(pid_t);		/* Find process group by id. */
 struct	proc *zpfind(pid_t);		/* Find zombie process by id. */
 
+struct	fork_req {
+	int		fr_flags;
+	int		fr_pages;
+	int 		*fr_pidp;
+	struct proc 	**fr_procp;
+	int 		*fr_pd_fd;
+	int 		fr_pd_flags;
+	struct filecaps	*fr_pd_fcaps;
+};
+
 /*
  * pget() flags.
  */
@@ -916,13 +943,14 @@ int	enterpgrp(struct proc *p, pid_t pgid, struct pgrp *pgrp,
 int	enterthispgrp(struct proc *p, struct pgrp *pgrp);
 void	faultin(struct proc *p);
 void	fixjobc(struct proc *p, struct pgrp *pgrp, int entering);
-int	fork1(struct thread *, int, int, struct proc **, int *, int);
+int	fork1(struct thread *, struct fork_req *);
 void	fork_exit(void (*)(void *, struct trapframe *), void *,
 	    struct trapframe *);
 void	fork_return(struct thread *, struct trapframe *);
 int	inferior(struct proc *p);
 void	kern_yield(int);
 void 	kick_proc0(void);
+void	killjobc(void);
 int	leavepgrp(struct proc *p);
 int	maybe_preempt(struct thread *td);
 void	maybe_yield(void);
@@ -971,7 +999,6 @@ void	userret(struct thread *, struct trapframe *);
 
 void	cpu_exit(struct thread *);
 void	exit1(struct thread *, int, int) __dead2;
-struct syscall_args;
 int	cpu_fetch_syscall_args(struct thread *td, struct syscall_args *sa);
 void	cpu_fork(struct thread *, struct proc *, struct thread *, int);
 void	cpu_set_fork_handler(struct thread *, void (*)(void *), void *);
@@ -992,6 +1019,8 @@ void	thread_cow_get_proc(struct thread *newtd, struct proc *p);
 void	thread_cow_get(struct thread *newtd, struct thread *td);
 void	thread_cow_free(struct thread *td);
 void	thread_cow_update(struct thread *td);
+int	thread_create(struct thread *td, struct rtprio *rtp,
+	    int (*initialize_thread)(struct thread *, void *), void *thunk);
 void	thread_exit(void) __dead2;
 void	thread_free(struct thread *td);
 void	thread_link(struct thread *td, struct proc *p);

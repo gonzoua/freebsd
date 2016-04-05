@@ -50,7 +50,12 @@ public:
         eAllocationPolicyProcessOnly            ///< The intent is that this allocation exist only in the process.
     };
 
-    lldb::addr_t Malloc (size_t size, uint8_t alignment, uint32_t permissions, AllocationPolicy policy, Error &error);
+    lldb::addr_t Malloc (size_t size,
+                         uint8_t alignment,
+                         uint32_t permissions,
+                         AllocationPolicy policy,
+                         bool zero_memory,
+                         Error &error);
     void Leak (lldb::addr_t process_address, Error &error);
     void Free (lldb::addr_t process_address, Error &error);
     
@@ -60,7 +65,7 @@ public:
     void ReadMemory (uint8_t *bytes, lldb::addr_t process_address, size_t size, Error &error);
     void ReadScalarFromMemory (Scalar &scalar, lldb::addr_t process_address, size_t size, Error &error);
     void ReadPointerFromMemory (lldb::addr_t *address, lldb::addr_t process_address, Error &error);
-    
+    bool GetAllocSize(lldb::addr_t address, size_t &size);
     void GetMemoryData (DataExtractor &extractor, lldb::addr_t process_address, size_t size, Error &error);
     
     lldb::ByteOrder GetByteOrder();
@@ -69,14 +74,22 @@ public:
     // This function can return NULL.
     ExecutionContextScope *GetBestExecutionContextScope() const;
 
+    lldb::TargetSP
+    GetTarget ()
+    {
+        return m_target_wp.lock();
+    }
+
 protected:
     // This function should only be used if you know you are using the JIT.
     // Any other cases should use GetBestExecutionContextScope().
-    lldb::ProcessWP GetProcessWP ()
+
+    lldb::ProcessWP &
+    GetProcessWP ()
     {
         return m_process_wp;
     }
-    
+
 private:
     struct Allocation
     {
@@ -116,7 +129,7 @@ private:
     typedef std::map<lldb::addr_t, Allocation>  AllocationMap;
     AllocationMap                               m_allocations;
         
-    lldb::addr_t FindSpace (size_t size);
+    lldb::addr_t FindSpace (size_t size, bool zero_memory = false);
     bool ContainsHostOnlyAllocations ();
     AllocationMap::iterator FindAllocation (lldb::addr_t addr, size_t size);
 

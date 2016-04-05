@@ -1,4 +1,4 @@
-//===-- EmulateInstructionARM64.h ------------------------------------*- C++ -*-===//
+//===-- EmulateInstructionARM64.h -------------------------------*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -10,6 +10,10 @@
 #ifndef EmulateInstructionARM64_h_
 #define EmulateInstructionARM64_h_
 
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "lldb/Core/EmulateInstruction.h"
 #include "lldb/Core/Error.h"
 #include "lldb/Interpreter/OptionValue.h"
@@ -18,6 +22,14 @@
 class EmulateInstructionARM64 : public lldb_private::EmulateInstruction
 {
 public: 
+    EmulateInstructionARM64 (const lldb_private::ArchSpec &arch) :
+        EmulateInstruction (arch),
+        m_opcode_pstate (),
+        m_emulated_pstate (),
+        m_ignore_conditions (false)
+    {
+    }
+
     static void
     Initialize ();
     
@@ -50,61 +62,46 @@ public:
         return false;
     }
 
-    virtual lldb_private::ConstString
-    GetPluginName();
+    lldb_private::ConstString
+    GetPluginName() override;
 
-    virtual lldb_private::ConstString
-    GetShortPluginName()
-    {
-        return GetPluginNameStatic();
-    }
-
-    virtual uint32_t
-    GetPluginVersion()
+    uint32_t
+    GetPluginVersion() override
     {
         return 1;
     }
 
     bool
-    SetTargetTriple (const lldb_private::ArchSpec &arch);
+    SetTargetTriple(const lldb_private::ArchSpec &arch) override;
     
-    EmulateInstructionARM64 (const lldb_private::ArchSpec &arch) :
-        EmulateInstruction (arch),
-        m_opcode_pstate (),
-        m_emulated_pstate (),
-        m_ignore_conditions (false)
-    {
-    }
-
-    virtual bool
-    SupportsEmulatingInstructionsOfType (lldb_private::InstructionType inst_type)
+    bool
+    SupportsEmulatingInstructionsOfType(lldb_private::InstructionType inst_type) override
     {
         return SupportsEmulatingInstructionsOfTypeStatic (inst_type);
     }
 
-    virtual bool 
-    ReadInstruction ();
+    bool
+    ReadInstruction() override;
     
-    virtual bool
-    EvaluateInstruction (uint32_t evaluate_options);
+    bool
+    EvaluateInstruction(uint32_t evaluate_options) override;
     
-    virtual bool
-    TestEmulation (lldb_private::Stream *out_stream, 
-                   lldb_private::ArchSpec &arch, 
-                   lldb_private::OptionValueDictionary *test_data)
+    bool
+    TestEmulation(lldb_private::Stream *out_stream,
+                  lldb_private::ArchSpec &arch,
+                  lldb_private::OptionValueDictionary *test_data) override
     {
         return false;
     }
 
-    virtual bool
-    GetRegisterInfo (lldb::RegisterKind reg_kind,
-                     uint32_t reg_num, 
-                     lldb_private::RegisterInfo &reg_info);
+    bool
+    GetRegisterInfo(lldb::RegisterKind reg_kind,
+                    uint32_t reg_num,
+                    lldb_private::RegisterInfo &reg_info) override;
 
-    virtual bool
-    CreateFunctionEntryUnwind (lldb_private::UnwindPlan &unwind_plan);
+    bool
+    CreateFunctionEntryUnwind(lldb_private::UnwindPlan &unwind_plan) override;
 
-    
     typedef enum 
     {
         AddrMode_OFF, 
@@ -141,7 +138,6 @@ public:
         BitwiseOp_NOT, 
         BitwiseOp_RBIT
     } BitwiseOp;
-    
 
     typedef enum
     {
@@ -252,7 +248,6 @@ public:
     } ProcState;
 
 protected:
-
     typedef struct
     {
         uint32_t mask;
@@ -265,33 +260,42 @@ protected:
     static Opcode*
     GetOpcodeForInstruction (const uint32_t opcode);
 
-    bool
-    Emulate_addsub_imm (const uint32_t opcode);
-    
-//    bool
-//    Emulate_STP_Q_ldstpair_off (const uint32_t opcode);
-//    
-//    bool
-//    Emulate_STP_S_ldstpair_off (const uint32_t opcode);
-//    
-//    bool
-//    Emulate_STP_32_ldstpair_off (const uint32_t opcode);
-//    
-//    bool
-//    Emulate_STP_D_ldstpair_off (const uint32_t opcode);
-//    
-    bool
-    Emulate_ldstpair_off (const uint32_t opcode);
+    uint32_t
+    GetFramePointerRegisterNumber() const;
 
     bool
-    Emulate_ldstpair_pre (const uint32_t opcode);
-    
+    BranchTo (const Context &context, uint32_t N, lldb::addr_t target);
+
     bool
-    Emulate_ldstpair (const uint32_t opcode, AddrMode a_mode);
+    ConditionHolds (const uint32_t cond);
+
+    bool
+    UsingAArch32 ();
+
+    bool
+    EmulateADDSUBImm (const uint32_t opcode);
+
+    template <AddrMode a_mode> bool
+    EmulateLDPSTP (const uint32_t opcode);
+
+    template <AddrMode a_mode> bool
+    EmulateLDRSTRImm (const uint32_t opcode);
+
+    bool
+    EmulateB (const uint32_t opcode);
+
+    bool
+    EmulateBcond (const uint32_t opcode);
+
+    bool
+    EmulateCBZ (const uint32_t opcode);
+
+    bool
+    EmulateTBZ (const uint32_t opcode);
 
     ProcState m_opcode_pstate;
     ProcState m_emulated_pstate; // This can get updated by the opcode.
     bool m_ignore_conditions;
 };
 
-#endif  // EmulateInstructionARM64_h_
+#endif // EmulateInstructionARM64_h_

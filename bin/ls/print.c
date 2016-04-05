@@ -47,12 +47,14 @@ __FBSDID("$FreeBSD$");
 #include <fts.h>
 #include <langinfo.h>
 #include <libutil.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <wchar.h>
 #ifdef COLORLS
 #include <ctype.h>
 #include <termcap.h>
@@ -105,6 +107,9 @@ static struct {
 } colors[C_NUMCOLORS];
 #endif
 
+static size_t padding_for_month[12];
+static size_t month_max_size = 0;
+
 void
 printscol(const DISPLAY *dp)
 {
@@ -136,6 +141,70 @@ printname(const char *field, const char *name)
 	rc = xo_emit(fmt, s);
 	free(s);
 	return rc;
+}
+
+static const char *
+get_abmon(int mon)
+{
+
+	switch (mon) {
+	case 0: return (nl_langinfo(ABMON_1));
+	case 1: return (nl_langinfo(ABMON_2));
+	case 2: return (nl_langinfo(ABMON_3));
+	case 3: return (nl_langinfo(ABMON_4));
+	case 4: return (nl_langinfo(ABMON_5));
+	case 5: return (nl_langinfo(ABMON_6));
+	case 6: return (nl_langinfo(ABMON_7));
+	case 7: return (nl_langinfo(ABMON_8));
+	case 8: return (nl_langinfo(ABMON_9));
+	case 9: return (nl_langinfo(ABMON_10));
+	case 10: return (nl_langinfo(ABMON_11));
+	case 11: return (nl_langinfo(ABMON_12));
+	}
+
+	/* should never happen */
+	abort();
+}
+
+static size_t
+mbswidth(const char *month)
+{
+	wchar_t wc;
+	size_t width, donelen, clen, w;
+
+	width = donelen = 0;
+	while ((clen = mbrtowc(&wc, month + donelen, MB_LEN_MAX, NULL)) != 0) {
+		if (clen == (size_t)-1 || clen == (size_t)-2)
+			return (-1);
+		donelen += clen;
+		if ((w = wcwidth(wc)) == (size_t)-1)
+			return (-1);
+		width += w;
+	}
+
+	return (width);
+}
+
+static void
+compute_abbreviated_month_size(void)
+{
+	int i;
+	size_t width;
+	size_t months_width[12];
+
+	for (i = 0; i < 12; i++) {
+		width = mbswidth(get_abmon(i));
+		if (width == (size_t)-1) {
+			month_max_size = -1;
+			return;
+		}
+		months_width[i] = width;
+		if (width > month_max_size)
+			month_max_size = width;
+	}
+
+	for (i = 0; i < 12; i++)
+		padding_for_month[i] = month_max_size - months_width[i];
 }
 
 /*
@@ -171,7 +240,7 @@ printlong(const DISPLAY *dp)
 
 	xo_open_list("entry");
 	for (p = dp->list; p; p = p->fts_link) {
-		char *name;
+		char *name, *type;
 		if (IS_NOPRINT(p))
 			continue;
 		xo_open_instance("entry");
@@ -180,22 +249,46 @@ printlong(const DISPLAY *dp)
 		if (name)
 		    xo_emit("{ke:name/%hs}", name);
 		if (f_inode)
-			xo_emit("{:inode/%*ju} ",
+			xo_emit("{t:inode/%*ju} ",
 			    dp->s_inode, (uintmax_t)sp->st_ino);
 		if (f_size)
-			xo_emit("{:blocks/%*jd} ",
+			xo_emit("{t:blocks/%*jd} ",
 			    dp->s_block, howmany(sp->st_blocks, blocksize));
 		strmode(sp->st_mode, buf);
 		aclmode(buf, p);
 		np = p->fts_pointer;
 		xo_attr("value", "%03o", (int) sp->st_mode & ALLPERMS);
-		xo_emit("{t:mode/%s} {:links/%*u} {:user/%-*s}  {:group/%-*s}  ",
-			buf, dp->s_nlink, sp->st_nlink,
-			dp->s_user, np->user, dp->s_group, np->group);
+		if (f_numericonly) {
+			xo_emit("{t:mode/%s}{e:mode_octal/%03o} {t:links/%*u} {td:user/%-*s}{e:user/%ju}  {td:group/%-*s}{e:group/%ju}  ",
+				buf, (int) sp->st_mode & ALLPERMS, dp->s_nlink, sp->st_nlink,
+				dp->s_user, np->user, (uintmax_t)sp->st_uid, dp->s_group, np->group, (uintmax_t)sp->st_gid);
+		} else {
+			xo_emit("{t:mode/%s}{e:mode_octal/%03o} {t:links/%*u} {t:user/%-*s}  {t:group/%-*s}  ",
+				buf, (int) sp->st_mode & ALLPERMS, dp->s_nlink, sp->st_nlink,
+				dp->s_user, np->user, dp->s_group, np->group);
+		}
+		if (S_ISBLK(sp->st_mode))
+			asprintf(&type, "block");
+		if (S_ISCHR(sp->st_mode))
+			asprintf(&type, "character");
+		if (S_ISDIR(sp->st_mode))
+			asprintf(&type, "directory");
+		if (S_ISFIFO(sp->st_mode))
+			asprintf(&type, "fifo");
+		if (S_ISLNK(sp->st_mode))
+			asprintf(&type, "symlink");
+		if (S_ISREG(sp->st_mode))
+			asprintf(&type, "regular");
+		if (S_ISSOCK(sp->st_mode))
+			asprintf(&type, "socket");
+		if (S_ISWHT(sp->st_mode))
+			asprintf(&type, "whiteout");
+		xo_emit("{e:type/%s}", type);
+		free(type);
 		if (f_flags)
 			xo_emit("{:flags/%-*s} ", dp->s_flags, np->flags);
 		if (f_label)
-			xo_emit("{:label/%-*s} ", dp->s_label, np->label);
+			xo_emit("{t:label/%-*s} ", dp->s_label, np->label);
 		if (S_ISCHR(sp->st_mode) || S_ISBLK(sp->st_mode))
 			printdev(dp->s_size, sp->st_rdev);
 		else
@@ -238,6 +331,7 @@ printstream(const DISPLAY *dp)
 	FTSENT *p;
 	int chcnt;
 
+	xo_open_list("entry");
 	for (p = dp->list, chcnt = 0; p; p = p->fts_link) {
 		if (p->fts_number == NO_PRINT)
 			continue;
@@ -247,12 +341,15 @@ printstream(const DISPLAY *dp)
 			xo_emit("\n");
 			chcnt = 0;
 		}
+		xo_open_instance("file");
 		chcnt += printaname(p, dp->s_inode, dp->s_block);
+		xo_close_instance("file");
 		if (p->fts_link) {
 			xo_emit(", ");
 			chcnt += 2;
 		}
 	}
+	xo_close_list("entry");
 	if (chcnt)
 		xo_emit("\n");
 }
@@ -369,10 +466,10 @@ printaname(const FTSENT *p, u_long inodefield, u_long sizefield)
 	sp = p->fts_statp;
 	chcnt = 0;
 	if (f_inode)
-		chcnt += xo_emit("{:inode/%*ju} ",
+		chcnt += xo_emit("{t:inode/%*ju} ",
 		    (int)inodefield, (uintmax_t)sp->st_ino);
 	if (f_size)
-		chcnt += xo_emit("{:size/%*jd} ",
+		chcnt += xo_emit("{t:size/%*jd} ",
 		    (int)sizefield, howmany(sp->st_blocks, blocksize));
 #ifdef COLORLS
 	if (f_color)
@@ -395,6 +492,31 @@ static void
 printdev(size_t width, dev_t dev)
 {
 	xo_emit("{:device/%#*jx} ", (u_int)width, (uintmax_t)dev);
+}
+
+static size_t
+ls_strftime(char *str, size_t len, const char *fmt, const struct tm *tm)
+{
+	char *posb, nfmt[BUFSIZ];
+	const char *format = fmt;
+	size_t ret;
+
+	if ((posb = strstr(fmt, "%b")) != NULL) {
+		if (month_max_size == 0) {
+			compute_abbreviated_month_size();
+		}
+		if (month_max_size > 0) {
+			snprintf(nfmt, sizeof(nfmt),  "%.*s%s%*s%s",
+			    (int)(posb - fmt), fmt,
+			    get_abmon(tm->tm_mon),
+			    (int)padding_for_month[tm->tm_mon],
+			    "",
+			    posb + 2);
+			format = nfmt;
+		}
+	}
+	ret = strftime(str, len, format, tm);
+	return (ret);
 }
 
 static void
@@ -423,11 +545,13 @@ printtime(const char *field, time_t ftime)
 	else
 		/* mmm dd  yyyy || dd mmm  yyyy */
 		format = d_first ? "%e %b  %Y" : "%b %e  %Y";
-	strftime(longstring, sizeof(longstring), format, localtime(&ftime));
+	ls_strftime(longstring, sizeof(longstring), format, localtime(&ftime));
 
-	snprintf(fmt, sizeof(fmt), "{:%s/%%hs} ", field);
+	snprintf(fmt, sizeof(fmt), "{d:%s/%%hs} ", field);
 	xo_attr("value", "%ld", (long) ftime);
 	xo_emit(fmt, longstring);
+	snprintf(fmt, sizeof(fmt), "{en:%s/%%ld}", field);
+	xo_emit(fmt, (long) ftime);
 }
 
 static int
@@ -456,7 +580,7 @@ printtype(u_int mode)
 		xo_emit("{D:=}{e:type/socket}");
 		return (1);
 	case S_IFWHT:
-		xo_emit("{D:%}{e:type/whiteout}");
+		xo_emit("{D:%%}{e:type/whiteout}");
 		return (1);
 	default:
 		break;

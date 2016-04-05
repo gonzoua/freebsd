@@ -37,6 +37,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/gpio.h>
 
 #include <machine/bus.h>
+#include <machine/intr.h>
 
 #include <dev/fdt/fdt_common.h>
 #include <dev/ofw/ofw_bus.h>
@@ -68,7 +69,7 @@ omap4_gpio_probe(device_t dev)
 	if (ofw_bus_search_compatible(dev, compat_data)->ocd_data == 0)
 		return (ENXIO);
 
-	device_set_desc(dev, "Ti OMAP4 General Purpose I/O (GPIO)");
+	device_set_desc(dev, "TI OMAP4 General Purpose I/O (GPIO)");
 
 	return (0);
 }

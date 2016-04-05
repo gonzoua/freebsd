@@ -51,6 +51,7 @@ __FBSDID("$FreeBSD$");
 #include <vm/vm_extern.h>
 #include <vm/vm_kern.h>
 
+#include <machine/debug_monitor.h>
 #include <machine/intr.h>
 #include <machine/smp.h>
 #ifdef VFP
@@ -79,6 +80,12 @@ static device_identify_t arm64_cpu_identify;
 static device_probe_t arm64_cpu_probe;
 static device_attach_t arm64_cpu_attach;
 
+static void ipi_ast(void *);
+static void ipi_hardclock(void *);
+static void ipi_preempt(void *);
+static void ipi_rendezvous(void *);
+static void ipi_stop(void *);
+
 static int ipi_handler(void *arg);
 
 struct mtx ap_boot_mtx;
@@ -94,8 +101,6 @@ void init_secondary(uint64_t);
 
 uint8_t secondary_stacks[MAXCPU - 1][PAGE_SIZE * KSTACK_PAGES] __aligned(16);
 
-/* # of Applications processors */
-volatile int mp_naps;
 /* Set to 1 once we're ready to let the APs out of the pen. */
 volatile int aps_ready = 0;
 
@@ -139,6 +144,7 @@ arm64_cpu_probe(device_t dev)
 	if (cpuid >= MAXCPU || cpuid > mp_maxid)
 		return (EINVAL);
 
+	device_quiet(dev);
 	return (0);
 }
 
@@ -160,10 +166,12 @@ arm64_cpu_attach(device_t dev)
 	if (reg == NULL)
 		return (EINVAL);
 
-	device_printf(dev, "Found register:");
-	for (i = 0; i < reg_size; i++)
-		printf(" %x", reg[i]);
-	printf("\n");
+	if (bootverbose) {
+		device_printf(dev, "register <");
+		for (i = 0; i < reg_size; i++)
+			printf("%s%x", (i == 0) ? "" : " ", reg[i]);
+		printf(">\n");
+	}
 
 	/* Set the device to start it later */
 	cpu_list[cpuid] = dev;
@@ -174,10 +182,10 @@ arm64_cpu_attach(device_t dev)
 static void
 release_aps(void *dummy __unused)
 {
-	int i;
+	int cpu, i;
 
 	/* Setup the IPI handler */
-	for (i = 0; i < COUNT_IPI; i++)
+	for (i = 0; i < INTR_IPI_COUNT; i++)
 		arm_setup_ipihandler(ipi_handler, i);
 
 	atomic_store_rel_int(&aps_ready, 1);
@@ -187,12 +195,18 @@ release_aps(void *dummy __unused)
 	printf("Release APs\n");
 
 	for (i = 0; i < 2000; i++) {
-		if (smp_started)
+		if (smp_started) {
+			for (cpu = 0; cpu <= mp_maxid; cpu++) {
+				if (CPU_ABSENT(cpu))
+					continue;
+				print_cpu_features(cpu);
+			}
 			return;
+		}
 		DELAY(1000);
 	}
 
-	printf("AP's not started\n");
+	printf("APs not started\n");
 }
 SYSINIT(start_aps, SI_SUB_SMP, SI_ORDER_FIRST, release_aps, NULL);
 
@@ -210,16 +224,6 @@ init_secondary(uint64_t cpu)
 	__asm __volatile(
 	    "mov x18, %0 \n"
 	    "msr tpidr_el1, %0" :: "r"(pcpup));
-
-	/*
-	 * pcpu_init() updates queue, so it should not be executed in parallel
-	 * on several cores
-	 */
-	while(mp_naps < (cpu - 1))
-		;
-
-	/* Signal our startup to BSP */
-	atomic_add_rel_32(&mp_naps, 1);
 
 	/* Spin until the BSP releases the APs */
 	while (!aps_ready)
@@ -240,7 +244,7 @@ init_secondary(uint64_t cpu)
 	/* Configure the interrupt controller */
 	arm_init_secondary();
 
-	for (i = 0; i < COUNT_IPI; i++)
+	for (i = 0; i < INTR_IPI_COUNT; i++)
 		arm_unmask_ipi(i);
 
 	/* Start per-CPU event timers. */
@@ -249,6 +253,8 @@ init_secondary(uint64_t cpu)
 #ifdef VFP
 	vfp_init();
 #endif
+
+	dbg_monitor_init();
 
 	/* Enable interrupts */
 	intr_enable();
@@ -271,13 +277,65 @@ init_secondary(uint64_t cpu)
 	/* NOTREACHED */
 }
 
+static void
+ipi_ast(void *dummy __unused)
+{
+
+	CTR0(KTR_SMP, "IPI_AST");
+}
+
+static void
+ipi_hardclock(void *dummy __unused)
+{
+
+	CTR1(KTR_SMP, "%s: IPI_HARDCLOCK", __func__);
+	hardclockintr();
+}
+
+static void
+ipi_preempt(void *dummy __unused)
+{
+	CTR1(KTR_SMP, "%s: IPI_PREEMPT", __func__);
+	sched_preempt(curthread);
+}
+
+static void
+ipi_rendezvous(void *dummy __unused)
+{
+
+	CTR0(KTR_SMP, "IPI_RENDEZVOUS");
+	smp_rendezvous_action();
+}
+
+static void
+ipi_stop(void *dummy __unused)
+{
+	u_int cpu;
+
+	CTR0(KTR_SMP, "IPI_STOP");
+
+	cpu = PCPU_GET(cpuid);
+	savectx(&stoppcbs[cpu]);
+
+	/* Indicate we are stopped */
+	CPU_SET_ATOMIC(cpu, &stopped_cpus);
+
+	/* Wait for restart */
+	while (!CPU_ISSET(cpu, &started_cpus))
+		cpu_spinwait();
+
+	CPU_CLR_ATOMIC(cpu, &started_cpus);
+	CPU_CLR_ATOMIC(cpu, &stopped_cpus);
+	CTR0(KTR_SMP, "IPI_STOP (restart)");
+}
+
 static int
 ipi_handler(void *arg)
 {
 	u_int cpu, ipi;
 
 	arg = (void *)((uintptr_t)arg & ~(1 << 16));
-	KASSERT((uintptr_t)arg < COUNT_IPI,
+	KASSERT((uintptr_t)arg < INTR_IPI_COUNT,
 	    ("Invalid IPI %ju", (uintptr_t)arg));
 
 	cpu = PCPU_GET(cpuid);
@@ -285,35 +343,20 @@ ipi_handler(void *arg)
 
 	switch(ipi) {
 	case IPI_AST:
-		CTR0(KTR_SMP, "IPI_AST");
+		ipi_ast(NULL);
 		break;
 	case IPI_PREEMPT:
-		CTR1(KTR_SMP, "%s: IPI_PREEMPT", __func__);
-		sched_preempt(curthread);
+		ipi_preempt(NULL);
 		break;
 	case IPI_RENDEZVOUS:
-		CTR0(KTR_SMP, "IPI_RENDEZVOUS");
-		smp_rendezvous_action();
+		ipi_rendezvous(NULL);
 		break;
 	case IPI_STOP:
 	case IPI_STOP_HARD:
-		CTR0(KTR_SMP, (ipi == IPI_STOP) ? "IPI_STOP" : "IPI_STOP_HARD");
-		savectx(&stoppcbs[cpu]);
-
-		/* Indicate we are stopped */
-		CPU_SET_ATOMIC(cpu, &stopped_cpus);
-
-		/* Wait for restart */
-		while (!CPU_ISSET(cpu, &started_cpus))
-			cpu_spinwait();
-
-		CPU_CLR_ATOMIC(cpu, &started_cpus);
-		CPU_CLR_ATOMIC(cpu, &stopped_cpus);
-		CTR0(KTR_SMP, "IPI_STOP (restart)");
+		ipi_stop(NULL);
 		break;
 	case IPI_HARDCLOCK:
-		CTR1(KTR_SMP, "%s: IPI_HARDCLOCK", __func__);
-		hardclockintr();
+		ipi_hardclock(NULL);
 		break;
 	default:
 		panic("Unknown IPI %#0x on cpu %d", ipi, curcpu);
@@ -364,7 +407,6 @@ cpu_init_fdt(u_int id, phandle_t node, u_int addr_size, pcell_t *reg)
 	if (id == 0)
 		return (1);
 
-	CPU_SET(id, &all_cpus);
 
 	pcpup = &__pcpu[id];
 	pcpu_init(pcpup, id, sizeof(struct pcpu));
@@ -383,8 +425,17 @@ cpu_init_fdt(u_int id, phandle_t node, u_int addr_size, pcell_t *reg)
 	pa = pmap_extract(kernel_pmap, (vm_offset_t)mpentry);
 
 	err = psci_cpu_on(target_cpu, pa, id);
-	if (err != PSCI_RETVAL_SUCCESS)
-		printf("Failed to start CPU %u\n", id);
+	if (err != PSCI_RETVAL_SUCCESS) {
+		/* Panic here if INVARIANTS are enabled */
+		KASSERT(0, ("Failed to start CPU %u (%lx)\n", id, target_cpu));
+
+		pcpu_destroy(pcpup);
+		kmem_free(kernel_arena, (vm_offset_t)dpcpu[id - 1], DPCPU_SIZE);
+		dpcpu[id - 1] = NULL;
+		/* Notify the user that the CPU failed to start */
+		printf("Failed to start CPU %u (%lx)\n", id, target_cpu);
+	} else
+		CPU_SET(id, &all_cpus);
 
 	return (1);
 }

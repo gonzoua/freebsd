@@ -96,8 +96,6 @@ ti_scm_probe(device_t dev)
 		return (ENXIO);
 
 	if (ti_scm_sc) {
-		printf("%s: multiple SCM modules in device tree data, ignoring\n",
-		    __func__);
 		return (EEXIST);
 	}
 
@@ -172,4 +170,5 @@ static driver_t ti_scm_driver = {
 
 static devclass_t ti_scm_devclass;
 
-DRIVER_MODULE(ti_scm, simplebus, ti_scm_driver, ti_scm_devclass, 0, 0);
+EARLY_DRIVER_MODULE(ti_scm, simplebus, ti_scm_driver, ti_scm_devclass, 0, 0,
+    BUS_PASS_BUS + BUS_PASS_ORDER_MIDDLE);

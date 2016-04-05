@@ -31,7 +31,7 @@ static bool f64AssignAPCS(unsigned &ValNo, MVT &ValVT, MVT &LocVT,
   static const MCPhysReg RegList[] = { ARM::R0, ARM::R1, ARM::R2, ARM::R3 };
 
   // Try to get the first register.
-  if (unsigned Reg = State.AllocateReg(RegList, 4))
+  if (unsigned Reg = State.AllocateReg(RegList))
     State.addLoc(CCValAssign::getCustomReg(ValNo, ValVT, Reg, LocVT, LocInfo));
   else {
     // For the 2nd half of a v2f64, do not fail.
@@ -46,7 +46,7 @@ static bool f64AssignAPCS(unsigned &ValNo, MVT &ValVT, MVT &LocVT,
   }
 
   // Try to get the second register.
-  if (unsigned Reg = State.AllocateReg(RegList, 4))
+  if (unsigned Reg = State.AllocateReg(RegList))
     State.addLoc(CCValAssign::getCustomReg(ValNo, ValVT, Reg, LocVT, LocInfo));
   else
     State.addLoc(CCValAssign::getCustomMem(ValNo, ValVT,
@@ -76,11 +76,11 @@ static bool f64AssignAAPCS(unsigned &ValNo, MVT &ValVT, MVT &LocVT,
   static const MCPhysReg ShadowRegList[] = { ARM::R0, ARM::R1 };
   static const MCPhysReg GPRArgRegs[] = { ARM::R0, ARM::R1, ARM::R2, ARM::R3 };
 
-  unsigned Reg = State.AllocateReg(HiRegList, ShadowRegList, 2);
+  unsigned Reg = State.AllocateReg(HiRegList, ShadowRegList);
   if (Reg == 0) {
 
     // If we had R3 unallocated only, now we still must to waste it.
-    Reg = State.AllocateReg(GPRArgRegs, 4);
+    Reg = State.AllocateReg(GPRArgRegs);
     assert((!Reg || Reg == ARM::R3) && "Wrong GPRs usage for f64");
 
     // For the 2nd half of a v2f64, do not just fail.
@@ -126,7 +126,7 @@ static bool f64RetAssign(unsigned &ValNo, MVT &ValVT, MVT &LocVT,
   static const MCPhysReg HiRegList[] = { ARM::R0, ARM::R2 };
   static const MCPhysReg LoRegList[] = { ARM::R1, ARM::R3 };
 
-  unsigned Reg = State.AllocateReg(HiRegList, LoRegList, 2);
+  unsigned Reg = State.AllocateReg(HiRegList, LoRegList);
   if (Reg == 0)
     return false; // we didn't handle it
 
@@ -160,15 +160,15 @@ static bool RetCC_ARM_AAPCS_Custom_f64(unsigned &ValNo, MVT &ValVT, MVT &LocVT,
                                    State);
 }
 
-static const uint16_t RRegList[] = { ARM::R0,  ARM::R1,  ARM::R2,  ARM::R3 };
+static const MCPhysReg RRegList[] = { ARM::R0,  ARM::R1,  ARM::R2,  ARM::R3 };
 
-static const uint16_t SRegList[] = { ARM::S0,  ARM::S1,  ARM::S2,  ARM::S3,
-                                     ARM::S4,  ARM::S5,  ARM::S6,  ARM::S7,
-                                     ARM::S8,  ARM::S9,  ARM::S10, ARM::S11,
-                                     ARM::S12, ARM::S13, ARM::S14,  ARM::S15 };
-static const uint16_t DRegList[] = { ARM::D0, ARM::D1, ARM::D2, ARM::D3,
-                                     ARM::D4, ARM::D5, ARM::D6, ARM::D7 };
-static const uint16_t QRegList[] = { ARM::Q0, ARM::Q1, ARM::Q2, ARM::Q3 };
+static const MCPhysReg SRegList[] = { ARM::S0,  ARM::S1,  ARM::S2,  ARM::S3,
+                                      ARM::S4,  ARM::S5,  ARM::S6,  ARM::S7,
+                                      ARM::S8,  ARM::S9,  ARM::S10, ARM::S11,
+                                      ARM::S12, ARM::S13, ARM::S14,  ARM::S15 };
+static const MCPhysReg DRegList[] = { ARM::D0, ARM::D1, ARM::D2, ARM::D3,
+                                      ARM::D4, ARM::D5, ARM::D6, ARM::D7 };
+static const MCPhysReg QRegList[] = { ARM::Q0, ARM::Q1, ARM::Q2, ARM::Q3 };
 
 
 // Allocate part of an AAPCS HFA or HVA. We assume that each member of the HA
@@ -199,13 +199,15 @@ static bool CC_ARM_AAPCS_Custom_Aggregate(unsigned &ValNo, MVT &ValVT,
 
   // Try to allocate a contiguous block of registers, each of the correct
   // size to hold one member.
-  unsigned Align = std::min(PendingMembers[0].getExtraInfo(), 8U);
+  auto &DL = State.getMachineFunction().getDataLayout();
+  unsigned StackAlign = DL.getStackAlignment();
+  unsigned Align = std::min(PendingMembers[0].getExtraInfo(), StackAlign);
 
-  ArrayRef<uint16_t> RegList;
+  ArrayRef<MCPhysReg> RegList;
   switch (LocVT.SimpleTy) {
   case MVT::i32: {
     RegList = RRegList;
-    unsigned RegIdx = State.getFirstUnallocated(RegList.data(), RegList.size());
+    unsigned RegIdx = State.getFirstUnallocated(RegList);
 
     // First consume all registers that would give an unaligned object. Whether
     // we go on stack or in regs, no-one will be using them in future.
@@ -246,7 +248,7 @@ static bool CC_ARM_AAPCS_Custom_Aggregate(unsigned &ValNo, MVT &ValVT,
   if (LocVT == MVT::i32 && State.getNextStackOffset() == 0) {
     // If nothing else has used the stack until this point, a non-HFA aggregate
     // can be split between regs and stack.
-    unsigned RegIdx = State.getFirstUnallocated(RegList.data(), RegList.size());
+    unsigned RegIdx = State.getFirstUnallocated(RegList);
     for (auto &It : PendingMembers) {
       if (RegIdx >= RegList.size())
         It.convertToMem(State.AllocateStack(Size, Size));

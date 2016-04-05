@@ -47,9 +47,13 @@ __FBSDID("$FreeBSD$");
 #include <sys/cpuset.h>
 #include <sys/lock.h>
 #include <sys/mutex.h>
+
 #include <machine/bus.h>
 #include <machine/intr.h>
 #include <machine/smp.h>
+
+#include <vm/vm.h>
+#include <vm/pmap.h>
 
 #include <arm64/arm64/gic.h>
 
@@ -71,6 +75,7 @@ __FBSDID("$FreeBSD$");
 #define GICD_ITARGETSR(n)	(0x0800 + ((n) * 4))	/* v1 ICDIPTR */
 #define GICD_ICFGR(n)		(0x0C00 + ((n) * 4))	/* v1 ICDICFR */
 #define GICD_SGIR(n)		(0x0F00 + ((n) * 4))	/* v1 ICDSGIR */
+#define  GICD_SGI_TARGET_SHIFT	16
 
 /* CPU Registers */
 #define GICC_CTLR		0x0000			/* v1 ICCICR */
@@ -104,6 +109,8 @@ static struct resource_spec arm_gic_spec[] = {
 	{ -1, 0 }
 };
 
+static u_int arm_gic_map[MAXCPU];
+
 static struct arm_gic_softc *arm_gic_sc = NULL;
 
 #define	gic_c_read_4(_sc, _reg)		\
@@ -120,12 +127,38 @@ static pic_eoi_t gic_eoi;
 static pic_mask_t gic_mask_irq;
 static pic_unmask_t gic_unmask_irq;
 
+static uint8_t
+gic_cpu_mask(struct arm_gic_softc *sc)
+{
+	uint32_t mask;
+	int i;
+
+	/* Read the current cpuid mask by reading ITARGETSR{0..7} */
+	for (i = 0; i < 8; i++) {
+		mask = gic_d_read_4(sc, GICD_ITARGETSR(i));
+		if (mask != 0)
+			break;
+	}
+	/* No mask found, assume we are on CPU interface 0 */
+	if (mask == 0)
+		return (1);
+
+	/* Collect the mask in the lower byte */
+	mask |= mask >> 16;
+	mask |= mask >> 8;
+
+	return (mask);
+}
+
 #ifdef SMP
 static void
 gic_init_secondary(device_t dev)
 {
 	struct arm_gic_softc *sc = device_get_softc(dev);
 	int i;
+
+	/* Set the mask so we can find this CPU to send it IPIs */
+	arm_gic_map[PCPU_GET(cpuid)] = gic_cpu_mask(sc);
 
 	for (i = 0; i < sc->nirqs; i += 4)
 		gic_d_write_4(sc, GICD_IPRIORITYR(i >> 2), 0);
@@ -153,12 +186,12 @@ gic_init_secondary(device_t dev)
 }
 #endif
 
-static int
+int
 arm_gic_attach(device_t dev)
 {
 	struct		arm_gic_softc *sc;
 	int		i;
-	uint32_t	icciidr;
+	uint32_t	icciidr, mask;
 
 	if (arm_gic_sc)
 		return (ENXIO);
@@ -208,10 +241,19 @@ arm_gic_attach(device_t dev)
 		gic_d_write_4(sc, GICD_ICENABLER(i >> 5), 0xFFFFFFFF);
 	}
 
+	/* Find the current cpu mask */
+	mask = gic_cpu_mask(sc);
+	/* Set the mask so we can find this CPU to send it IPIs */
+	arm_gic_map[PCPU_GET(cpuid)] = mask;
+	/* Set all four targets to this cpu */
+	mask |= mask << 8;
+	mask |= mask << 16;
+
 	for (i = 0; i < sc->nirqs; i += 4) {
 		gic_d_write_4(sc, GICD_IPRIORITYR(i >> 2), 0);
-		gic_d_write_4(sc, GICD_ITARGETSR(i >> 2),
-		    1 << 0 | 1 << 8 | 1 << 16 | 1 << 24);
+		if (i > 32) {
+			gic_d_write_4(sc, GICD_ITARGETSR(i >> 2), mask);
+		}
 	}
 
 	/* Set all the interrupts to be in Group 0 (secure) */
@@ -295,32 +337,9 @@ gic_ipi_send(device_t dev, cpuset_t cpus, u_int ipi)
 
 	for (i = 0; i < MAXCPU; i++)
 		if (CPU_ISSET(i, &cpus))
-			val |= 1 << (16 + i);
+			val |= arm_gic_map[i] << GICD_SGI_TARGET_SHIFT;
 
 	gic_d_write_4(sc, GICD_SGIR(0), val | ipi);
-}
-
-static int
-arm_gic_ipi_read(device_t dev, int i)
-{
-
-	if (i != -1) {
-		/*
-		 * The intr code will automagically give the frame pointer
-		 * if the interrupt argument is 0.
-		 */
-		if ((unsigned int)i > 16)
-			return (0);
-		return (i);
-	}
-
-	return (0x3ff);
-}
-
-static void
-arm_gic_ipi_clear(device_t dev, int ipi)
-{
-	/* no-op */
 }
 #endif
 
@@ -344,3 +363,129 @@ static device_method_t arm_gic_methods[] = {
 
 DEFINE_CLASS_0(gic, arm_gic_driver, arm_gic_methods,
     sizeof(struct arm_gic_softc));
+
+#define	GICV2M_MSI_TYPER	0x008
+#define	 MSI_TYPER_SPI_BASE(x)	(((x) >> 16) & 0x3ff)
+#define	 MSI_TYPER_SPI_COUNT(x)	(((x) >> 0) & 0x3ff)
+#define	GICv2M_MSI_SETSPI_NS	0x040
+#define	GICV2M_MSI_IIDR		0xFCC
+
+static int
+gicv2m_attach(device_t dev)
+{
+	struct gicv2m_softc *sc;
+	uint32_t typer;
+	int rid;
+
+	sc = device_get_softc(dev);
+
+	rid = 0;
+	sc->sc_mem = bus_alloc_resource_any(dev, SYS_RES_MEMORY, &rid, RF_ACTIVE);
+	if (sc->sc_mem == NULL) {
+		device_printf(dev, "Unable to allocate resources\n");
+		return (ENXIO);
+	}
+
+	typer = bus_read_4(sc->sc_mem, GICV2M_MSI_TYPER);
+	sc->sc_spi_start = MSI_TYPER_SPI_BASE(typer);
+	sc->sc_spi_count = MSI_TYPER_SPI_COUNT(typer);
+
+	device_printf(dev, "using spi %u to %u\n", sc->sc_spi_start,
+	    sc->sc_spi_start + sc->sc_spi_count - 1);
+
+	mtx_init(&sc->sc_mutex, "GICv2m lock", "", MTX_DEF);
+
+	arm_register_msi_pic(dev);
+
+	return (0);
+}
+
+static int
+gicv2m_alloc_msix(device_t dev, device_t pci_dev, int *pirq)
+{
+	struct arm_gic_softc *psc;
+	struct gicv2m_softc *sc;
+	uint32_t reg;
+	int irq;
+
+	psc = device_get_softc(device_get_parent(dev));
+	sc = device_get_softc(dev);
+
+	mtx_lock(&sc->sc_mutex);
+	/* Find an unused interrupt */
+	KASSERT(sc->sc_spi_offset < sc->sc_spi_count, ("No free SPIs"));
+
+	irq = sc->sc_spi_start + sc->sc_spi_offset;
+	sc->sc_spi_offset++;
+
+	/* Interrupts need to be edge triggered, set this */
+	reg = gic_d_read_4(psc, GICD_ICFGR(irq >> 4));
+	reg |= (GICD_ICFGR_TRIG_EDGE | GICD_ICFGR_POL_HIGH) <<
+	    ((irq & 0xf) * 2);
+	gic_d_write_4(psc, GICD_ICFGR(irq >> 4), reg);
+
+	*pirq = irq;
+	mtx_unlock(&sc->sc_mutex);
+
+	return (0);
+}
+
+static int
+gicv2m_alloc_msi(device_t dev, device_t pci_dev, int count, int *irqs)
+{
+	struct arm_gic_softc *psc;
+	struct gicv2m_softc *sc;
+	uint32_t reg;
+	int i, irq;
+
+	psc = device_get_softc(device_get_parent(dev));
+	sc = device_get_softc(dev);
+
+	mtx_lock(&sc->sc_mutex);
+	KASSERT(sc->sc_spi_offset + count <= sc->sc_spi_count,
+	    ("No free SPIs for %d MSI interrupts", count));
+
+	/* Find an unused interrupt */
+	for (i = 0; i < count; i++) {
+		irq = sc->sc_spi_start + sc->sc_spi_offset;
+		sc->sc_spi_offset++;
+
+		/* Interrupts need to be edge triggered, set this */
+		reg = gic_d_read_4(psc, GICD_ICFGR(irq >> 4));
+		reg |= (GICD_ICFGR_TRIG_EDGE | GICD_ICFGR_POL_HIGH) <<
+		    ((irq & 0xf) * 2);
+		gic_d_write_4(psc, GICD_ICFGR(irq >> 4), reg);
+
+		irqs[i] = irq;
+	}
+	mtx_unlock(&sc->sc_mutex);
+
+	return (0);
+}
+
+static int
+gicv2m_map_msi(device_t dev, device_t pci_dev, int irq, uint64_t *addr,
+    uint32_t *data)
+{
+	struct gicv2m_softc *sc = device_get_softc(dev);
+
+	*addr = vtophys(rman_get_virtual(sc->sc_mem)) + 0x40;
+	*data = irq;
+
+	return (0);
+}
+
+static device_method_t arm_gicv2m_methods[] = {
+	/* Device interface */
+	DEVMETHOD(device_attach,	gicv2m_attach),
+
+	/* MSI/MSI-X */
+	DEVMETHOD(pic_alloc_msix,	gicv2m_alloc_msix),
+	DEVMETHOD(pic_alloc_msi,	gicv2m_alloc_msi),
+	DEVMETHOD(pic_map_msi,		gicv2m_map_msi),
+
+	{ 0, 0 }
+};
+
+DEFINE_CLASS_0(gicv2m, arm_gicv2m_driver, arm_gicv2m_methods,
+    sizeof(struct gicv2m_softc));

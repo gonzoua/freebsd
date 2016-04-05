@@ -74,7 +74,7 @@ cpu_fork(struct thread *td1, struct proc *p2, struct thread *td2, int flags)
 		td1->td_pcb->pcb_tpidr_el0 = READ_SPECIALREG(tpidr_el0);
 #ifdef VFP
 		if ((td1->td_pcb->pcb_fpflags & PCB_FP_STARTED) != 0)
-			vfp_save_state(td1);
+			vfp_save_state(td1, td1->td_pcb);
 #endif
 	}
 
@@ -84,8 +84,8 @@ cpu_fork(struct thread *td1, struct proc *p2, struct thread *td2, int flags)
 	td2->td_pcb = pcb2;
 	bcopy(td1->td_pcb, pcb2, sizeof(*pcb2));
 
-	td2->td_pcb->pcb_l1addr =
-	    vtophys(vmspace_pmap(td2->td_proc->p_vmspace)->pm_l1);
+	td2->td_pcb->pcb_l0addr =
+	    vtophys(vmspace_pmap(td2->td_proc->p_vmspace)->pm_l0);
 
 	tf = (struct trapframe *)STACKALIGN((struct trapframe *)pcb2 - 1);
 	bcopy(td1->td_frame, tf, sizeof(*tf));
@@ -186,7 +186,7 @@ cpu_set_upcall_kse(struct thread *td, void (*entry)(void *), void *arg,
 {
 	struct trapframe *tf = td->td_frame;
 
-	tf->tf_sp = STACKALIGN(stack->ss_sp + stack->ss_size);
+	tf->tf_sp = STACKALIGN((uintptr_t)stack->ss_sp + stack->ss_size);
 	tf->tf_elr = (register_t)entry;
 	tf->tf_x[0] = (register_t)arg;
 }
@@ -258,18 +258,3 @@ swi_vm(void *v)
 
 	/* Nothing to do here - busdma bounce buffers are not implemented. */
 }
-
-void *
-uma_small_alloc(uma_zone_t zone, vm_size_t bytes, u_int8_t *flags, int wait)
-{
-
-	panic("uma_small_alloc");
-}
-
-void
-uma_small_free(void *mem, vm_size_t size, u_int8_t flags)
-{
-
-	panic("uma_small_free");
-}
-

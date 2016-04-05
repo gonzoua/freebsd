@@ -97,6 +97,18 @@ ar9300_freebsd_get_cts_timeout(struct ath_hal *ah)
     return ath_hal_mac_usec(ah, clks);      /* convert from system clocks */
 }
 
+static void
+ar9300_freebsd_set_tsf64(struct ath_hal *ah, uint64_t tsf64)
+{
+
+	/*
+	 * XXX TODO: read ar5416SetTsf64() - we should wait before we do
+	 * this.
+	 */
+	OS_REG_WRITE(ah, AR_TSF_L32, tsf64 & 0xffffffff);
+	OS_REG_WRITE(ah, AR_TSF_U32, (tsf64 >> 32) & 0xffffffff);
+}
+
 void
 ar9300_attach_freebsd_ops(struct ath_hal *ah)
 {
@@ -182,6 +194,7 @@ ar9300_attach_freebsd_ops(struct ath_hal *ah)
 	ah->ah_getTsf32		= ar9300_get_tsf32;
 	ah->ah_getTsf64		= ar9300_get_tsf64;
 	ah->ah_resetTsf		= ar9300_reset_tsf;
+	ah->ah_setTsf64		= ar9300_freebsd_set_tsf64;
 	ah->ah_detectCardPresent	= ar9300_detect_card_present;
 	// ah->ah_updateMibCounters	= ar9300_update_mib_counters;
 	ah->ah_getRfGain		= ar9300_get_rfgain;
@@ -210,6 +223,14 @@ ar9300_attach_freebsd_ops(struct ath_hal *ah)
 	// procradarevent
 	ah->ah_isFastClockEnabled	= ar9300_is_fast_clock_enabled;
 	ah->ah_get11nExtBusy	= ar9300_get_11n_ext_busy;
+
+	/* Spectral Scan Functions */
+	ah->ah_spectralConfigure	= ar9300_configure_spectral_scan;
+	ah->ah_spectralGetConfig	= ar9300_get_spectral_params;
+	ah->ah_spectralStart		= ar9300_start_spectral_scan;
+	ah->ah_spectralStop		= ar9300_stop_spectral_scan;
+	ah->ah_spectralIsEnabled	= ar9300_is_spectral_enabled;
+	ah->ah_spectralIsActive		= ar9300_is_spectral_active;
 
 	/* Key cache functions */
 	ah->ah_getKeyCacheSize	= ar9300_get_key_cache_size;
@@ -300,6 +321,7 @@ ar9300_attach_freebsd_ops(struct ath_hal *ah)
 HAL_BOOL
 ar9300_reset_freebsd(struct ath_hal *ah, HAL_OPMODE opmode,
     struct ieee80211_channel *chan, HAL_BOOL bChannelChange,
+    HAL_RESET_TYPE resetType,
     HAL_STATUS *status)
 {
 	HAL_BOOL r;

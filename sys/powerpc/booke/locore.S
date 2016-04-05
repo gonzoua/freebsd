@@ -61,11 +61,11 @@ __start:
 
 /*
  * Assumptions on the boot loader:
- *  - system memory starts from physical address 0
- *  - it's mapped by a single TBL1 entry
+ *  - System memory starts from physical address 0
+ *  - It's mapped by a single TLB1 entry
  *  - TLB1 mapping is 1:1 pa to va
- *  - kernel is loaded at 16MB boundary
- *  - all PID registers are set to the same value
+ *  - Kernel is loaded at 64MB boundary
+ *  - All PID registers are set to the same value
  *  - CPU is running in AS=0
  *
  * Registers contents provided by the loader(8):
@@ -73,14 +73,14 @@ __start:
  *	r3	: metadata pointer
  *
  * We rearrange the TLB1 layout as follows:
- *  - find TLB1 entry we started in
- *  - make sure it's protected, ivalidate other entries
- *  - create temp entry in the second AS (make sure it's not TLB[1])
- *  - switch to temp mapping
- *  - map 16MB of RAM in TLB1[1]
- *  - use AS=1, set EPN to KERNBASE and RPN to kernel load address
- *  - switch to to TLB1[1] mapping
- *  - invalidate temp mapping
+ *  - Find TLB1 entry we started in
+ *  - Make sure it's protected, invalidate other entries
+ *  - Create temp entry in the second AS (make sure it's not TLB[1])
+ *  - Switch to temp mapping
+ *  - Map 64MB of RAM in TLB1[1]
+ *  - Use AS=1, set EPN to KERNBASE and RPN to kernel load address
+ *  - Switch to to TLB1[1] mapping
+ *  - Invalidate temp mapping
  *
  * locore registers use:
  *	r1	: stack pointer
@@ -104,15 +104,44 @@ __start:
 	mtmsr	%r3
 	isync
 
-	lis	%r3, HID0_E500_DEFAULT_SET@h
-	ori	%r3, %r3, HID0_E500_DEFAULT_SET@l
-	mtspr	SPR_HID0, %r3
+	mfpvr	%r3
+	rlwinm	%r3, %r3, 16, 16, 31
+
+	lis	%r4, HID0_E500_DEFAULT_SET@h
+	ori	%r4, %r4, HID0_E500_DEFAULT_SET@l
+
+	/* Check for e500mc and e5500 */
+	cmpli	0, 0, %r3, FSL_E500mc
+	bne	2f
+
+	lis	%r4, HID0_E500MC_DEFAULT_SET@h
+	ori	%r4, %r4, HID0_E500MC_DEFAULT_SET@l
+	b	3f
+2:
+	cmpli	0, 0, %r3, FSL_E5500
+	bne	3f
+
+	lis	%r4, HID0_E5500_DEFAULT_SET@h
+	ori	%r4, %r4, HID0_E5500_DEFAULT_SET@l
+
+3:
+	mtspr	SPR_HID0, %r4
 	isync
+
+/*
+ * E500mc and E5500 do not have HID1 register, so skip HID1 setup on
+ * this core.
+ */
+	cmpli	0, 0, %r3, FSL_E500mc
+	beq	1f
+	cmpli	0, 0, %r3, FSL_E5500
+	beq	1f
+
 	lis	%r3, HID1_E500_DEFAULT_SET@h
 	ori	%r3, %r3, HID1_E500_DEFAULT_SET@l
 	mtspr	SPR_HID1, %r3
 	isync
-
+1:
 	/* Invalidate all entries in TLB0 */
 	li	%r3, 0
 	bl	tlb_inval_all
@@ -153,10 +182,10 @@ __start:
 /*
  * Setup final mapping in TLB1[1] and switch to it
  */
-	/* Final kernel mapping, map in 16 MB of RAM */
+	/* Final kernel mapping, map in 64 MB of RAM */
 	lis	%r3, MAS0_TLBSEL1@h	/* Select TLB1 */
 	li	%r4, 0			/* Entry 0 */
-	rlwimi	%r3, %r4, 16, 12, 15
+	rlwimi	%r3, %r4, 16, 10, 15
 	mtspr	SPR_MAS0, %r3
 	isync
 
@@ -176,10 +205,12 @@ __start:
 	/* Discover phys load address */
 	bl	3f
 3:	mflr	%r4			/* Use current address */
-	rlwinm	%r4, %r4, 0, 0, 7	/* 16MB alignment mask */
+	rlwinm	%r4, %r4, 0, 0, 5	/* 64MB alignment mask */
 	ori	%r4, %r4, (MAS3_SX | MAS3_SW | MAS3_SR)@l
 	mtspr	SPR_MAS3, %r4		/* Set RPN and protection */
 	isync
+	bl	zero_mas7
+	bl	zero_mas8
 	tlbwe
 	isync
 	msync
@@ -270,7 +301,7 @@ bp_ntlb1s:
 
 	.globl	bp_tlb1
 bp_tlb1:
-	.space	4 * 3 * 16
+	.space	4 * 3 * 64
 
 	.globl	bp_tlb1_end
 bp_tlb1_end:
@@ -281,15 +312,40 @@ bp_tlb1_end:
 1:	mflr	%r31		/* r31 hold the address of bp_ntlb1s */
 
 	/* Set HIDs */
-	lis	%r3, HID0_E500_DEFAULT_SET@h
-	ori	%r3, %r3, HID0_E500_DEFAULT_SET@l
-	mtspr	SPR_HID0, %r3
+	mfpvr	%r3
+	rlwinm	%r3, %r3, 16, 16, 31
+
+	/* HID0 for E500 is default */
+	lis	%r4, HID0_E500_DEFAULT_SET@h
+	ori	%r4, %r4, HID0_E500_DEFAULT_SET@l
+
+	cmpli	0, 0, %r3, FSL_E500mc
+	bne	2f
+	lis	%r4, HID0_E500MC_DEFAULT_SET@h
+	ori	%r4, %r4, HID0_E500MC_DEFAULT_SET@l
+	b	3f
+2:
+	cmpli	0, 0, %r3, FSL_E5500
+	bne	3f
+	lis	%r4, HID0_E5500_DEFAULT_SET@h
+	ori	%r4, %r4, HID0_E5500_DEFAULT_SET@l
+3:
+	mtspr	SPR_HID0, %r4
 	isync
+/*
+ * E500mc and E5500 do not have HID1 register, so skip HID1 setup on
+ * this core.
+ */
+	cmpli	0, 0, %r3, FSL_E500mc
+	beq	1f
+	cmpli	0, 0, %r3, FSL_E5500
+	beq	1f
+
 	lis	%r3, HID1_E500_DEFAULT_SET@h
 	ori	%r3, %r3, HID1_E500_DEFAULT_SET@l
 	mtspr	SPR_HID1, %r3
 	isync
-
+1:
 	/* Enable branch prediction */
 	li	%r3, BUCSR_BPEN
 	mtspr	SPR_BUCSR, %r3
@@ -429,8 +485,8 @@ bp_tlb1_end:
  * r3	TLBSEL
  */
 tlb_inval_all:
-	rlwinm	%r3, %r3, 3, 0x18	/* TLBSEL */
-	ori	%r3, %r3, 0x4		/* INVALL */
+	rlwinm	%r3, %r3, 3, (1 << 3)	/* TLBSEL */
+	ori	%r3, %r3, (1 << 2)	/* INVALL */
 	tlbivax	0, %r3
 	isync
 	msync
@@ -472,7 +528,7 @@ tlb1_find_current:
  */
 tlb1_inval_entry:
 	lis	%r4, MAS0_TLBSEL1@h	/* Select TLB1 */
-	rlwimi	%r4, %r3, 16, 12, 15	/* Select our entry */
+	rlwimi	%r4, %r3, 16, 10, 15	/* Select our entry */
 	mtspr	SPR_MAS0, %r4
 	isync
 	tlbre
@@ -495,14 +551,14 @@ tlb1_temp_mapping_as1:
 
 	/* Read our current translation */
 	lis	%r3, MAS0_TLBSEL1@h	/* Select TLB1 */
-	rlwimi	%r3, %r29, 16, 12, 15	/* Select our current entry */
+	rlwimi	%r3, %r29, 16, 10, 15	/* Select our current entry */
 	mtspr	SPR_MAS0, %r3
 	isync
 	tlbre
 
 	/* Prepare and write temp entry */
 	lis	%r3, MAS0_TLBSEL1@h	/* Select TLB1 */
-	rlwimi	%r3, %r28, 16, 12, 15	/* Select temp entry */
+	rlwimi	%r3, %r28, 16, 10, 15	/* Select temp entry */
 	mtspr	SPR_MAS0, %r3
 	isync
 	mfspr	%r5, SPR_MAS1
@@ -513,6 +569,10 @@ tlb1_temp_mapping_as1:
 	oris	%r5, %r5, (MAS1_VALID | MAS1_IPROT)@h
 	mtspr	SPR_MAS1, %r5
 	isync
+	mflr	%r3
+	bl	zero_mas7
+	bl	zero_mas8
+	mtlr	%r3
 	tlbwe
 	isync
 	msync
@@ -531,7 +591,7 @@ tlb1_inval_all_but_current:
 	andi.	%r3, %r3, TLBCFG_NENTRY_MASK@l
 	li	%r4, 0			/* Start from Entry 0 */
 1:	lis	%r5, MAS0_TLBSEL1@h
-	rlwimi	%r5, %r4, 16, 12, 15
+	rlwimi	%r5, %r4, 16, 10, 15
 	mtspr	SPR_MAS0, %r5
 	isync
 	tlbre
@@ -549,6 +609,38 @@ tlb1_inval_all_but_current:
 	bne	1b
 	blr
 
+/*
+ * MAS7 and MAS8 conditional zeroing.
+ */
+.globl zero_mas7
+zero_mas7:
+	mfpvr	%r20
+	rlwinm	%r20, %r20, 16, 16, 31
+	cmpli	0, 0, %r20, FSL_E500v1
+	beq	1f
+
+	li	%r20, 0
+	mtspr	SPR_MAS7, %r20
+	isync
+1:
+	blr
+
+.globl zero_mas8
+zero_mas8:
+	mfpvr	%r20
+	rlwinm	%r20, %r20, 16, 16, 31
+	cmpli	0, 0, %r20, FSL_E500mc
+	beq	1f
+	cmpli	0, 0, %r20, FSL_E5500
+	beq	1f
+
+	blr
+1:
+	li	%r20, 0
+	mtspr	SPR_MAS8, %r20
+	isync
+	blr
+
 #ifdef SMP
 __boot_page_padding:
 	/*
@@ -564,77 +656,6 @@ __boot_page_padding:
 /************************************************************************/
 /* locore subroutines */
 /************************************************************************/
-
-/*
- * void tid_flush(tlbtid_t tid);
- *
- * Invalidate all TLB0 entries which match the given TID. Note this is
- * dedicated for cases when invalidation(s) should NOT be propagated to other
- * CPUs.
- *
- * void tid_flush(tlbtid_t tid, int tlb0_ways, int tlb0_entries_per_way);
- *
- * XXX: why isn't this in C?
- */
-ENTRY(tid_flush)
-	cmpwi	%r3, TID_KERNEL
-	beq	tid_flush_end	/* don't evict kernel translations */
-
-	/* Disable interrupts */
-	mfmsr	%r10
-	wrteei	0
-
-	li	%r6, 0		/* ways counter */
-loop_ways:
-	li	%r7, 0		/* entries [per way] counter */
-loop_entries:
-	/* Select TLB0 and ESEL (way) */
-	lis	%r8, MAS0_TLBSEL0@h
-	rlwimi	%r8, %r6, 16, 14, 15
-	mtspr	SPR_MAS0, %r8
-	isync
-
-	/* Select EPN (entry within the way) */
-	rlwinm	%r8, %r7, 12, 13, 19
-	mtspr	SPR_MAS2, %r8
-	isync
-	tlbre
-
-	/* Check if valid entry */
-	mfspr	%r8, SPR_MAS1
-	andis.	%r9, %r8, MAS1_VALID@h
-	beq	next_entry	/* invalid entry */
-
-	/* Check if this is our TID */
-	rlwinm	%r9, %r8, 16, 24, 31
-
-	cmplw	%r9, %r3
-	bne	next_entry	/* not our TID */
-
-	/* Clear VALID bit */
-	rlwinm	%r8, %r8, 0, 1, 31
-	mtspr	SPR_MAS1, %r8
-	isync
-	tlbwe
-	isync
-	msync
-
-next_entry:
-	addi	%r7, %r7, 1
-	cmpw	%r7, %r5
-	bne	loop_entries
-
-	/* Next way */
-	addi	%r6, %r6, 1
-	cmpw	%r6, %r4
-	bne	loop_ways
-
-	/* Restore MSR (possibly re-enable interrupts) */
-	mtmsr	%r10
-	isync
-
-tid_flush_end:
-	blr
 
 /*
  * Cache disable/enable/inval sequences according
@@ -710,25 +731,110 @@ ENTRY(icache_enable)
 	blr
 
 /*
- * int setfault()
- *
- * Similar to setjmp to setup for handling faults on accesses to user memory.
- * Any routine using this may only call bcopy, either the form below,
- * or the (currently used) C code optimized, so it doesn't use any non-volatile
- * registers.
+ * L2 cache disable/enable/inval sequences for E500mc.
  */
-	.globl	setfault
-setfault:
-	mflr	%r0
-	mfsprg0	%r4
-	lwz	%r4, TD_PCB(%r2)
-	stw	%r3, PCB_ONFAULT(%r4)
-	mfcr	%r10
-	stw	%r0, 0(%r3)
-	stw	%r1, 4(%r3)
-	stw	%r2, 8(%r3)
-	stmw	%r13, 12(%r3)		/* store CR, CTR, XER, [r13 .. r31] */
-	li	%r3, 0			/* return FALSE */
+
+ENTRY(l2cache_inval)
+	mfspr	%r3, SPR_L2CSR0
+	oris	%r3, %r3, (L2CSR0_L2FI | L2CSR0_L2LFC)@h
+	ori	%r3, %r3, (L2CSR0_L2FI | L2CSR0_L2LFC)@l
+	isync
+	mtspr	SPR_L2CSR0, %r3
+	isync
+1:	mfspr   %r3, SPR_L2CSR0
+	andis.	%r3, %r3, L2CSR0_L2FI@h
+	bne	1b
+	blr
+
+ENTRY(l2cache_enable)
+	mfspr	%r3, SPR_L2CSR0
+	oris	%r3, %r3, (L2CSR0_L2E | L2CSR0_L2PE)@h
+	isync
+	mtspr	SPR_L2CSR0, %r3
+	isync
+	blr
+
+/*
+ * Branch predictor setup.
+ */
+ENTRY(bpred_enable)
+	mfspr	%r3, SPR_BUCSR
+	ori	%r3, %r3, BUCSR_BBFI
+	isync
+	mtspr	SPR_BUCSR, %r3
+	isync
+	ori	%r3, %r3, BUCSR_BPEN
+	isync
+	mtspr	SPR_BUCSR, %r3
+	isync
+	blr
+
+ENTRY(dataloss_erratum_access)
+	/* Lock two cache lines into I-Cache */
+	sync
+	mfspr	%r11, SPR_L1CSR1
+	rlwinm	%r11, %r11, 0, ~L1CSR1_ICUL
+	sync
+	isync
+	mtspr	SPR_L1CSR1, %r11
+	isync
+
+	mflr	%r9
+	bl	1f
+	.long 2f-.
+1:
+	mflr	%r5
+	lwz	%r8, 0(%r5)
+	mtlr	%r9
+	add	%r8, %r8, %r5
+	icbtls	0, 0, %r8
+	addi	%r9, %r8, 64
+
+	sync
+	mfspr	%r11, SPR_L1CSR1
+3:	andi.	%r11, %r11, L1CSR1_ICUL
+	bne	3b
+
+	icbtls	0, 0, %r9
+
+	sync
+	mfspr	%r11, SPR_L1CSR1
+3:	andi.	%r11, %r11, L1CSR1_ICUL
+	bne	3b
+
+	b	2f
+	.align	6
+	/* Inside a locked cacheline, wait a while, write, then wait a while */
+2:	sync
+
+	mfspr	%r5, TBR_TBL
+4:	addis	%r11, %r5, 0x100000@h	/* wait around one million timebase ticks */
+	mfspr	%r5, TBR_TBL
+	subf.	%r5, %r5, %r11
+	bgt	4b
+
+	stw	%r4, 0(%r3)
+
+	mfspr	%r5, TBR_TBL
+4:	addis	%r11, %r5, 0x100000@h	/* wait around one million timebase ticks */
+	mfspr	%r5, TBR_TBL
+	subf.	%r5, %r5, %r11
+	bgt	4b
+
+	sync
+
+	/*
+	 * Fill out the rest of this cache line and the next with nops,
+	 * to ensure that nothing outside the locked area will be
+	 * fetched due to a branch.
+	 */
+	.rept 19
+	nop
+	.endr
+
+	icblc	0, 0, %r8
+	icblc	0, 0, %r9
+
 	blr
 
 /************************************************************************/

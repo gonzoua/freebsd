@@ -482,11 +482,15 @@ struct ahci_controller {
 	device_t		dev;
 	bus_dma_tag_t		dma_tag;
 	int			r_rid;
+	int			r_msix_tab_rid;
+	int			r_msix_pba_rid;
 	uint16_t		vendorid;	/* Vendor ID from the bus */
 	uint16_t		deviceid;	/* Device ID from the bus */
 	uint16_t		subvendorid;	/* Subvendor ID from the bus */
 	uint16_t		subdeviceid;	/* Subdevice ID from the bus */
 	struct resource		*r_mem;
+	struct resource		*r_msix_table;
+	struct resource		*r_msix_pba;
 	struct rman		sc_iomem;
 	struct ahci_controller_irq {
 		struct ahci_controller	*ctlr;
@@ -558,6 +562,20 @@ enum ahci_err_type {
 #define ATA_OUTSL_STRM(res, offset, addr, count) \
 	bus_write_multi_stream_4((res), (offset), (addr), (count))
 
+/*
+ * On some platforms, we must ensure proper interdevice write ordering.
+ * The AHCI interrupt status register must be updated in HW before
+ * registers in interrupt controller.
+ * Unfortunately, only way how we can do it is readback.
+ *
+ * Currently, only ARM is known to have this issue.
+ */
+#if defined(__arm__)
+#define ATA_RBL(res, offset) \
+	bus_read_4((res), (offset))
+#else
+#define ATA_RBL(res, offset)
+#endif
 
 #define AHCI_Q_NOFORCE		0x00000001
 #define AHCI_Q_NOPMP		0x00000002
@@ -579,6 +597,7 @@ enum ahci_err_type {
 #define AHCI_Q_1MSI		0x00020000
 #define AHCI_Q_FORCE_PI		0x00040000
 #define AHCI_Q_RESTORE_CAP	0x00080000
+#define AHCI_Q_NOMSIX		0x00100000
 
 #define AHCI_Q_BIT_STRING	\
 	"\020"			\
@@ -601,14 +620,15 @@ enum ahci_err_type {
 	"\021ABAR0"		\
 	"\0221MSI"              \
 	"\023FORCE_PI"          \
-	"\024RESTORE_CAP"
+	"\024RESTORE_CAP"	\
+	"\025NOMSIX"
 
 int ahci_attach(device_t dev);
 int ahci_detach(device_t dev);
 int ahci_setup_interrupt(device_t dev);
 int ahci_print_child(device_t dev, device_t child);
 struct resource *ahci_alloc_resource(device_t dev, device_t child, int type, int *rid,
-    u_long start, u_long end, u_long count, u_int flags);
+    rman_res_t start, rman_res_t end, rman_res_t count, u_int flags);
 int ahci_release_resource(device_t dev, device_t child, int type, int rid,
     struct resource *r);
 int ahci_setup_intr(device_t dev, device_t child, struct resource *irq, 
@@ -621,3 +641,4 @@ int ahci_child_location_str(device_t dev, device_t child, char *buf,
 bus_dma_tag_t ahci_get_dma_tag(device_t dev, device_t child);
 int ahci_ctlr_reset(device_t dev);
 int ahci_ctlr_setup(device_t dev);
+void ahci_free_mem(device_t dev);

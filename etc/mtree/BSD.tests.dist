@@ -12,7 +12,11 @@
         ..
         date
         ..
+        dd
+        ..
         expr
+        ..
+        ls
         ..
         mv
         ..
@@ -240,6 +244,8 @@
             test-programs
             ..
         ..
+        libarchive
+        ..
         libc
             c063
             ..
@@ -265,11 +271,19 @@
                     ..
                 ..
             ..
+            nss
+            ..
             regex
                 data
                 ..
             ..
+            resolv
+            ..
+            rpc
+            ..
             ssp
+            ..
+            setjmp
             ..
             stdio
             ..
@@ -307,6 +321,8 @@
             ..
         ..
         libutil
+        ..
+        libxo
         ..
         msun
         ..
@@ -354,17 +370,55 @@
         ..
     ..
     sys
+        acl
+        ..
         aio
         ..
         fifo
         ..
         file
         ..
+        geom
+            class
+                concat
+                ..
+                eli
+                ..
+                gate
+                ..
+                gpt
+                ..
+                mirror
+                ..
+                nop
+                ..
+                raid3
+                ..
+                shsec
+                ..
+                stripe
+                ..
+                uzip
+                    etalon
+                    ..
+                ..
+            ..
+        ..
         kern
+            acct
+            ..
             execve
+            ..
+            pipe
             ..
         ..
         kqueue
+        ..
+        mac
+            bsdextended
+            ..
+            portacl
+            ..
         ..
         mqueue
         ..
@@ -403,6 +457,10 @@
             ..
             unlink
             ..
+        ..
+        posixshm
+        ..
+        vfs
         ..
         vm
         ..
@@ -514,6 +572,8 @@
         ..
         cmp
         ..
+        cpio
+        ..
         col
         ..
         comm
@@ -528,11 +588,15 @@
         ..
         gzip
         ..
+        ident
+        ..
         join
         ..
         jot
         ..
         lastcomm
+        ..
+        limits
         ..
         m4
         ..
@@ -550,6 +614,8 @@
         ..
         soelim
         ..
+        tar
+        ..
         timeout
         ..
         tr
@@ -564,6 +630,8 @@
         ..
         xargs
         ..
+        xo
+        ..
         yacc
             yacc
             ..
@@ -572,11 +640,17 @@
     usr.sbin
         etcupdate
         ..
+        fstyp
+        ..
+        makefs
+        ..
         newsyslog
         ..
         nmtree
         ..
         pw
+        ..
+        rpcbind
         ..
         sa
         ..

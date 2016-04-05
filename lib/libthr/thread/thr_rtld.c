@@ -185,7 +185,9 @@ _thr_rtld_init(void)
 {
 	struct RtldLockInfo	li;
 	struct pthread		*curthread;
+	ucontext_t *uc;
 	long dummy = -1;
+	int uc_len;
 
 	curthread = _get_curthread();
 
@@ -225,10 +227,16 @@ _thr_rtld_init(void)
 	_rtld_atfork_post(NULL);
 	_malloc_prefork();
 	_malloc_postfork();
+	getpid();
 	syscall(SYS_getpid);
 
 	/* mask signals, also force to resolve __sys_sigprocmask PLT */
 	_thr_signal_block(curthread);
 	_rtld_thread_init(&li);
 	_thr_signal_unblock(curthread);
+
+	uc_len = __getcontextx_size();
+	uc = alloca(uc_len);
+	getcontext(uc);
+	__fillcontextx2((char *)uc);
 }

@@ -33,7 +33,6 @@
 #include "opt_ddb.h"
 
 #include <machine/asmacros.h>
-#include <machine/intr_machdep.h>
 #include <machine/pmap.h>
 
 #include "assym.s"
@@ -152,6 +151,7 @@ END(bcopy)
  */
 ENTRY(memcpy)
 	PUSH_FRAME_POINTER
+	movq	%rdi,%rax
 	movq	%rdx,%rcx
 	shrq	$3,%rcx				/* copy by 64-bit words */
 	cld					/* copy forwards */

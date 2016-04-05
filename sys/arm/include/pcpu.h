@@ -47,13 +47,22 @@ struct vmspace;
 	unsigned int pc_vfpmvfr0;					\
 	unsigned int pc_vfpmvfr1;					\
 	struct pmap *pc_curpmap;					\
-	char __pad[141]
+	vm_offset_t pc_qmap_addr;					\
+	void *pc_qmap_pte;						\
+	unsigned int pc_dbreg[32];					\
+	int pc_dbreg_cmd;						\
+	char __pad[1]
 #else
 #define PCPU_MD_FIELDS							\
-	char __pad[157]
+	vm_offset_t qmap_addr;						\
+	void *pc_qmap_pte;						\
+	char __pad[149]
 #endif
 
 #ifdef _KERNEL
+
+#define	PC_DBREG_CMD_NONE	0
+#define	PC_DBREG_CMD_LOAD	1
 
 struct pcb;
 struct pcpu;
@@ -72,7 +81,7 @@ extern struct pcpu *pcpup;
     	(pcpup + (id & CPU_MASK));					\
     })
 #endif
-	
+
 static inline struct thread *
 get_curthread(void)
 {

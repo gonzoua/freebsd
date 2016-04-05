@@ -16,12 +16,14 @@
 
 namespace lldb {
 
-class SBStream
+class LLDB_API SBStream
 {
 public:
 
     SBStream ();
-    
+
+    SBStream (SBStream &&rhs);
+
     ~SBStream ();
 
     bool

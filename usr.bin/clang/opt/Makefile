@@ -10,67 +10,69 @@ SRCS=	AnalysisWrappers.cpp \
 	GraphPrinters.cpp \
 	NewPMDriver.cpp \
 	PassPrinters.cpp \
-	Passes.cpp \
 	PrintSCC.cpp \
 	opt.cpp
 
-TGHDRS=	Intrinsics
-LIBDEPS=llvmaarch64disassembler \
+TGHDRS=	Attributes \
+	Intrinsics
+
+LIBDEPS=llvmpasses \
+	llvmaarch64disassembler \
 	llvmaarch64codegen \
 	llvmaarch64asmparser \
 	llvmaarch64desc \
 	llvmaarch64info \
-	llvmaarch64instprinter \
+	llvmaarch64asmprinter \
 	llvmaarch64utils \
 	llvmarmdisassembler \
 	llvmarmcodegen \
 	llvmarmasmparser \
 	llvmarmdesc \
 	llvmarminfo \
-	llvmarminstprinter \
+	llvmarmasmprinter \
 	llvmmipsdisassembler \
 	llvmmipscodegen \
 	llvmmipsasmparser \
 	llvmmipsdesc \
 	llvmmipsinfo \
-	llvmmipsinstprinter \
+	llvmmipsasmprinter \
 	llvmpowerpcdisassembler \
 	llvmpowerpccodegen \
 	llvmpowerpcasmparser \
 	llvmpowerpcdesc \
 	llvmpowerpcinfo \
-	llvmpowerpcinstprinter \
+	llvmpowerpcasmprinter \
 	llvmsparcdisassembler \
 	llvmsparccodegen \
 	llvmsparcasmparser \
 	llvmsparcdesc \
 	llvmsparcinfo \
-	llvmsparcinstprinter \
+	llvmsparcasmprinter \
 	llvmx86disassembler \
 	llvmx86asmparser \
 	llvmx86codegen \
 	llvmselectiondag \
 	llvmasmprinter \
 	llvmcodegen \
+	llvmtarget \
 	llvmx86desc \
 	llvmmcdisassembler \
 	llvmx86info \
-	llvmx86instprinter \
+	llvmx86asmprinter \
 	llvmx86utils \
 	llvmipo \
 	llvmvectorize \
+	llvmlinker \
 	llvmobjcarcopts \
 	llvmscalaropts \
+	llvminstcombine \
+	llvminstrumentation \
 	llvmprofiledata \
 	llvmobject \
 	llvmmcparser \
-	llvminstcombine \
-	llvminstrumentation \
 	llvmtransformutils \
-	llvmipa \
-	llvmanalysis \
-	llvmtarget \
 	llvmmc \
+	llvmanalysis \
 	llvmirreader \
 	llvmasmparser \
 	llvmbitwriter \
@@ -78,7 +80,6 @@ LIBDEPS=llvmaarch64disassembler \
 	llvmcore \
 	llvmsupport
 
-.include "../clang.prog.mk"
+LIBADD+=	z
 
-DPADD+=	${LIBZ}
-LDADD+=	-lz
+.include "../clang.prog.mk"

@@ -46,6 +46,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/malloc.h>
 #include <sys/socket.h>
 #include <sys/systm.h>
+#include <sys/mbuf.h>
 #include <sys/module.h>
 #include <sys/bus.h>
 
@@ -152,6 +153,7 @@ static const struct pccard_product wi_pccard_products[] = {
 	PCMCIA_CARD(TDK, LAK_CD011WL),
 	{ NULL }
 };
+PCCARD_PNP_INFO(wi_pccard_products);
 
 static int
 wi_pccard_probe(device_t dev)

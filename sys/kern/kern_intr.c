@@ -829,8 +829,14 @@ ok:
 		 * Ensure that the thread will process the handler list
 		 * again and remove this handler if it has already passed
 		 * it on the list.
+		 *
+		 * The release part of the following store ensures
+		 * that the update of ih_flags is ordered before the
+		 * it_need setting.  See the comment before
+		 * atomic_cmpset_acq(&ithd->it_need, ...) operation in
+		 * the ithread_execute_handlers().
 		 */
-		ie->ie_thread->it_need = 1;
+		atomic_store_rel_int(&ie->ie_thread->it_need, 1);
 	} else
 		TAILQ_REMOVE(&ie->ie_handlers, handler, ih_next);
 	thread_unlock(ie->ie_thread->it_thread);
@@ -979,8 +985,14 @@ ok:
 		 * Ensure that the thread will process the handler list
 		 * again and remove this handler if it has already passed
 		 * it on the list.
+		 *
+		 * The release part of the following store ensures
+		 * that the update of ih_flags is ordered before the
+		 * it_need setting.  See the comment before
+		 * atomic_cmpset_acq(&ithd->it_need, ...) operation in
+		 * the ithread_execute_handlers().
 		 */
-		it->it_need = 1;
+		atomic_store_rel_int(&it->it_need, 1);
 	} else
 		TAILQ_REMOVE(&ie->ie_handlers, handler, ih_next);
 	thread_unlock(it->it_thread);
@@ -1231,17 +1243,14 @@ intr_event_execute_handlers(struct proc *p, struct intr_event *ie)
 		 * For software interrupt threads, we only execute
 		 * handlers that have their need flag set.  Hardware
 		 * interrupt threads always invoke all of their handlers.
+		 *
+		 * ih_need can only be 0 or 1.  Failed cmpset below
+		 * means that there is no request to execute handlers,
+		 * so a retry of the cmpset is not needed.
 		 */
-		if ((ie->ie_flags & IE_SOFT) != 0) {
-			/*
-			 * ih_need can only be 0 or 1.  Failed cmpset
-			 * below means that there is no request to
-			 * execute handlers, so a retry of the cmpset
-			 * is not needed.
-			 */
-			if (atomic_cmpset_int(&ih->ih_need, 1, 0) == 0)
-				continue;
-		}
+		if ((ie->ie_flags & IE_SOFT) != 0 &&
+		    atomic_cmpset_int(&ih->ih_need, 1, 0) == 0)
+			continue;
 
 		/* Execute this handler. */
 		CTR6(KTR_INTR, "%s: pid %d exec %p(%p) for %s flg=%x",

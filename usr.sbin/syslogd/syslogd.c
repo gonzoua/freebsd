@@ -69,7 +69,7 @@ __FBSDID("$FreeBSD$");
  */
 
 #define	MAXLINE		1024		/* maximum line length */
-#define	MAXSVLINE	120		/* maximum saved line length */
+#define	MAXSVLINE	MAXLINE		/* maximum saved line length */
 #define	DEFUPRI		(LOG_USER|LOG_NOTICE)
 #define	DEFSPRI		(LOG_KERN|LOG_CRIT)
 #define	TIMERINTVL	30		/* interval for checking flush, mark */
@@ -324,7 +324,7 @@ static const char *cvthname(struct sockaddr *);
 static void	deadq_enter(pid_t, const char *);
 static int	deadq_remove(pid_t);
 static int	decode(const char *, const CODE *);
-static void	die(int);
+static void	die(int) __dead2;
 static void	dodie(int);
 static void	dofsync(void);
 static void	domark(int);
@@ -341,6 +341,7 @@ static void	printsys(char *);
 static int	p_open(const char *, pid_t *);
 static void	readklog(void);
 static void	reapchild(int);
+static const char *ttymsg_check(struct iovec *, int, char *, int);
 static void	usage(void);
 static int	validate(struct sockaddr *, const char *);
 static void	unmapped(struct sockaddr *);
@@ -348,6 +349,18 @@ static void	wallmsg(struct filed *, struct iovec *, const int iovlen);
 static int	waitdaemon(int, int, int);
 static void	timedout(int);
 static void	increase_rcvbuf(int);
+
+static void
+close_filed(struct filed *f)
+{
+
+	if (f == NULL || f->f_file == -1)
+		return;
+
+	(void)close(f->f_file);
+	f->f_file = -1;
+	f->f_type = F_UNUSED;
+}
 
 int
 main(int argc, char *argv[])
@@ -1024,7 +1037,8 @@ logmsg(int pri, const char *msg, const char *from, int flags)
 			(void)strlcpy(f->f_lasttime, timestamp,
 				sizeof(f->f_lasttime));
 			fprintlog(f, flags, msg);
-			(void)close(f->f_file);
+			close(f->f_file);
+			f->f_file = -1;
 		}
 		(void)sigsetmask(omask);
 		return;
@@ -1313,8 +1327,7 @@ fprintlog(struct filed *f, int flags, const char *msg)
 			 */
 			if (errno != ENOSPC) {
 				int e = errno;
-				(void)close(f->f_file);
-				f->f_type = F_UNUSED;
+				close_filed(f);
 				errno = e;
 				logerror(f->f_un.f_fname);
 			}
@@ -1338,7 +1351,7 @@ fprintlog(struct filed *f, int flags, const char *msg)
 		}
 		if (writev(f->f_file, iov, IOV_SIZE) < 0) {
 			int e = errno;
-			(void)close(f->f_file);
+			close_filed(f);
 			if (f->f_un.f_pipe.f_pid > 0)
 				deadq_enter(f->f_un.f_pipe.f_pid,
 					    f->f_un.f_pipe.f_pname);
@@ -1413,7 +1426,7 @@ wallmsg(struct filed *f, struct iovec *iov, const int iovlen)
 			if (!f->f_un.f_uname[i][0])
 				break;
 			if (!strcmp(f->f_un.f_uname[i], ut->ut_user)) {
-				if ((p = ttymsg(iov, iovlen, ut->ut_line,
+				if ((p = ttymsg_check(iov, iovlen, ut->ut_line,
 				    TTYMSGTIME)) != NULL) {
 					errno = 0;	/* already in msg */
 					logerror(p);
@@ -1424,6 +1437,29 @@ wallmsg(struct filed *f, struct iovec *iov, const int iovlen)
 	}
 	endutxent();
 	reenter = 0;
+}
+
+/*
+ * Wrapper routine for ttymsg() that checks the terminal for messages enabled.
+ */
+static const char *
+ttymsg_check(struct iovec *iov, int iovcnt, char *line, int tmout)
+{
+	static char device[1024];
+	static char errbuf[1024];
+	struct stat sb;
+
+	(void) snprintf(device, sizeof(device), "%s%s", _PATH_DEV, line);
+
+	if (stat(device, &sb) < 0) {
+		(void) snprintf(errbuf, sizeof(errbuf),
+		    "%s: %s", device, strerror(errno));
+		return (errbuf);
+	}
+	if ((sb.st_mode & S_IWGRP) == 0)
+		/* Messages disabled. */
+		return (NULL);
+	return ttymsg(iov, iovcnt, line, tmout);
 }
 
 static void
@@ -1446,7 +1482,7 @@ reapchild(int signo __unused)
 		for (f = Files; f; f = f->f_next)
 			if (f->f_type == F_PIPE &&
 			    f->f_un.f_pipe.f_pid == pid) {
-				(void)close(f->f_file);
+				close_filed(f);
 				f->f_un.f_pipe.f_pid = 0;
 				log_deadchild(pid, status,
 					      f->f_un.f_pipe.f_pname);
@@ -1550,7 +1586,7 @@ die(int signo)
 		if (f->f_prevcount)
 			fprintlog(f, 0, (char *)NULL);
 		if (f->f_type == F_PIPE && f->f_un.f_pipe.f_pid > 0) {
-			(void)close(f->f_file);
+			close_filed(f);
 			f->f_un.f_pipe.f_pid = 0;
 		}
 	}
@@ -1634,11 +1670,11 @@ init(int signo)
 		case F_FORW:
 		case F_CONSOLE:
 		case F_TTY:
-			(void)close(f->f_file);
+			close_filed(f);
 			break;
 		case F_PIPE:
 			if (f->f_un.f_pipe.f_pid > 0) {
-				(void)close(f->f_file);
+				close_filed(f);
 				deadq_enter(f->f_un.f_pipe.f_pid,
 					    f->f_un.f_pipe.f_pname);
 			}

@@ -57,7 +57,7 @@ static int		pcib_resume(device_t dev);
 static int		pcib_power_for_sleep(device_t pcib, device_t dev,
 			    int *pstate);
 static uint16_t		pcib_ari_get_rid(device_t pcib, device_t dev);
-static uint32_t		pcib_read_config(device_t dev, u_int b, u_int s, 
+static uint32_t		pcib_read_config(device_t dev, u_int b, u_int s,
     u_int f, u_int reg, int width);
 static void		pcib_write_config(device_t dev, u_int b, u_int s,
     u_int f, u_int reg, uint32_t val, int width);
@@ -212,9 +212,10 @@ pcib_write_windows(struct pcib_softc *sc, int mask)
  * ISA alias range.
  */
 static int
-pcib_is_isa_range(struct pcib_softc *sc, u_long start, u_long end, u_long count)
+pcib_is_isa_range(struct pcib_softc *sc, rman_res_t start, rman_res_t end,
+    rman_res_t count)
 {
-	u_long next_alias;
+	rman_res_t next_alias;
 
 	if (!(sc->bridgectl & PCIB_BCR_ISA_ENABLE))
 		return (0);
@@ -246,7 +247,7 @@ pcib_is_isa_range(struct pcib_softc *sc, u_long start, u_long end, u_long count)
 alias:
 	if (bootverbose)
 		device_printf(sc->dev,
-		    "I/O range %#lx-%#lx overlaps with an ISA alias\n", start,
+		    "I/O range %#jx-%#jx overlaps with an ISA alias\n", start,
 		    end);
 	return (1);
 }
@@ -266,7 +267,7 @@ pcib_add_window_resources(struct pcib_window *w, struct resource **res,
 	free(w->res, M_DEVBUF);
 	w->res = newarray;
 	w->count += count;
-	
+
 	for (i = 0; i < count; i++) {
 		error = rman_manage_region(&w->rman, rman_get_start(res[i]),
 		    rman_get_end(res[i]));
@@ -275,13 +276,13 @@ pcib_add_window_resources(struct pcib_window *w, struct resource **res,
 	}
 }
 
-typedef void (nonisa_callback)(u_long start, u_long end, void *arg);
+typedef void (nonisa_callback)(rman_res_t start, rman_res_t end, void *arg);
 
 static void
-pcib_walk_nonisa_ranges(u_long start, u_long end, nonisa_callback *cb,
+pcib_walk_nonisa_ranges(rman_res_t start, rman_res_t end, nonisa_callback *cb,
     void *arg)
 {
-	u_long next_end;
+	rman_res_t next_end;
 
 	/*
 	 * If start is within an ISA alias range, move up to the start
@@ -309,7 +310,7 @@ pcib_walk_nonisa_ranges(u_long start, u_long end, nonisa_callback *cb,
 }
 
 static void
-count_ranges(u_long start, u_long end, void *arg)
+count_ranges(rman_res_t start, rman_res_t end, void *arg)
 {
 	int *countp;
 
@@ -324,7 +325,7 @@ struct alloc_state {
 };
 
 static void
-alloc_ranges(u_long start, u_long end, void *arg)
+alloc_ranges(rman_res_t start, rman_res_t end, void *arg)
 {
 	struct alloc_state *as;
 	struct pcib_window *w;
@@ -338,7 +339,7 @@ alloc_ranges(u_long start, u_long end, void *arg)
 	rid = w->reg;
 	if (bootverbose)
 		device_printf(as->sc->dev,
-		    "allocating non-ISA range %#lx-%#lx\n", start, end);
+		    "allocating non-ISA range %#jx-%#jx\n", start, end);
 	as->res[as->count] = bus_alloc_resource(as->sc->dev, SYS_RES_IOPORT,
 	    &rid, start, end, end - start + 1, 0);
 	if (as->res[as->count] == NULL)
@@ -348,7 +349,7 @@ alloc_ranges(u_long start, u_long end, void *arg)
 }
 
 static int
-pcib_alloc_nonisa_ranges(struct pcib_softc *sc, u_long start, u_long end)
+pcib_alloc_nonisa_ranges(struct pcib_softc *sc, rman_res_t start, rman_res_t end)
 {
 	struct alloc_state as;
 	int i, new_count;
@@ -387,8 +388,8 @@ pcib_alloc_window(struct pcib_softc *sc, struct pcib_window *w, int type,
 	char buf[64];
 	int error, rid;
 
-	if (max_address != (u_long)max_address)
-		max_address = ~0ul;
+	if (max_address != (rman_res_t)max_address)
+		max_address = ~0;
 	w->rman.rm_start = 0;
 	w->rman.rm_end = max_address;
 	w->rman.rm_type = RMAN_ARRAY;
@@ -576,14 +577,14 @@ pcib_setup_secbus(device_t dev, struct pcib_secbus *bus, int min_count)
 	 * if one exists, or a new bus range if one does not.
 	 */
 	rid = 0;
-	bus->res = bus_alloc_resource(dev, PCI_RES_BUS, &rid, 0ul, ~0ul,
+	bus->res = bus_alloc_resource_anywhere(dev, PCI_RES_BUS, &rid,
 	    min_count, 0);
 	if (bus->res == NULL) {
 		/*
 		 * Fall back to just allocating a range of a single bus
 		 * number.
 		 */
-		bus->res = bus_alloc_resource(dev, PCI_RES_BUS, &rid, 0ul, ~0ul,
+		bus->res = bus_alloc_resource_anywhere(dev, PCI_RES_BUS, &rid,
 		    1, 0);
 	} else if (rman_get_size(bus->res) < min_count)
 		/*
@@ -609,7 +610,7 @@ pcib_setup_secbus(device_t dev, struct pcib_secbus *bus, int min_count)
 
 static struct resource *
 pcib_suballoc_bus(struct pcib_secbus *bus, device_t child, int *rid,
-    u_long start, u_long end, u_long count, u_int flags)
+    rman_res_t start, rman_res_t end, rman_res_t count, u_int flags)
 {
 	struct resource *res;
 
@@ -620,7 +621,7 @@ pcib_suballoc_bus(struct pcib_secbus *bus, device_t child, int *rid,
 
 	if (bootverbose)
 		device_printf(bus->dev,
-		    "allocated bus range (%lu-%lu) for rid %d of %s\n",
+		    "allocated bus range (%ju-%ju) for rid %d of %s\n",
 		    rman_get_start(res), rman_get_end(res), *rid,
 		    pcib_child_name(child));
 	rman_set_rid(res, *rid);
@@ -633,9 +634,9 @@ pcib_suballoc_bus(struct pcib_secbus *bus, device_t child, int *rid,
  * subbus.
  */
 static int
-pcib_grow_subbus(struct pcib_secbus *bus, u_long new_end)
+pcib_grow_subbus(struct pcib_secbus *bus, rman_res_t new_end)
 {
-	u_long old_end;
+	rman_res_t old_end;
 	int error;
 
 	old_end = rman_get_end(bus->res);
@@ -645,7 +646,7 @@ pcib_grow_subbus(struct pcib_secbus *bus, u_long new_end)
 	if (error)
 		return (error);
 	if (bootverbose)
-		device_printf(bus->dev, "grew bus range to %lu-%lu\n",
+		device_printf(bus->dev, "grew bus range to %ju-%ju\n",
 		    rman_get_start(bus->res), rman_get_end(bus->res));
 	error = rman_manage_region(&bus->rman, old_end + 1,
 	    rman_get_end(bus->res));
@@ -658,10 +659,10 @@ pcib_grow_subbus(struct pcib_secbus *bus, u_long new_end)
 
 struct resource *
 pcib_alloc_subbus(struct pcib_secbus *bus, device_t child, int *rid,
-    u_long start, u_long end, u_long count, u_int flags)
+    rman_res_t start, rman_res_t end, rman_res_t count, u_int flags)
 {
 	struct resource *res;
-	u_long start_free, end_free, new_end;
+	rman_res_t start_free, end_free, new_end;
 
 	/*
 	 * First, see if the request can be satisified by the existing
@@ -693,8 +694,8 @@ pcib_alloc_subbus(struct pcib_secbus *bus, device_t child, int *rid,
 	/* Finally, attempt to grow the existing resource. */
 	if (bootverbose) {
 		device_printf(bus->dev,
-		    "attempting to grow bus range for %lu buses\n", count);
-		printf("\tback candidate range: %lu-%lu\n", start_free,
+		    "attempting to grow bus range for %ju buses\n", count);
+		printf("\tback candidate range: %ju-%ju\n", start_free,
 		    new_end);
 	}
 	if (pcib_grow_subbus(bus, new_end) == 0)
@@ -783,7 +784,7 @@ pcib_get_mem_decode(struct pcib_softc *sc)
 		sc->pmembase = PCI_PPBMEMBASE(0, pmemlow);
 
 	pmemlow = pci_read_config(dev, PCIR_PMLIMITL_1, 2);
-	if ((pmemlow & PCIM_BRPM_MASK) == PCIM_BRPM_64)	
+	if ((pmemlow & PCIM_BRPM_MASK) == PCIM_BRPM_64)
 		sc->pmemlimit = PCI_PPBMEMLIMIT(
 		    pci_read_config(dev, PCIR_PMLIMITH_1, 4), pmemlow);
 	else
@@ -960,9 +961,10 @@ pcib_attach_common(device_t dev)
      * The i82380FB mobile docking controller is a PCI-PCI bridge,
      * and it is a subtractive bridge.  However, the ProgIf is wrong
      * so the normal setting of PCIB_SUBTRACTIVE bit doesn't
-     * happen.  There's also a Toshiba bridge that behaves this
-     * way.
+     * happen.  There are also Toshiba and Cavium ThunderX bridges
+     * that behave this way.
      */
+    case 0xa002177d:		/* Cavium ThunderX */
     case 0x124b8086:		/* Intel 82380FB Mobile */
     case 0x060513d7:		/* Toshiba ???? */
 	sc->flags |= PCIB_SUBTRACTIVE;
@@ -1081,7 +1083,7 @@ pcib_attach(device_t dev)
     pcib_attach_common(dev);
     sc = device_get_softc(dev);
     if (sc->bus.sec != 0) {
-	child = device_add_child(dev, "pci", sc->bus.sec);
+	child = device_add_child(dev, "pci", -1);
 	if (child != NULL)
 	    return(bus_generic_attach(dev));
     }
@@ -1125,7 +1127,7 @@ int
 pcib_read_ivar(device_t dev, device_t child, int which, uintptr_t *result)
 {
     struct pcib_softc	*sc = device_get_softc(dev);
-    
+
     switch (which) {
     case PCIB_IVAR_DOMAIN:
 	*result = sc->domain;
@@ -1157,8 +1159,8 @@ pcib_write_ivar(device_t dev, device_t child, int which, uintptr_t value)
  */
 static struct resource *
 pcib_suballoc_resource(struct pcib_softc *sc, struct pcib_window *w,
-    device_t child, int type, int *rid, u_long start, u_long end, u_long count,
-    u_int flags)
+    device_t child, int type, int *rid, rman_res_t start, rman_res_t end,
+    rman_res_t count, u_int flags)
 {
 	struct resource *res;
 
@@ -1172,7 +1174,7 @@ pcib_suballoc_resource(struct pcib_softc *sc, struct pcib_window *w,
 
 	if (bootverbose)
 		device_printf(sc->dev,
-		    "allocated %s range (%#lx-%#lx) for rid %x of %s\n",
+		    "allocated %s range (%#jx-%#jx) for rid %x of %s\n",
 		    w->name, rman_get_start(res), rman_get_end(res), *rid,
 		    pcib_child_name(child));
 	rman_set_rid(res, *rid);
@@ -1195,10 +1197,10 @@ pcib_suballoc_resource(struct pcib_softc *sc, struct pcib_window *w,
 /* Allocate a fresh resource range for an unconfigured window. */
 static int
 pcib_alloc_new_window(struct pcib_softc *sc, struct pcib_window *w, int type,
-    u_long start, u_long end, u_long count, u_int flags)
+    rman_res_t start, rman_res_t end, rman_res_t count, u_int flags)
 {
 	struct resource *res;
-	u_long base, limit, wmask;
+	rman_res_t base, limit, wmask;
 	int rid;
 
 	/*
@@ -1242,17 +1244,17 @@ pcib_alloc_new_window(struct pcib_softc *sc, struct pcib_window *w, int type,
 				return (0);
 			}
 		}
-		return (ENOSPC);		
+		return (ENOSPC);
 	}
-	
-	wmask = (1ul << w->step) - 1;
+
+	wmask = ((rman_res_t)1 << w->step) - 1;
 	if (RF_ALIGNMENT(flags) < w->step) {
 		flags &= ~RF_ALIGNMENT_MASK;
 		flags |= RF_ALIGNMENT_LOG2(w->step);
 	}
 	start &= ~wmask;
 	end |= wmask;
-	count = roundup2(count, 1ul << w->step);
+	count = roundup2(count, (rman_res_t)1 << w->step);
 	rid = w->reg;
 	res = bus_alloc_resource(sc->dev, type, &rid, start, end, count,
 	    flags & ~RF_ACTIVE);
@@ -1268,7 +1270,7 @@ pcib_alloc_new_window(struct pcib_softc *sc, struct pcib_window *w, int type,
 /* Try to expand an existing window to the requested base and limit. */
 static int
 pcib_expand_window(struct pcib_softc *sc, struct pcib_window *w, int type,
-    u_long base, u_long limit)
+    rman_res_t base, rman_res_t limit)
 {
 	struct resource *res;
 	int error, i, force_64k_base;
@@ -1336,7 +1338,7 @@ pcib_expand_window(struct pcib_softc *sc, struct pcib_window *w, int type,
 		KASSERT(w->base == rman_get_start(res),
 		    ("existing resource mismatch"));
 		force_64k_base = 0;
-	}	
+	}
 
 	error = bus_adjust_resource(sc->dev, type, res, force_64k_base ?
 	    rman_get_start(res) : base, limit);
@@ -1366,9 +1368,9 @@ pcib_expand_window(struct pcib_softc *sc, struct pcib_window *w, int type,
  */
 static int
 pcib_grow_window(struct pcib_softc *sc, struct pcib_window *w, int type,
-    u_long start, u_long end, u_long count, u_int flags)
+    rman_res_t start, rman_res_t end, rman_res_t count, u_int flags)
 {
-	u_long align, start_free, end_free, front, back, wmask;
+	rman_res_t align, start_free, end_free, front, back, wmask;
 	int error;
 
 	/*
@@ -1387,7 +1389,7 @@ pcib_grow_window(struct pcib_softc *sc, struct pcib_window *w, int type,
 		end = w->rman.rm_end;
 	if (start + count - 1 > end || start + count < start)
 		return (EINVAL);
-	wmask = (1ul << w->step) - 1;
+	wmask = ((rman_res_t)1 << w->step) - 1;
 
 	/*
 	 * If there is no resource at all, just try to allocate enough
@@ -1399,7 +1401,7 @@ pcib_grow_window(struct pcib_softc *sc, struct pcib_window *w, int type,
 		if (error) {
 			if (bootverbose)
 				device_printf(sc->dev,
-		    "failed to allocate initial %s window (%#lx-%#lx,%#lx)\n",
+		    "failed to allocate initial %s window (%#jx-%#jx,%#jx)\n",
 				    w->name, start, end, count);
 			return (error);
 		}
@@ -1431,9 +1433,9 @@ pcib_grow_window(struct pcib_softc *sc, struct pcib_window *w, int type,
 	 */
 	if (bootverbose)
 		device_printf(sc->dev,
-		    "attempting to grow %s window for (%#lx-%#lx,%#lx)\n",
+		    "attempting to grow %s window for (%#jx-%#jx,%#jx)\n",
 		    w->name, start, end, count);
-	align = 1ul << RF_ALIGNMENT(flags);
+	align = (rman_res_t)1 << RF_ALIGNMENT(flags);
 	if (start < w->base) {
 		if (rman_first_free_region(&w->rman, &start_free, &end_free) !=
 		    0 || start_free != w->base)
@@ -1455,7 +1457,7 @@ pcib_grow_window(struct pcib_softc *sc, struct pcib_window *w, int type,
 		 */
 		if (front >= start && front <= end_free) {
 			if (bootverbose)
-				printf("\tfront candidate range: %#lx-%#lx\n",
+				printf("\tfront candidate range: %#jx-%#jx\n",
 				    front, end_free);
 			front &= ~wmask;
 			front = w->base - front;
@@ -1483,7 +1485,7 @@ pcib_grow_window(struct pcib_softc *sc, struct pcib_window *w, int type,
 		 */
 		if (back <= end && start_free <= back) {
 			if (bootverbose)
-				printf("\tback candidate range: %#lx-%#lx\n",
+				printf("\tback candidate range: %#jx-%#jx\n",
 				    start_free, back);
 			back |= wmask;
 			back -= w->limit;
@@ -1533,7 +1535,7 @@ updatewin:
  */
 struct resource *
 pcib_alloc_resource(device_t dev, device_t child, int type, int *rid,
-    u_long start, u_long end, u_long count, u_int flags)
+    rman_res_t start, rman_res_t end, rman_res_t count, u_int flags)
 {
 	struct pcib_softc *sc;
 	struct resource *r;
@@ -1622,7 +1624,7 @@ pcib_alloc_resource(device_t dev, device_t child, int type, int *rid,
 
 int
 pcib_adjust_resource(device_t bus, device_t child, int type, struct resource *r,
-    u_long start, u_long end)
+    rman_res_t start, rman_res_t end)
 {
 	struct pcib_softc *sc;
 
@@ -1656,8 +1658,8 @@ pcib_release_resource(device_t dev, device_t child, int type, int rid,
  * is set up to, or capable of handling them.
  */
 struct resource *
-pcib_alloc_resource(device_t dev, device_t child, int type, int *rid, 
-    u_long start, u_long end, u_long count, u_int flags)
+pcib_alloc_resource(device_t dev, device_t child, int type, int *rid,
+    rman_res_t start, rman_res_t end, rman_res_t count, u_int flags)
 {
 	struct pcib_softc	*sc = device_get_softc(dev);
 	const char *name, *suffix;
@@ -1707,7 +1709,7 @@ pcib_alloc_resource(device_t dev, device_t child, int type, int *rid,
 #endif
 		}
 		if (end < start) {
-			device_printf(dev, "ioport: end (%lx) < start (%lx)\n",
+			device_printf(dev, "ioport: end (%jx) < start (%jx)\n",
 			    end, start);
 			start = 0;
 			end = 0;
@@ -1715,13 +1717,13 @@ pcib_alloc_resource(device_t dev, device_t child, int type, int *rid,
 		}
 		if (!ok) {
 			device_printf(dev, "%s%srequested unsupported I/O "
-			    "range 0x%lx-0x%lx (decoding 0x%x-0x%x)\n",
+			    "range 0x%jx-0x%jx (decoding 0x%x-0x%x)\n",
 			    name, suffix, start, end, sc->iobase, sc->iolimit);
 			return (NULL);
 		}
 		if (bootverbose)
 			device_printf(dev,
-			    "%s%srequested I/O range 0x%lx-0x%lx: in range\n",
+			    "%s%srequested I/O range 0x%jx-0x%jx: in range\n",
 			    name, suffix, start, end);
 		break;
 
@@ -1776,7 +1778,7 @@ pcib_alloc_resource(device_t dev, device_t child, int type, int *rid,
 #endif
 		}
 		if (end < start) {
-			device_printf(dev, "memory: end (%lx) < start (%lx)\n",
+			device_printf(dev, "memory: end (%jx) < start (%jx)\n",
 			    end, start);
 			start = 0;
 			end = 0;
@@ -1784,7 +1786,7 @@ pcib_alloc_resource(device_t dev, device_t child, int type, int *rid,
 		}
 		if (!ok && bootverbose)
 			device_printf(dev,
-			    "%s%srequested unsupported memory range %#lx-%#lx "
+			    "%s%srequested unsupported memory range %#jx-%#jx "
 			    "(decoding %#jx-%#jx, %#jx-%#jx)\n",
 			    name, suffix, start, end,
 			    (uintmax_t)sc->membase, (uintmax_t)sc->memlimit,
@@ -1793,7 +1795,7 @@ pcib_alloc_resource(device_t dev, device_t child, int type, int *rid,
 			return (NULL);
 		if (bootverbose)
 			device_printf(dev,"%s%srequested memory range "
-			    "0x%lx-0x%lx: good\n",
+			    "0x%jx-0x%jx: good\n",
 			    name, suffix, start, end);
 		break;
 
@@ -1927,7 +1929,7 @@ pcib_route_interrupt(device_t pcib, device_t dev, int pin)
     int		parent_intpin;
     int		intnum;
 
-    /*	
+    /*
      *
      * The PCI standard defines a swizzle of the child-side device/intpin to
      * the parent-side intpin as follows.
@@ -2115,4 +2117,3 @@ pcib_try_enable_ari(device_t pcib, device_t dev)
 
 	return (0);
 }
-

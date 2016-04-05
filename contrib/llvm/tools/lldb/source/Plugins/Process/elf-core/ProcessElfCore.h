@@ -1,4 +1,4 @@
-//===-- ProcessElfCore.h ---------------------------------------*- C++ -*-===//
+//===-- ProcessElfCore.h ----------------------------------------*- C++ -*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -10,18 +10,20 @@
 //  2) The ELF file's PT_NOTE and PT_LOAD segments describes the program's
 //     address space and thread contexts.
 //  3) PT_NOTE segment contains note entries which describes a thread context.
-//  4) PT_LOAD segment describes a valid contigous range of process address
+//  4) PT_LOAD segment describes a valid contiguous range of process address
 //     space.
 //===----------------------------------------------------------------------===//
 
 #ifndef liblldb_ProcessElfCore_h_
 #define liblldb_ProcessElfCore_h_
 
+// C Includes
 // C++ Includes
 #include <list>
 #include <vector>
 
 // Other libraries and framework includes
+// Project includes
 #include "lldb/Core/ConstString.h"
 #include "lldb/Core/Error.h"
 #include "lldb/Target/Process.h"
@@ -37,7 +39,7 @@ public:
     // Constructors and Destructors
     //------------------------------------------------------------------
     static lldb::ProcessSP
-    CreateInstance (lldb_private::Target& target,
+    CreateInstance (lldb::TargetSP target_sp,
                     lldb_private::Listener &listener,
                     const lldb_private::FileSpec *crash_file_path);
 
@@ -56,64 +58,51 @@ public:
     //------------------------------------------------------------------
     // Constructors and Destructors
     //------------------------------------------------------------------
-    ProcessElfCore(lldb_private::Target& target,
-                    lldb_private::Listener &listener,
-                    const lldb_private::FileSpec &core_file);
+    ProcessElfCore(lldb::TargetSP target_sp,
+                   lldb_private::Listener &listener,
+                   const lldb_private::FileSpec &core_file);
 
-    virtual
-    ~ProcessElfCore();
+    ~ProcessElfCore() override;
 
     //------------------------------------------------------------------
     // Check if a given Process
     //------------------------------------------------------------------
-    virtual bool
-    CanDebug (lldb_private::Target &target,
-              bool plugin_specified_by_name) override;
+    bool CanDebug(lldb::TargetSP target_sp, bool plugin_specified_by_name) override;
 
     //------------------------------------------------------------------
     // Creating a new process, or attaching to an existing one
     //------------------------------------------------------------------
-    virtual lldb_private::Error
-    DoLoadCore () override;
+    lldb_private::Error DoLoadCore() override;
 
-    virtual lldb_private::DynamicLoader *
-    GetDynamicLoader () override;
+    lldb_private::DynamicLoader *GetDynamicLoader() override;
 
     //------------------------------------------------------------------
     // PluginInterface protocol
     //------------------------------------------------------------------
-    virtual lldb_private::ConstString
-    GetPluginName() override;
+    lldb_private::ConstString GetPluginName() override;
 
-    virtual uint32_t
-    GetPluginVersion() override;
+    uint32_t GetPluginVersion() override;
 
     //------------------------------------------------------------------
     // Process Control
     //------------------------------------------------------------------
-    virtual lldb_private::Error
-    DoDestroy () override;
+    lldb_private::Error DoDestroy() override;
 
-    virtual void
-    RefreshStateAfterStop() override;
+    void RefreshStateAfterStop() override;
 
     //------------------------------------------------------------------
     // Process Queries
     //------------------------------------------------------------------
-    virtual bool
-    IsAlive () override;
+    bool IsAlive() override;
 
     //------------------------------------------------------------------
     // Process Memory
     //------------------------------------------------------------------
-    virtual size_t
-    ReadMemory (lldb::addr_t addr, void *buf, size_t size, lldb_private::Error &error) override;
+    size_t ReadMemory(lldb::addr_t addr, void *buf, size_t size, lldb_private::Error &error) override;
 
-    virtual size_t
-    DoReadMemory (lldb::addr_t addr, void *buf, size_t size, lldb_private::Error &error) override;
+    size_t DoReadMemory(lldb::addr_t addr, void *buf, size_t size, lldb_private::Error &error) override;
 
-    virtual lldb::addr_t
-    GetImageInfoAddress () override;
+    lldb::addr_t GetImageInfoAddress() override;
 
     lldb_private::ArchSpec
     GetArchitecture();
@@ -126,11 +115,18 @@ protected:
     void
     Clear ( );
 
-    virtual bool
-    UpdateThreadList (lldb_private::ThreadList &old_thread_list,
-                      lldb_private::ThreadList &new_thread_list) override;
+    bool UpdateThreadList(lldb_private::ThreadList &old_thread_list,
+                          lldb_private::ThreadList &new_thread_list) override;
 
 private:
+    struct NT_FILE_Entry
+    {
+        lldb::addr_t start;
+        lldb::addr_t end;
+        lldb::addr_t file_ofs;
+        lldb_private::ConstString path;
+    };
+
     //------------------------------------------------------------------
     // For ProcessElfCore only
     //------------------------------------------------------------------
@@ -156,6 +152,9 @@ private:
     // Address ranges found in the core
     VMRangeToFileOffset m_core_aranges;
 
+    // NT_FILE entries found from the NOTE segment
+    std::vector<NT_FILE_Entry> m_nt_file_entries;
+
     // Parse thread(s) data structures(prstatus, prpsinfo) from given NOTE segment
     void
     ParseThreadContextsFromNoteSegment (const elf::ELFProgramHeader *segment_header,
@@ -170,4 +169,4 @@ private:
     AddAddressRangeFromLoadSegment(const elf::ELFProgramHeader *header);
 };
 
-#endif  // liblldb_ProcessElffCore_h_
+#endif // liblldb_ProcessElfCore_h_

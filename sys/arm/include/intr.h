@@ -43,6 +43,28 @@
 #include <dev/ofw/openfirm.h>
 #endif
 
+#ifdef ARM_INTRNG
+
+#ifndef NIRQ
+#define	NIRQ		1024	/* XXX - It should be an option. */
+#endif
+
+#include <sys/intr.h>
+
+#ifdef SMP
+typedef void intr_ipi_send_t(void *, cpuset_t, u_int);
+typedef void intr_ipi_handler_t(void *);
+
+void intr_ipi_dispatch(u_int, struct trapframe *);
+void intr_ipi_send(cpuset_t, u_int);
+
+void intr_ipi_setup(u_int, const char *, intr_ipi_handler_t *, void *,
+    intr_ipi_send_t *, void *);
+
+int intr_pic_ipi_setup(u_int, const char *, intr_ipi_handler_t *, void *);
+#endif
+#else /* ARM_INTRNG */
+
 /* XXX move to std.* files? */
 #ifdef CPU_XSCALE_81342
 #define NIRQ		128
@@ -71,7 +93,6 @@
 #define NIRQ		32
 #endif
 
-
 int arm_get_next_irq(int);
 void arm_mask_irq(uintptr_t);
 void arm_unmask_irq(uintptr_t);
@@ -83,14 +104,15 @@ extern void (*arm_post_filter)(void *);
 extern int (*arm_config_irq)(int irq, enum intr_trigger trig,
     enum intr_polarity pol);
 
-void arm_irq_memory_barrier(uintptr_t);
-
-void arm_init_secondary_ic(void);
-int  gic_decode_fdt(uint32_t iparentnode, uint32_t *intrcells, int *interrupt,
-    int *trig, int *pol);
+void intr_pic_init_secondary(void);
 
 #ifdef FDT
-int arm_fdt_map_irq(phandle_t, pcell_t *, int);
+int gic_decode_fdt(phandle_t, pcell_t *, int *, int *, int *);
+int intr_fdt_map_irq(phandle_t, pcell_t *, int);
 #endif
+
+#endif /* ARM_INTRNG */
+
+void arm_irq_memory_barrier(uintptr_t);
 
 #endif	/* _MACHINE_INTR_H */

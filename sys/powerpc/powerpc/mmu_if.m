@@ -124,6 +124,12 @@ CODE {
 	{
 		return;
 	}
+
+	static int mmu_null_change_attr(mmu_t mmu, vm_offset_t va,
+	    vm_size_t sz, vm_memattr_t mode)
+	{
+		return (0);
+	}
 };
 
 
@@ -933,3 +939,43 @@ METHOD void dumpsys_unmap {
 METHOD void scan_init {
 	mmu_t		_mmu;
 };
+
+/**
+ * @brief Create a temporary thread-local KVA mapping of a single page.
+ *
+ * @param _pg		The physical page to map
+ *
+ * @retval addr		The temporary KVA
+ */
+METHOD vm_offset_t quick_enter_page {
+	mmu_t		_mmu;
+	vm_page_t	_pg;
+};
+
+/**
+ * @brief Undo a mapping created by quick_enter_page
+ *
+ * @param _va		The mapped KVA
+ */
+METHOD void quick_remove_page {
+	mmu_t		_mmu;
+	vm_offset_t	_va;
+};
+
+/**
+ * @brief Change the specified virtual address range's memory type.
+ *
+ * @param _va		The virtual base address to change
+ *
+ * @param _sz		Size of the region to change
+ *
+ * @param _mode		New mode to set on the VA range
+ *
+ * @retval error	0 on success, EINVAL or ENOMEM on error.
+ */
+METHOD int change_attr {
+	mmu_t		_mmu;
+	vm_offset_t	_va;
+	vm_size_t	_sz;
+	vm_memattr_t	_mode;
+} DEFAULT mmu_null_change_attr;

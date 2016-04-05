@@ -7,8 +7,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "lldb/lldb-python.h"
-
 #include "lldb/API/SBProcess.h"
 
 // C Includes
@@ -21,6 +19,7 @@
 #include "lldb/Core/Debugger.h"
 #include "lldb/Core/Log.h"
 #include "lldb/Core/Module.h"
+#include "lldb/Core/PluginManager.h"
 #include "lldb/Core/State.h"
 #include "lldb/Core/Stream.h"
 #include "lldb/Core/StreamFile.h"
@@ -169,11 +168,11 @@ SBProcess::RemoteLaunch (char const **argv,
         {
             if (stop_at_entry)
                 launch_flags |= eLaunchFlagStopAtEntry;
-            ProcessLaunchInfo launch_info (stdin_path,
-                                           stdout_path,
-                                           stderr_path,
-                                           working_directory,
-                                           launch_flags);
+            ProcessLaunchInfo launch_info(FileSpec{stdin_path, false},
+                                          FileSpec{stdout_path, false},
+                                          FileSpec{stderr_path, false},
+                                          FileSpec{working_directory, false},
+                                          launch_flags);
             Module *exe_module = process_sp->GetTarget().GetExecutableModulePointer();
             if (exe_module)
                 launch_info.SetExecutableFile(exe_module->GetPlatformFileSpec(), true);
@@ -411,7 +410,7 @@ SBProcess::GetAsyncProfileData(char *dst, size_t dst_len) const
 
     Log *log(lldb_private::GetLogIfAllCategoriesSet (LIBLLDB_LOG_API));
     if (log)
-        log->Printf ("SBProcess(%p)::GetProfileData (dst=\"%.*s\", dst_len=%" PRIu64 ") => %" PRIu64,
+        log->Printf ("SBProcess(%p)::GetAsyncProfileData (dst=\"%.*s\", dst_len=%" PRIu64 ") => %" PRIu64,
                      static_cast<void*>(process_sp.get()),
                      static_cast<int>(bytes_read), dst,
                      static_cast<uint64_t>(dst_len),
@@ -603,6 +602,30 @@ SBProcess::GetStopID(bool include_expression_stops)
     return 0;
 }
 
+SBEvent
+SBProcess::GetStopEventForStopID(uint32_t stop_id)
+{
+    Log *log(lldb_private::GetLogIfAllCategoriesSet (LIBLLDB_LOG_API));
+
+    SBEvent sb_event;
+    EventSP event_sp;
+    ProcessSP process_sp(GetSP());
+    if (process_sp)
+    {
+        Mutex::Locker api_locker (process_sp->GetTarget().GetAPIMutex());
+        event_sp = process_sp->GetStopEventForStopID(stop_id);
+        sb_event.reset(event_sp);
+    }
+
+    if (log)
+        log->Printf ("SBProcess(%p)::GetStopEventForStopID (stop_id=%" PRIu32 ") => SBEvent(%p)",
+                     static_cast<void*>(process_sp.get()),
+                     stop_id,
+                     static_cast<void*>(event_sp.get()));
+
+    return sb_event;
+}
+
 StateType
 SBProcess::GetState ()
 {
@@ -768,7 +791,7 @@ SBProcess::Destroy ()
     if (process_sp)
     {
         Mutex::Locker api_locker (process_sp->GetTarget().GetAPIMutex());
-        sb_error.SetError(process_sp->Destroy());
+        sb_error.SetError(process_sp->Destroy(false));
     }
     else
         sb_error.SetErrorString ("SBProcess is invalid");
@@ -821,7 +844,7 @@ SBProcess::Kill ()
     if (process_sp)
     {
         Mutex::Locker api_locker (process_sp->GetTarget().GetAPIMutex());
-        sb_error.SetError (process_sp->Destroy());
+        sb_error.SetError (process_sp->Destroy(true));
     }
     else
         sb_error.SetErrorString ("SBProcess is invalid");
@@ -890,14 +913,10 @@ SBProcess::Signal (int signo)
 SBUnixSignals
 SBProcess::GetUnixSignals()
 {
-    SBUnixSignals sb_unix_signals;
-    ProcessSP process_sp(GetSP());
-    if (process_sp)
-    {
-        sb_unix_signals.SetSP(process_sp);
-    }
+    if (auto process_sp = GetSP())
+        return SBUnixSignals{process_sp};
 
-    return sb_unix_signals;
+    return {};
 }
 
 void
@@ -918,9 +937,9 @@ SBProcess::GetThreadByID (tid_t tid)
     ProcessSP process_sp(GetSP());
     if (process_sp)
     {
-        Mutex::Locker api_locker (process_sp->GetTarget().GetAPIMutex());
         Process::StopLocker stop_locker;
         const bool can_update = stop_locker.TryLock(&process_sp->GetRunLock());
+        Mutex::Locker api_locker (process_sp->GetTarget().GetAPIMutex());
         thread_sp = process_sp->GetThreadList().FindThreadByID (tid, can_update);
         sb_thread.SetThread (thread_sp);
     }
@@ -942,9 +961,9 @@ SBProcess::GetThreadByIndexID (uint32_t index_id)
     ProcessSP process_sp(GetSP());
     if (process_sp)
     {
-        Mutex::Locker api_locker (process_sp->GetTarget().GetAPIMutex());
         Process::StopLocker stop_locker;
         const bool can_update = stop_locker.TryLock(&process_sp->GetRunLock());
+        Mutex::Locker api_locker (process_sp->GetTarget().GetAPIMutex());
         thread_sp = process_sp->GetThreadList().FindThreadByIndexID (index_id, can_update);
         sb_thread.SetThread (thread_sp);
     }
@@ -976,7 +995,15 @@ SBProcess::GetStateFromEvent (const SBEvent &event)
 bool
 SBProcess::GetRestartedFromEvent (const SBEvent &event)
 {
-    return Process::ProcessEventData::GetRestartedFromEvent (event.get());
+    Log *log(lldb_private::GetLogIfAllCategoriesSet (LIBLLDB_LOG_API));
+
+    bool ret_val = Process::ProcessEventData::GetRestartedFromEvent (event.get());
+
+    if (log)
+        log->Printf ("SBProcess::%s (event.sp=%p) => %d", __FUNCTION__,
+                     static_cast<void*>(event.get()), ret_val);
+
+    return ret_val;
 }
 
 size_t
@@ -999,9 +1026,15 @@ SBProcess::GetProcessFromEvent (const SBEvent &event)
 }
 
 bool
+SBProcess::GetInterruptedFromEvent (const SBEvent &event)
+{
+    return Process::ProcessEventData::GetInterruptedFromEvent(event.get());
+}
+
+bool
 SBProcess::EventIsProcessEvent (const SBEvent &event)
 {
-    return strcmp (event.GetBroadcasterClass(), SBProcess::GetBroadcasterClass()) == 0;
+    return event.GetBroadcasterClass() == SBProcess::GetBroadcasterClass();
 }
 
 SBBroadcaster
@@ -1263,7 +1296,15 @@ SBProcess::GetNumSupportedHardwareWatchpoints (lldb::SBError &sb_error) const
 }
 
 uint32_t
-SBProcess::LoadImage (lldb::SBFileSpec &sb_image_spec, lldb::SBError &sb_error)
+SBProcess::LoadImage (lldb::SBFileSpec &sb_remote_image_spec, lldb::SBError &sb_error)
+{
+    return LoadImage(SBFileSpec(), sb_remote_image_spec, sb_error);
+}
+
+uint32_t
+SBProcess::LoadImage (const lldb::SBFileSpec &sb_local_image_spec,
+                      const lldb::SBFileSpec &sb_remote_image_spec,
+                      lldb::SBError &sb_error)
 {
     ProcessSP process_sp(GetSP());
     if (process_sp)
@@ -1272,7 +1313,11 @@ SBProcess::LoadImage (lldb::SBFileSpec &sb_image_spec, lldb::SBError &sb_error)
         if (stop_locker.TryLock(&process_sp->GetRunLock()))
         {
             Mutex::Locker api_locker (process_sp->GetTarget().GetAPIMutex());
-            return process_sp->LoadImage (*sb_image_spec, sb_error.ref());
+            PlatformSP platform_sp = process_sp->GetTarget().GetPlatform();
+            return platform_sp->LoadImage (process_sp.get(),
+                                           *sb_local_image_spec,
+                                           *sb_remote_image_spec,
+                                           sb_error.ref());
         }
         else
         {
@@ -1297,7 +1342,8 @@ SBProcess::UnloadImage (uint32_t image_token)
         if (stop_locker.TryLock(&process_sp->GetRunLock()))
         {
             Mutex::Locker api_locker (process_sp->GetTarget().GetAPIMutex());
-            sb_error.SetError (process_sp->UnloadImage (image_token));
+            PlatformSP platform_sp = process_sp->GetTarget().GetPlatform();
+            sb_error.SetError (platform_sp->UnloadImage (process_sp.get(), image_token));
         }
         else
         {
@@ -1400,4 +1446,28 @@ SBProcess::IsInstrumentationRuntimePresent(InstrumentationRuntimeType type)
         return false;
     
     return runtime_sp->IsActive();
+}
+
+lldb::SBError
+SBProcess::SaveCore(const char *file_name)
+{
+    lldb::SBError error;
+    ProcessSP process_sp(GetSP());
+    if (!process_sp)
+    {
+        error.SetErrorString("SBProcess is invalid");
+        return error;
+    }
+
+    Mutex::Locker api_locker(process_sp->GetTarget().GetAPIMutex());
+
+    if (process_sp->GetState() != eStateStopped)
+    {
+        error.SetErrorString("the process is not stopped");
+        return error;
+    }
+
+    FileSpec core_file(file_name, false);
+    error.ref() = PluginManager::SaveCore(process_sp, core_file);
+    return error;
 }

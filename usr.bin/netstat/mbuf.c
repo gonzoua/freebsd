@@ -310,34 +310,49 @@ mbpr(void *kvmd, u_long mbaddr)
 	    jumbop_failures, jumbo9_failures, jumbo16_failures,
 	    jumbop_size / 1024);
 
-	if (live) {
-		mlen = sizeof(nsfbufs);
-		if (!sysctlbyname("kern.ipc.nsfbufs", &nsfbufs, &mlen, NULL,
-		    0) &&
-		    !sysctlbyname("kern.ipc.nsfbufsused", &nsfbufsused,
-		    &mlen, NULL, 0) &&
-		    !sysctlbyname("kern.ipc.nsfbufspeak", &nsfbufspeak,
-		    &mlen, NULL, 0))
-			xo_emit("{:nsfbufs-current/%d}/{:nsfbufs-peak/%d}/"
-			    "{:nsfbufs/%d} "
-			    "{N:sfbufs in use (current\\/peak\\/max)}\n",
-			    nsfbufsused, nsfbufspeak, nsfbufs);
-		mlen = sizeof(sfstat);
-		if (sysctlbyname("kern.ipc.sfstat", &sfstat, &mlen, NULL, 0)) {
-			xo_warn("kern.ipc.sfstat");
-			goto out;
-		}
-	} else {
-		if (kread_counters(mbaddr, (char *)&sfstat, sizeof sfstat) != 0)
-			goto out;
-	}
+	mlen = sizeof(nsfbufs);
+	if (live &&
+	    sysctlbyname("kern.ipc.nsfbufs", &nsfbufs, &mlen, NULL, 0) == 0 &&
+	    sysctlbyname("kern.ipc.nsfbufsused", &nsfbufsused, &mlen,
+	    NULL, 0) == 0 &&
+	    sysctlbyname("kern.ipc.nsfbufspeak", &nsfbufspeak, &mlen,
+	    NULL, 0) == 0)
+		xo_emit("{:nsfbufs-current/%d}/{:nsfbufs-peak/%d}/"
+		    "{:nsfbufs/%d} "
+		    "{N:sfbufs in use (current\\/peak\\/max)}\n",
+		    nsfbufsused, nsfbufspeak, nsfbufs);
+
+	if (fetch_stats("kern.ipc.sfstat", mbaddr, &sfstat, sizeof(sfstat),
+	    kread_counters) != 0)
+		goto out;
+
+        xo_emit("{:sendfile-syscalls/%ju} {N:sendfile syscalls}\n",
+	    (uintmax_t)sfstat.sf_syscalls); 
+        xo_emit("{:sendfile-no-io/%ju} "
+	    "{N:sendfile syscalls completed without I\\/O request}\n", 
+            (uintmax_t)sfstat.sf_noiocnt);
+	xo_emit("{:sendfile-io-count/%ju} "
+	    "{N:requests for I\\/O initiated by sendfile}\n",
+	    (uintmax_t)sfstat.sf_iocnt);
+        xo_emit("{:sendfile-pages-sent/%ju} "
+	    "{N:pages read by sendfile as part of a request}\n",
+            (uintmax_t)sfstat.sf_pages_read);
+        xo_emit("{:sendfile-pages-valid/%ju} "
+	    "{N:pages were valid at time of a sendfile request}\n",
+            (uintmax_t)sfstat.sf_pages_valid);
+        xo_emit("{:sendfile-requested-readahead/%ju} "
+	    "{N:pages were requested for read ahead by applications}\n",
+            (uintmax_t)sfstat.sf_rhpages_requested);
+        xo_emit("{:sendfile-readahead/%ju} "
+	    "{N:pages were read ahead by sendfile}\n",
+            (uintmax_t)sfstat.sf_rhpages_read);
+	xo_emit("{:sendfile-busy-encounters/%ju} "
+	    "{N:times sendfile encountered an already busy page}\n",
+	    (uintmax_t)sfstat.sf_busy);
 	xo_emit("{:sfbufs-alloc-failed/%ju} {N:requests for sfbufs denied}\n",
 	    (uintmax_t)sfstat.sf_allocfail);
 	xo_emit("{:sfbufs-alloc-wait/%ju} {N:requests for sfbufs delayed}\n",
 	    (uintmax_t)sfstat.sf_allocwait);
-	xo_emit("{:sfbufs-io-count/%ju} "
-	    "{N:requests for I\\/O initiated by sendfile}\n",
-	    (uintmax_t)sfstat.sf_iocnt);
 out:
 	xo_close_container("mbuf-statistics");
 	memstat_mtl_free(mtlp);

@@ -7,14 +7,11 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "lldb/Target/ThreadPlanCallFunction.h"
-
 // C Includes
 // C++ Includes
 // Other libraries and framework includes
-
 // Project includes
-#include "lldb/lldb-private-log.h"
+#include "lldb/Target/ThreadPlanCallFunction.h"
 #include "lldb/Breakpoint/Breakpoint.h"
 #include "lldb/Breakpoint/BreakpointLocation.h"
 #include "lldb/Core/Address.h"
@@ -22,6 +19,7 @@
 #include "lldb/Core/Module.h"
 #include "lldb/Core/Stream.h"
 #include "lldb/Symbol/ObjectFile.h"
+#include "lldb/Target/ABI.h"
 #include "lldb/Target/LanguageRuntime.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Target/RegisterContext.h"
@@ -76,7 +74,7 @@ ThreadPlanCallFunction::ConstructorSetup (Thread &thread,
 
     Module *exe_module = GetTarget().GetExecutableModulePointer();
 
-    if (exe_module == NULL)
+    if (exe_module == nullptr)
     {
         m_constructor_errors.Printf ("Can't execute code without an executable module.");
         if (log)
@@ -135,7 +133,7 @@ ThreadPlanCallFunction::ConstructorSetup (Thread &thread,
 
 ThreadPlanCallFunction::ThreadPlanCallFunction (Thread &thread,
                                                 const Address &function,
-                                                const ClangASTType &return_type,
+                                                const CompilerType &return_type,
                                                 llvm::ArrayRef<addr_t> args,
                                                 const EvaluateExpressionOptions &options) :
     ThreadPlan (ThreadPlan::eKindCallFunction, "Call function plan", thread, eVoteNoOpinion, eVoteNoOpinion),
@@ -147,15 +145,16 @@ ThreadPlanCallFunction::ThreadPlanCallFunction (Thread &thread,
     m_trap_exceptions (options.GetTrapExceptions()),
     m_function_addr (function),
     m_function_sp (0),
-    m_return_type (return_type),
     m_takedown_done (false),
     m_should_clear_objc_exception_bp(false),
     m_should_clear_cxx_exception_bp (false),
-    m_stop_address (LLDB_INVALID_ADDRESS)
+    m_stop_address (LLDB_INVALID_ADDRESS),
+    m_return_type (return_type)
 {
-    lldb::addr_t start_load_addr;
-    ABI *abi;
-    lldb::addr_t function_load_addr;
+    lldb::addr_t start_load_addr = LLDB_INVALID_ADDRESS;
+    lldb::addr_t function_load_addr = LLDB_INVALID_ADDRESS;
+    ABI *abi = nullptr;
+
     if (!ConstructorSetup (thread, abi, start_load_addr, function_load_addr))
         return;
 
@@ -169,6 +168,26 @@ ThreadPlanCallFunction::ThreadPlanCallFunction (Thread &thread,
     ReportRegisterState ("Function call was set up.  Register state was:");
 
     m_valid = true;    
+}
+
+ThreadPlanCallFunction::ThreadPlanCallFunction(Thread &thread,
+                                               const Address &function,
+                                               const EvaluateExpressionOptions &options) :
+    ThreadPlan(ThreadPlan::eKindCallFunction, "Call function plan", thread, eVoteNoOpinion, eVoteNoOpinion),
+    m_valid(false),
+    m_stop_other_threads(options.GetStopOthers()),
+    m_unwind_on_error(options.DoesUnwindOnError()),
+    m_ignore_breakpoints(options.DoesIgnoreBreakpoints()),
+    m_debug_execution(options.GetDebug()),
+    m_trap_exceptions(options.GetTrapExceptions()),
+    m_function_addr(function),
+    m_function_sp(0),
+    m_takedown_done(false),
+    m_should_clear_objc_exception_bp(false),
+    m_should_clear_cxx_exception_bp(false),
+    m_stop_address(LLDB_INVALID_ADDRESS),
+    m_return_type(CompilerType())
+{
 }
 
 ThreadPlanCallFunction::~ThreadPlanCallFunction ()
@@ -222,13 +241,7 @@ ThreadPlanCallFunction::DoTakedown (bool success)
     {
         if (success)
         {
-            ProcessSP process_sp (m_thread.GetProcess());
-            const ABI *abi = process_sp ? process_sp->GetABI().get() : NULL;
-            if (abi && m_return_type.IsValid())
-            {
-                const bool persistent = false;
-                m_return_valobj_sp = abi->GetReturnValueObject (m_thread, m_return_type, persistent);
-            }
+            SetReturnValue();
         }
         if (log)
             log->Printf ("ThreadPlanCallFunction(%p): DoTakedown called for thread 0x%4.4" PRIx64 ", m_valid: %d complete: %d.\n",
@@ -247,7 +260,6 @@ ThreadPlanCallFunction::DoTakedown (bool success)
         ClearBreakpoints();
         if (log && log->GetVerbose())
             ReportRegisterState ("Restoring thread state after function call.  Restored register state:");
-
     }
     else
     {
@@ -296,7 +308,6 @@ ThreadPlanCallFunction::ValidatePlan (Stream *error)
     return true;
 }
 
-
 Vote
 ThreadPlanCallFunction::ShouldReportStop(Event *event_ptr)
 {
@@ -314,7 +325,7 @@ ThreadPlanCallFunction::DoPlanExplainsStop (Event *event_ptr)
     
     // If our subplan knows why we stopped, even if it's done (which would forward the question to us)
     // we answer yes.
-    if (m_subplan_sp.get() != NULL && m_subplan_sp->PlanExplainsStop(event_ptr))
+    if (m_subplan_sp && m_subplan_sp->PlanExplainsStop(event_ptr))
     {
         SetPlanComplete();
         return true;
@@ -344,8 +355,7 @@ ThreadPlanCallFunction::DoPlanExplainsStop (Event *event_ptr)
     // We control breakpoints separately from other "stop reasons."  So first,
     // check the case where we stopped for an internal breakpoint, in that case, continue on.
     // If it is not an internal breakpoint, consult m_ignore_breakpoints.
-    
-    
+
     if (stop_reason == eStopReasonBreakpoint)
     {
         ProcessSP process_sp (m_thread.CalculateProcess());
@@ -407,18 +417,10 @@ ThreadPlanCallFunction::DoPlanExplainsStop (Event *event_ptr)
         // signal that is set not to stop.  Check that here first.  We just say we explain the stop
         // but aren't done and everything will continue on from there.
         
-        if (m_real_stop_info_sp->ShouldStopSynchronous(event_ptr))
+        if (m_real_stop_info_sp && m_real_stop_info_sp->ShouldStopSynchronous(event_ptr))
         {
             SetPlanComplete(false);
-            if (m_subplan_sp)
-            {
-                if (m_unwind_on_error)
-                    return true;
-                else
-                    return false;
-            }
-            else
-                return false;
+            return m_subplan_sp ? m_unwind_on_error : false;
         }
         else
             return true;
@@ -567,10 +569,20 @@ ThreadPlanCallFunction::SetStopOthers (bool new_value)
     m_subplan_sp->SetStopOthers(new_value);
 }
 
-
 bool
 ThreadPlanCallFunction::RestoreThreadState()
 {
     return GetThread().RestoreThreadStateFromCheckpoint(m_stored_thread_state);
 }
 
+void
+ThreadPlanCallFunction::SetReturnValue()
+{
+    ProcessSP process_sp(m_thread.GetProcess());
+    const ABI *abi = process_sp ? process_sp->GetABI().get() : nullptr;
+    if (abi && m_return_type.IsValid())
+    {
+        const bool persistent = false;
+        m_return_valobj_sp = abi->GetReturnValueObject(m_thread, m_return_type, persistent);
+    }
+}

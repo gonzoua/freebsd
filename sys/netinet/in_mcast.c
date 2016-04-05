@@ -38,9 +38,11 @@ __FBSDID("$FreeBSD$");
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
+#include <sys/lock.h>
 #include <sys/malloc.h>
 #include <sys/mbuf.h>
 #include <sys/protosw.h>
+#include <sys/rmlock.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
 #include <sys/protosw.h>
@@ -57,6 +59,7 @@ __FBSDID("$FreeBSD$");
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
+#include <netinet/in_fib.h>
 #include <netinet/in_pcb.h>
 #include <netinet/in_var.h>
 #include <netinet/ip_var.h>
@@ -513,8 +516,8 @@ in_getmulti(struct ifnet *ifp, const struct in_addr *group,
 	 */
 	inm = malloc(sizeof(*inm), M_IPMADDR, M_NOWAIT | M_ZERO);
 	if (inm == NULL) {
-		if_delmulti_ifma(ifma);
 		IF_ADDR_WUNLOCK(ifp);
+		if_delmulti_ifma(ifma);
 		return (ENOMEM);
 	}
 	inm->inm_addr = *group;
@@ -1748,6 +1751,7 @@ inp_get_source_filters(struct inpcb *inp, struct sockopt *sopt)
 int
 inp_getmoptions(struct inpcb *inp, struct sockopt *sopt)
 {
+	struct rm_priotracker	 in_ifa_tracker;
 	struct ip_mreqn		 mreqn;
 	struct ip_moptions	*imo;
 	struct ifnet		*ifp;
@@ -1787,7 +1791,7 @@ inp_getmoptions(struct inpcb *inp, struct sockopt *sopt)
 				mreqn.imr_address = imo->imo_multicast_addr;
 			} else if (ifp != NULL) {
 				mreqn.imr_ifindex = ifp->if_index;
-				IFP_TO_IA(ifp, ia);
+				IFP_TO_IA(ifp, ia, &in_ifa_tracker);
 				if (ia != NULL) {
 					mreqn.imr_address =
 					    IA_SIN(ia)->sin_addr;
@@ -1878,7 +1882,10 @@ static struct ifnet *
 inp_lookup_mcast_ifp(const struct inpcb *inp,
     const struct sockaddr_in *gsin, const struct in_addr ina)
 {
+	struct rm_priotracker in_ifa_tracker;
 	struct ifnet *ifp;
+	struct nhop4_basic nh4;
+	uint32_t fibnum;
 
 	KASSERT(gsin->sin_family == AF_INET, ("%s: not AF_INET", __func__));
 	KASSERT(IN_MULTICAST(ntohl(gsin->sin_addr.s_addr)),
@@ -1888,21 +1895,15 @@ inp_lookup_mcast_ifp(const struct inpcb *inp,
 	if (!in_nullhost(ina)) {
 		INADDR_TO_IFP(ina, ifp);
 	} else {
-		struct route ro;
-
-		ro.ro_rt = NULL;
-		memcpy(&ro.ro_dst, gsin, sizeof(struct sockaddr_in));
-		in_rtalloc_ign(&ro, 0, inp ? inp->inp_inc.inc_fibnum : 0);
-		if (ro.ro_rt != NULL) {
-			ifp = ro.ro_rt->rt_ifp;
-			KASSERT(ifp != NULL, ("%s: null ifp", __func__));
-			RTFREE(ro.ro_rt);
-		} else {
+		fibnum = inp ? inp->inp_inc.inc_fibnum : 0;
+		if (fib4_lookup_nh_basic(fibnum, gsin->sin_addr, 0, 0, &nh4)==0)
+			ifp = nh4.nh_ifp;
+		else {
 			struct in_ifaddr *ia;
 			struct ifnet *mifp;
 
 			mifp = NULL;
-			IN_IFADDR_RLOCK();
+			IN_IFADDR_RLOCK(&in_ifa_tracker);
 			TAILQ_FOREACH(ia, &V_in_ifaddrhead, ia_link) {
 				mifp = ia->ia_ifp;
 				if (!(mifp->if_flags & IFF_LOOPBACK) &&
@@ -1911,7 +1912,7 @@ inp_lookup_mcast_ifp(const struct inpcb *inp,
 					break;
 				}
 			}
-			IN_IFADDR_RUNLOCK();
+			IN_IFADDR_RUNLOCK(&in_ifa_tracker);
 		}
 	}
 

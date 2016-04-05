@@ -60,6 +60,7 @@ __FBSDID("$FreeBSD$");
 #include <netinet/in_var.h>
 #include <netinet/ip_encap.h>
 #include <netinet/ip_ecn.h>
+#include <netinet/in_fib.h>
 
 #ifdef INET6
 #include <netinet/ip6.h>
@@ -67,8 +68,6 @@ __FBSDID("$FreeBSD$");
 
 #include <net/if_gif.h>
 
-static int gif_validate4(const struct ip *, struct gif_softc *,
-	struct ifnet *);
 static int in_gif_input(struct mbuf **, int *, int);
 
 extern  struct domain inetdomain;
@@ -163,16 +162,22 @@ in_gif_input(struct mbuf **mp, int *offp, int proto)
 }
 
 /*
- * validate outer address.
+ * we know that we are in IFF_UP, outer address available, and outer family
+ * matched the physical addr family.  see gif_encapcheck().
  */
-static int
-gif_validate4(const struct ip *ip, struct gif_softc *sc, struct ifnet *ifp)
+int
+in_gif_encapcheck(const struct mbuf *m, int off, int proto, void *arg)
 {
+	const struct ip *ip;
+	struct gif_softc *sc;
 	int ret;
 
+	/* sanity check done in caller */
+	sc = (struct gif_softc *)arg;
 	GIF_RLOCK_ASSERT(sc);
 
 	/* check for address match */
+	ip = mtod(m, const struct ip *);
 	if (sc->gif_iphdr->ip_src.s_addr != ip->ip_dst.s_addr)
 		return (0);
 	ret = 32;
@@ -182,56 +187,20 @@ gif_validate4(const struct ip *ip, struct gif_softc *sc, struct ifnet *ifp)
 	} else
 		ret += 32;
 
-	/* martian filters on outer source - NOT done in ip_input! */
-	if (IN_MULTICAST(ntohl(ip->ip_src.s_addr)))
-		return (0);
-	switch ((ntohl(ip->ip_src.s_addr) & 0xff000000) >> 24) {
-	case 0:
-	case 127:
-	case 255:
-		return (0);
-	}
-
 	/* ingress filters on outer source */
-	if ((GIF2IFP(sc)->if_flags & IFF_LINK2) == 0 && ifp) {
-		struct sockaddr_in sin;
-		struct rtentry *rt;
+	if ((GIF2IFP(sc)->if_flags & IFF_LINK2) == 0) {
+		struct nhop4_basic nh4;
+		struct in_addr dst;
 
-		bzero(&sin, sizeof(sin));
-		sin.sin_family = AF_INET;
-		sin.sin_len = sizeof(struct sockaddr_in);
-		sin.sin_addr = ip->ip_src;
-		/* XXX MRT  check for the interface we would use on output */
-		rt = in_rtalloc1((struct sockaddr *)&sin, 0,
-		    0UL, sc->gif_fibnum);
-		if (!rt || rt->rt_ifp != ifp) {
-			if (rt)
-				RTFREE_LOCKED(rt);
+		dst = ip->ip_src;
+
+		if (fib4_lookup_nh_basic(sc->gif_fibnum, dst, 0, 0, &nh4) != 0)
 			return (0);
-		}
-		RTFREE_LOCKED(rt);
+
+		if (nh4.nh_ifp != m->m_pkthdr.rcvif)
+			return (0);
 	}
 	return (ret);
-}
-
-/*
- * we know that we are in IFF_UP, outer address available, and outer family
- * matched the physical addr family.  see gif_encapcheck().
- */
-int
-in_gif_encapcheck(const struct mbuf *m, int off, int proto, void *arg)
-{
-	struct ip ip;
-	struct gif_softc *sc;
-	struct ifnet *ifp;
-
-	/* sanity check done in caller */
-	sc = (struct gif_softc *)arg;
-	GIF_RLOCK_ASSERT(sc);
-
-	m_copydata(m, 0, sizeof(ip), (caddr_t)&ip);
-	ifp = ((m->m_flags & M_PKTHDR) != 0) ? m->m_pkthdr.rcvif : NULL;
-	return (gif_validate4(&ip, sc, ifp));
 }
 
 int

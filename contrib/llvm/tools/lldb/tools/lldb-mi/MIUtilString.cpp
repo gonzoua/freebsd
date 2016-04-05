@@ -7,24 +7,13 @@
 //
 //===----------------------------------------------------------------------===//
 
-//++
-// File:        MIUtilString.h
-//
-// Overview:    CMIUtilString implementation.
-//
-// Environment: Compilers:  Visual C++ 12.
-//                          gcc (Ubuntu/Linaro 4.8.1-10ubuntu9) 4.8.1
-//              Libraries:  See MIReadmetxt.
-//
-// Copyright:   None.
-//--
-
 // Third party headers
-#include <memory>   // std::unique_ptr
-#include <stdarg.h> // va_list, va_start, var_end
-#include <sstream>  // std::stringstream
-#include <string.h> // for strcpy
-#include <limits.h> // for ULONG_MAX
+#include <inttypes.h> // for PRIx8
+#include <limits.h>   // for ULONG_MAX
+#include <memory>     // std::unique_ptr
+#include <sstream>    // std::stringstream
+#include <stdarg.h>   // va_list, va_start, var_end
+#include <string.h>   // for strncmp
 
 // In-house headers:
 #include "MIUtilString.h"
@@ -36,7 +25,7 @@
 // Return:  None.
 // Throws:  None.
 //--
-CMIUtilString::CMIUtilString(void)
+CMIUtilString::CMIUtilString()
     : std::string()
 {
 }
@@ -48,7 +37,7 @@ CMIUtilString::CMIUtilString(void)
 // Return:  None.
 // Throws:  None.
 //--
-CMIUtilString::CMIUtilString(const MIchar *vpData)
+CMIUtilString::CMIUtilString(const char *vpData)
     : std::string(vpData)
 {
 }
@@ -56,37 +45,30 @@ CMIUtilString::CMIUtilString(const MIchar *vpData)
 //++ ------------------------------------------------------------------------------------
 // Details: CMIUtilString constructor.
 // Type:    Method.
-// Args:    vpData  - Pointer to UTF8 text data.
+// Args:    vpStr  - Text data.
 // Return:  None.
 // Throws:  None.
 //--
-CMIUtilString::CMIUtilString(const MIchar *const *vpData)
-    : std::string((const char *)vpData)
+CMIUtilString::CMIUtilString(const std::string& vrStr)
+    : std::string(vrStr)
 {
 }
 
 //++ ------------------------------------------------------------------------------------
-// Details: CMIUtilString assigment operator.
+// Details: CMIUtilString assignment operator.
 // Type:    Method.
 // Args:    vpRhs   - Pointer to UTF8 text data.
 // Return:  CMIUtilString & - *this string.
 // Throws:  None.
 //--
-CMIUtilString &CMIUtilString::operator=(const MIchar *vpRhs)
+CMIUtilString &CMIUtilString::operator=(const char *vpRhs)
 {
-    if (*this == vpRhs)
-        return *this;
-
-    if (vpRhs != nullptr)
-    {
-        assign(vpRhs);
-    }
-
+    assign(vpRhs);
     return *this;
 }
 
 //++ ------------------------------------------------------------------------------------
-// Details: CMIUtilString assigment operator.
+// Details: CMIUtilString assignment operator.
 // Type:    Method.
 // Args:    vrRhs   - The other string to copy from.
 // Return:  CMIUtilString & - *this string.
@@ -94,11 +76,7 @@ CMIUtilString &CMIUtilString::operator=(const MIchar *vpRhs)
 //--
 CMIUtilString &CMIUtilString::operator=(const std::string &vrRhs)
 {
-    if (*this == vrRhs)
-        return *this;
-
     assign(vrRhs);
-
     return *this;
 }
 
@@ -109,7 +87,7 @@ CMIUtilString &CMIUtilString::operator=(const std::string &vrRhs)
 // Return:  None.
 // Throws:  None.
 //--
-CMIUtilString::~CMIUtilString(void)
+CMIUtilString::~CMIUtilString()
 {
 }
 
@@ -213,10 +191,10 @@ CMIUtilString::FormatValist(const CMIUtilString &vrFormating, va_list vArgs)
 // Args:    vData       - (R) String data to be split up.
 //          vDelimiter  - (R) Delimiter char or text.
 //          vwVecSplits - (W) Container of splits found in string data.
-// Return:  MIuint - Number of splits found in the string data.
+// Return:  size_t - Number of splits found in the string data.
 // Throws:  None.
 //--
-MIuint
+size_t
 CMIUtilString::Split(const CMIUtilString &vDelimiter, VecString_t &vwVecSplits) const
 {
     vwVecSplits.clear();
@@ -224,39 +202,29 @@ CMIUtilString::Split(const CMIUtilString &vDelimiter, VecString_t &vwVecSplits) 
     if (this->empty() || vDelimiter.empty())
         return 0;
 
-    MIint nPos = find(vDelimiter);
-    if (nPos == (MIint)std::string::npos)
+    const size_t nLen(length());
+    size_t nOffset(0);
+    do
     {
-        vwVecSplits.push_back(*this);
-        return 1;
-    }
-    const MIint strLen(length());
-    if (nPos == strLen)
-    {
-        vwVecSplits.push_back(*this);
-        return 1;
-    }
+        // Find first occurrence which doesn't match to the delimiter
+        const size_t nSectionPos(FindFirstNot(vDelimiter, nOffset));
+        if (nSectionPos == std::string::npos)
+            break;
 
-    MIuint nAdd1(1);
-    if ((nPos > 0) && (substr(0, nPos) != vDelimiter))
-    {
-        nPos = 0;
-        nAdd1 = 0;
+        // Find next occurrence of the delimiter after section
+        size_t nNextDelimiterPos(FindFirst(vDelimiter, nSectionPos));
+        if (nNextDelimiterPos == std::string::npos)
+            nNextDelimiterPos = nLen;
+
+        // Extract string between delimiters
+        const size_t nSectionLen(nNextDelimiterPos - nSectionPos);
+        const std::string strSection(substr(nSectionPos, nSectionLen));
+        vwVecSplits.push_back(strSection);
+
+        // Next
+        nOffset = nNextDelimiterPos + 1;
     }
-    MIint nPos2 = find(vDelimiter, nPos + 1);
-    while (nPos2 != (MIint)std::string::npos)
-    {
-        const MIuint len(nPos2 - nPos - nAdd1);
-        const std::string strSection(substr(nPos + nAdd1, len));
-        if (strSection != vDelimiter)
-            vwVecSplits.push_back(strSection.c_str());
-        nPos += len + 1;
-        nPos2 = find(vDelimiter, nPos + 1);
-        nAdd1 = 0;
-    }
-    const std::string strSection(substr(nPos, strLen - nPos));
-    if ((strSection.length() != 0) && (strSection != vDelimiter))
-        vwVecSplits.push_back(strSection.c_str());
+    while (nOffset < nLen);
 
     return vwVecSplits.size();
 }
@@ -265,17 +233,17 @@ CMIUtilString::Split(const CMIUtilString &vDelimiter, VecString_t &vwVecSplits) 
 // Details: Splits string into array of strings using delimiter. However the string is
 //          also considered for text surrounded by quotes. Text with quotes including the
 //          delimiter is treated as a whole. If multiple delimiter are found in sequence
-//          then they are not added to the list of splits. Quotes that are embedded in the
+//          then they are not added to the list of splits. Quotes that are embedded in
 //          the string as string formatted quotes are ignored (proceeded by a '\\') i.e.
 //          "\"MI GDB local C++.cpp\":88".
 // Type:    Method.
 // Args:    vData       - (R) String data to be split up.
 //          vDelimiter  - (R) Delimiter char or text.
 //          vwVecSplits - (W) Container of splits found in string data.
-// Return:  MIuint - Number of splits found in the string data.
+// Return:  size_t - Number of splits found in the string data.
 // Throws:  None.
 //--
-MIuint
+size_t
 CMIUtilString::SplitConsiderQuotes(const CMIUtilString &vDelimiter, VecString_t &vwVecSplits) const
 {
     vwVecSplits.clear();
@@ -283,82 +251,51 @@ CMIUtilString::SplitConsiderQuotes(const CMIUtilString &vDelimiter, VecString_t 
     if (this->empty() || vDelimiter.empty())
         return 0;
 
-    MIint nPos = find(vDelimiter);
-    if (nPos == (MIint)std::string::npos)
+    const size_t nLen(length());
+    size_t nOffset(0);
+    do
     {
-        vwVecSplits.push_back(*this);
-        return 1;
-    }
-    const MIint strLen(length());
-    if (nPos == strLen)
-    {
-        vwVecSplits.push_back(*this);
-        return 1;
-    }
+        // Find first occurrence which doesn't match to the delimiter
+        const size_t nSectionPos(FindFirstNot(vDelimiter, nOffset));
+        if (nSectionPos == std::string::npos)
+            break;
 
-    // Look for more quotes
-    bool bHaveQuotes = false;
-    const MIchar cBckSlash = '\\';
-    const MIchar cQuote = '"';
-    MIint nPosQ = find(cQuote);
-    MIint nPosQ2 = (MIint)std::string::npos;
-    if (nPosQ != (MIint)std::string::npos)
-    {
-        nPosQ2 = nPosQ + 1;
-        while (nPosQ2 < strLen)
+        // Find next occurrence of the delimiter after (quoted) section
+        const bool bSkipQuotedText(true);
+        bool bUnmatchedQuote(false);
+        size_t nNextDelimiterPos(FindFirst(vDelimiter, bSkipQuotedText, bUnmatchedQuote, nSectionPos));
+        if (bUnmatchedQuote)
         {
-            nPosQ2 = find(cQuote, nPosQ2);
-            if ((nPosQ2 == (MIint)std::string::npos) || (at(nPosQ2 - 1) != cBckSlash))
-                break;
-            nPosQ2++;
+            vwVecSplits.clear();
+            return 0;
         }
-        bHaveQuotes = (nPosQ2 != (MIint)std::string::npos);
-    }
+        if (nNextDelimiterPos == std::string::npos)
+            nNextDelimiterPos = nLen;
 
-    MIuint nAdd1(1);
-    if ((nPos > 0) && (substr(0, nPos) != vDelimiter))
-    {
-        nPos = 0;
-        nAdd1 = 0;
-    }
-    MIint nPos2 = find(vDelimiter, nPos + 1);
-    while (nPos2 != (MIint)std::string::npos)
-    {
-        if (!bHaveQuotes || (bHaveQuotes && ((nPos2 > nPosQ2) || (nPos2 < nPosQ))))
-        {
-            // Extract text or quoted text
-            const MIuint len(nPos2 - nPos - nAdd1);
-            const std::string strSection(substr(nPos + nAdd1, len));
-            if (strSection != vDelimiter)
-                vwVecSplits.push_back(strSection.c_str());
-            nPos += len + 1;
-            nPos2 = find(vDelimiter, nPos + 1);
-            nAdd1 = 0;
+        // Extract string between delimiters
+        const size_t nSectionLen(nNextDelimiterPos - nSectionPos);
+        const std::string strSection(substr(nSectionPos, nSectionLen));
+        vwVecSplits.push_back(strSection);
 
-            if (bHaveQuotes && (nPos2 > nPosQ2))
-            {
-                // Reset, look for more quotes
-                bHaveQuotes = false;
-                nPosQ = find(cQuote, nPos);
-                nPosQ2 = (MIint)std::string::npos;
-                if (nPosQ != (MIint)std::string::npos)
-                {
-                    nPosQ2 = find(cQuote, nPosQ + 1);
-                    bHaveQuotes = (nPosQ2 != (MIint)std::string::npos);
-                }
-            }
-        }
-        else
-        {
-            // Skip passed text in quotes
-            nPos2 = find(vDelimiter, nPosQ2 + 1);
-        }
+        // Next
+        nOffset = nNextDelimiterPos + 1;
     }
-    const std::string strSection(substr(nPos, strLen - nPos));
-    if ((strSection.length() != 0) && (strSection != vDelimiter))
-        vwVecSplits.push_back(strSection.c_str());
+    while (nOffset < nLen);
 
     return vwVecSplits.size();
+}
+
+//++ ------------------------------------------------------------------------------------
+// Details: Split string into lines using \n and return an array of strings.
+// Type:    Method.
+// Args:    vwVecSplits - (W) Container of splits found in string data.
+// Return:  size_t - Number of splits found in the string data.
+// Throws:  None.
+//--
+size_t
+CMIUtilString::SplitLines(VecString_t &vwVecSplits) const
+{
+    return Split("\n", vwVecSplits);
 }
 
 //++ ------------------------------------------------------------------------------------
@@ -370,13 +307,13 @@ CMIUtilString::SplitConsiderQuotes(const CMIUtilString &vDelimiter, VecString_t 
 // Throws:  None.
 //--
 CMIUtilString
-CMIUtilString::StripCREndOfLine(void) const
+CMIUtilString::StripCREndOfLine() const
 {
-    const MIint nPos = rfind('\n');
-    if (nPos == (MIint)std::string::npos)
+    const size_t nPos = rfind('\n');
+    if (nPos == std::string::npos)
         return *this;
 
-    const CMIUtilString strNew(substr(0, nPos).c_str());
+    const CMIUtilString strNew(substr(0, nPos));
 
     return strNew;
 }
@@ -390,7 +327,7 @@ CMIUtilString::StripCREndOfLine(void) const
 // Throws:  None.
 //--
 CMIUtilString
-CMIUtilString::StripCRAll(void) const
+CMIUtilString::StripCRAll() const
 {
     return FindAndReplace("\n", " ");
 }
@@ -410,12 +347,12 @@ CMIUtilString::FindAndReplace(const CMIUtilString &vFind, const CMIUtilString &v
     if (vFind.empty() || this->empty())
         return *this;
 
-    MIint nPos = find(vFind);
-    if (nPos == (MIint)std::string::npos)
+    size_t nPos = find(vFind);
+    if (nPos == std::string::npos)
         return *this;
 
     CMIUtilString strNew(*this);
-    while (nPos != (MIint)std::string::npos)
+    while (nPos != std::string::npos)
     {
         strNew.replace(nPos, vFind.length(), vReplaceWith);
         nPos += vReplaceWith.length();
@@ -433,7 +370,7 @@ CMIUtilString::FindAndReplace(const CMIUtilString &vFind, const CMIUtilString &v
 // Throws:  None.
 //--
 bool
-CMIUtilString::IsNumber(void) const
+CMIUtilString::IsNumber() const
 {
     if (empty())
         return false;
@@ -441,8 +378,30 @@ CMIUtilString::IsNumber(void) const
     if ((at(0) == '-') && (length() == 1))
         return false;
 
-    const MIint nPos = find_first_not_of("-.0123456789");
-    if (nPos != (MIint)std::string::npos)
+    const size_t nPos = find_first_not_of("-.0123456789");
+    if (nPos != std::string::npos)
+        return false;
+
+    return true;
+}
+
+//++ ------------------------------------------------------------------------------------
+// Details: Check if *this string is a hexadecimal number.
+// Type:    Method.
+// Args:    None.
+// Return:  bool - True = yes number, false not a number.
+// Throws:  None.
+//--
+bool
+CMIUtilString::IsHexadecimalNumber() const
+{
+    // Compare '0x..' prefix
+    if ((strncmp(c_str(), "0x", 2) != 0) && (strncmp(c_str(), "0X", 2) != 0))
+        return false;
+
+    // Skip '0x..' prefix
+    const size_t nPos = find_first_not_of("01234567890ABCDEFabcedf", 2);
+    if (nPos != std::string::npos)
         return false;
 
     return true;
@@ -452,7 +411,7 @@ CMIUtilString::IsNumber(void) const
 // Details: Extract the number from the string. The number can be either a hexadecimal or
 //          natural number. It cannot contain other non-numeric characters.
 // Type:    Method.
-// Args:    vwrNumber   - (W) Number exracted from the string.
+// Args:    vwrNumber   - (W) Number extracted from the string.
 // Return:  bool - True = yes number, false not a number.
 // Throws:  None.
 //--
@@ -478,7 +437,7 @@ CMIUtilString::ExtractNumber(MIint64 &vwrNumber) const
 //++ ------------------------------------------------------------------------------------
 // Details: Extract the number from the hexadecimal string..
 // Type:    Method.
-// Args:    vwrNumber   - (W) Number exracted from the string.
+// Args:    vwrNumber   - (W) Number extracted from the string.
 // Return:  bool - True = yes number, false not a number.
 // Throws:  None.
 //--
@@ -487,16 +446,16 @@ CMIUtilString::ExtractNumberFromHexadecimal(MIint64 &vwrNumber) const
 {
     vwrNumber = 0;
 
-    const MIint nPos = find_first_not_of("x01234567890ABCDEFabcedf");
-    if (nPos != (MIint)std::string::npos)
+    const size_t nPos = find_first_not_of("xX01234567890ABCDEFabcedf");
+    if (nPos != std::string::npos)
         return false;
 
-    const MIint64 nNum = ::strtoul(this->c_str(), nullptr, 16);
-    if (nNum != LONG_MAX)
-    {
-        vwrNumber = nNum;
-        return true;
-    }
+    errno = 0;
+    const MIuint64 nNum = ::strtoull(this->c_str(), nullptr, 16);
+    if (errno == ERANGE)
+        return false;
+
+    vwrNumber = static_cast<MIint64>(nNum);
 
     return true;
 }
@@ -505,21 +464,20 @@ CMIUtilString::ExtractNumberFromHexadecimal(MIint64 &vwrNumber) const
 // Details: Determine if the text is all valid alpha numeric characters. Letters can be
 //          either upper or lower case.
 // Type:    Static method.
-// Args:    vrText  - (R) The text data to examine.
+// Args:    vpText  - (R) The text data to examine.
 // Return:  bool - True = yes all alpha, false = one or more chars is non alpha.
 // Throws:  None.
 //--
 bool
-CMIUtilString::IsAllValidAlphaAndNumeric(const MIchar &vrText)
+CMIUtilString::IsAllValidAlphaAndNumeric(const char *vpText)
 {
-    const MIuint len = ::strlen(&vrText);
+    const size_t len = ::strlen(vpText);
     if (len == 0)
         return false;
 
-    MIchar *pPtr = const_cast<MIchar *>(&vrText);
-    for (MIuint i = 0; i < len; i++, pPtr++)
+    for (size_t i = 0; i < len; i++, vpText++)
     {
-        const MIchar c = *pPtr;
+        const char c = *vpText;
         if (::isalnum((int)c) == 0)
             return false;
     }
@@ -553,19 +511,19 @@ CMIUtilString::Compare(const CMIUtilString &vrLhs, const CMIUtilString &vrRhs)
 // Throws:  None.
 //--
 CMIUtilString
-CMIUtilString::Trim(void) const
+CMIUtilString::Trim() const
 {
     CMIUtilString strNew(*this);
-    const MIchar *pWhiteSpace = " \t\n\v\f\r";
-    const MIint nPos = find_last_not_of(pWhiteSpace);
-    if (nPos != (MIint)std::string::npos)
+    const char *pWhiteSpace = " \t\n\v\f\r";
+    const size_t nPos = find_last_not_of(pWhiteSpace);
+    if (nPos != std::string::npos)
     {
-        strNew = substr(0, nPos + 1).c_str();
+        strNew = substr(0, nPos + 1);
     }
-    const MIint nPos2 = strNew.find_first_not_of(pWhiteSpace);
-    if (nPos2 != (MIint)std::string::npos)
+    const size_t nPos2 = strNew.find_first_not_of(pWhiteSpace);
+    if (nPos2 != std::string::npos)
     {
-        strNew = strNew.substr(nPos2).c_str();
+        strNew = strNew.substr(nPos2);
     }
 
     return strNew;
@@ -579,14 +537,14 @@ CMIUtilString::Trim(void) const
 // Throws:  None.
 //--
 CMIUtilString
-CMIUtilString::Trim(const MIchar vChar) const
+CMIUtilString::Trim(const char vChar) const
 {
     CMIUtilString strNew(*this);
-    const MIint nLen = strNew.length();
+    const size_t nLen = strNew.length();
     if (nLen > 1)
     {
         if ((strNew[0] == vChar) && (strNew[nLen - 1] == vChar))
-            strNew = strNew.substr(1, nLen - 2).c_str();
+            strNew = strNew.substr(1, nLen - 2);
     }
 
     return strNew;
@@ -615,7 +573,7 @@ CMIUtilString::FormatBinary(const MIuint64 vnDecimal)
         nNum = nNum >> 1;
         nLen++;
     }
-    MIchar pN[nConstBits + 1];
+    char pN[nConstBits + 1];
     MIuint j = 0;
     for (i = nLen; i > 0; --i, j++)
     {
@@ -637,7 +595,7 @@ CMIUtilString::FormatBinary(const MIuint64 vnDecimal)
 // Throws:  None.
 //--
 CMIUtilString
-CMIUtilString::RemoveRepeatedCharacters(const MIchar vChar)
+CMIUtilString::RemoveRepeatedCharacters(const char vChar)
 {
     return RemoveRepeatedCharacters(0, vChar);
 }
@@ -648,22 +606,22 @@ CMIUtilString::RemoveRepeatedCharacters(const MIchar vChar)
 //          character.
 // Type:    Method.
 // Args:    vChar   - (R) The character to search for and remove adjacent duplicates.
-//          vnPos   - (R) Character position in the string.
+//          vnPos   - Character position in the string.
 // Return:  CMIUtilString - New version of the string.
 // Throws:  None.
 //--
 CMIUtilString
-CMIUtilString::RemoveRepeatedCharacters(const MIint vnPos, const MIchar vChar)
+CMIUtilString::RemoveRepeatedCharacters(size_t vnPos, const char vChar)
 {
-    const MIchar cQuote = '"';
+    const char cQuote = '"';
 
     // Look for first quote of two
-    MIint nPos = find(cQuote, vnPos);
-    if (nPos == (MIint)std::string::npos)
+    const size_t nPos = find(cQuote, vnPos);
+    if (nPos == std::string::npos)
         return *this;
 
-    const MIint nPosNext = nPos + 1;
-    if (nPosNext > (MIint)length())
+    const size_t nPosNext = nPos + 1;
+    if (nPosNext > length())
         return *this;
 
     if (at(nPosNext) == cQuote)
@@ -683,16 +641,343 @@ CMIUtilString::RemoveRepeatedCharacters(const MIint vnPos, const MIchar vChar)
 // Throws:  None.
 //--
 bool
-CMIUtilString::IsQuoted(void) const
+CMIUtilString::IsQuoted() const
 {
-    const MIchar cQuote = '"';
+    const char cQuote = '"';
 
     if (at(0) != cQuote)
         return false;
 
-    const MIint nLen = length();
+    const size_t nLen = length();
     if ((nLen > 0) && (at(nLen - 1) != cQuote))
         return false;
 
     return true;
+}
+
+//++ ------------------------------------------------------------------------------------
+// Details: Find first occurrence in *this string which matches the pattern.
+// Type:    Method.
+// Args:    vrPattern   - (R) The pattern to search for.
+//          vnPos       - The starting position at which to start searching. (Dflt = 0)
+// Return:  size_t - The position of the first substring that match.
+// Throws:  None.
+//--
+size_t
+CMIUtilString::FindFirst(const CMIUtilString &vrPattern, size_t vnPos /* = 0 */) const
+{
+    return find(vrPattern, vnPos);
+}
+
+//++ ------------------------------------------------------------------------------------
+// Details: Find first occurrence in *this string which matches the pattern and isn't surrounded by quotes.
+// Type:    Method.
+// Args:    vrPattern                 - (R) The pattern to search for.
+//          vbSkipQuotedText          - (R) True = don't look at quoted text, false = otherwise.
+//          vrwbNotFoundClosedQuote   - (W) True = parsing error: unmatched quote, false = otherwise.
+//          vnPos                     - Position of the first character in the string to be considered in the search. (Dflt = 0)
+// Return:  size_t - The position of the first substring that matches and isn't quoted.
+// Throws:  None.
+//--
+size_t
+CMIUtilString::FindFirst(const CMIUtilString &vrPattern, const bool vbSkipQuotedText, bool &vrwbNotFoundClosedQuote,
+                         size_t vnPos /* = 0 */) const
+{
+    vrwbNotFoundClosedQuote = false;
+
+    if (!vbSkipQuotedText)
+        return FindFirst(vrPattern, vnPos);
+
+    const size_t nLen(length());
+
+    size_t nPos = vnPos;
+    do
+    {
+        const size_t nQuotePos(FindFirstQuote(nPos));
+        const size_t nPatternPos(FindFirst(vrPattern, nPos));
+        if (nQuotePos == std::string::npos)
+            return nPatternPos;
+
+        const size_t nQuoteClosedPos = FindFirstQuote(nQuotePos + 1);
+        if (nQuoteClosedPos == std::string::npos)
+        {
+            vrwbNotFoundClosedQuote = true;
+            return std::string::npos;
+        }
+
+        if ((nPatternPos == std::string::npos) || (nPatternPos < nQuotePos))
+            return nPatternPos;
+
+        nPos = nQuoteClosedPos + 1;
+    }
+    while (nPos < nLen);
+
+    return std::string::npos;
+}
+
+//++ ------------------------------------------------------------------------------------
+// Details: Find first occurrence in *this string which doesn't match the pattern.
+// Type:    Method.
+// Args:    vrPattern   - (R) The pattern to search for.
+//          vnPos       - Position of the first character in the string to be considered in the search. (Dflt = 0)
+// Return:  size_t - The position of the first character that doesn't match.
+// Throws:  None.
+//--
+size_t
+CMIUtilString::FindFirstNot(const CMIUtilString &vrPattern, size_t vnPos /* = 0 */) const
+{
+    const size_t nLen(length());
+    const size_t nPatternLen(vrPattern.length());
+
+    size_t nPatternPos(vnPos);
+    do
+    {
+        const bool bMatchPattern(compare(nPatternPos, nPatternLen, vrPattern) == 0);
+        if (!bMatchPattern)
+            return nPatternPos;
+        nPatternPos += nPatternLen;
+    }
+    while (nPatternPos < nLen);
+
+    return std::string::npos;
+}
+
+//++ ------------------------------------------------------------------------------------
+// Details: Find first occurrence of not escaped quotation mark in *this string.
+// Type:    Method.
+// Args:    vnPos   - Position of the first character in the string to be considered in the search.
+// Return:  size_t - The position of the quotation mark.
+// Throws:  None.
+//--
+size_t
+CMIUtilString::FindFirstQuote(size_t vnPos) const
+{
+    const char cBckSlash('\\');
+    const char cQuote('"');
+    const size_t nLen(length());
+
+    size_t nPos = vnPos;
+    do
+    {
+        const size_t nBckSlashPos(find(cBckSlash, nPos));
+        const size_t nQuotePos(find(cQuote, nPos));
+        if ((nBckSlashPos == std::string::npos) || (nQuotePos == std::string::npos))
+            return nQuotePos;
+
+        if (nQuotePos < nBckSlashPos)
+            return nQuotePos;
+
+        // Skip 2 characters: First is '\', second is that which is escaped by '\'
+        nPos = nBckSlashPos + 2;
+    }
+    while (nPos < nLen);
+
+    return std::string::npos;
+}
+
+//++ ------------------------------------------------------------------------------------
+// Details: Get escaped string from *this string.
+// Type:    Method.
+// Args:    None.
+// Return:  CMIUtilString - The escaped version of the initial string.
+// Throws:  None.
+//--
+CMIUtilString
+CMIUtilString::Escape(bool vbEscapeQuotes /* = false */) const
+{
+    const size_t nLen(length());
+    CMIUtilString strNew;
+    strNew.reserve(nLen);
+    for (size_t nIndex(0); nIndex < nLen; ++nIndex)
+    {
+        const char cUnescapedChar((*this)[nIndex]);
+        if (cUnescapedChar == '"' && vbEscapeQuotes)
+            strNew.append("\\\"");
+        else
+            strNew.append(ConvertToPrintableASCII((char)cUnescapedChar));
+    }
+    return strNew;
+}
+
+//++ ------------------------------------------------------------------------------------
+// Details: Get string with backslashes in front of double quote '"' and backslash '\\'
+//          characters.
+// Type:    Method.
+// Args:    None.
+// Return:  CMIUtilString - The wrapped version of the initial string.
+// Throws:  None.
+//--
+CMIUtilString
+CMIUtilString::AddSlashes() const
+{
+    const char cBckSlash('\\');
+    const size_t nLen(length());
+    CMIUtilString strNew;
+    strNew.reserve(nLen);
+
+    size_t nOffset(0);
+    while (nOffset < nLen)
+    {
+        const size_t nUnescapedCharPos(find_first_of("\"\\", nOffset));
+        const bool bUnescapedCharNotFound(nUnescapedCharPos == std::string::npos);
+        if (bUnescapedCharNotFound)
+        {
+            const size_t nAppendAll(std::string::npos);
+            strNew.append(*this, nOffset, nAppendAll);
+            break;
+        }
+        const size_t nAppendLen(nUnescapedCharPos - nOffset);
+        strNew.append(*this, nOffset, nAppendLen);
+        strNew.push_back(cBckSlash);
+        const char cUnescapedChar((*this)[nUnescapedCharPos]);
+        strNew.push_back(cUnescapedChar);
+        nOffset = nUnescapedCharPos + 1;
+    }
+
+    return strNew;
+}
+
+//++ ------------------------------------------------------------------------------------
+// Details: Remove backslashes added by CMIUtilString::AddSlashes.
+// Type:    Method.
+// Args:    None.
+// Return:  CMIUtilString - The initial version of wrapped string.
+// Throws:  None.
+//--
+CMIUtilString
+CMIUtilString::StripSlashes() const
+{
+    const char cBckSlash('\\');
+    const size_t nLen(length());
+    CMIUtilString strNew;
+    strNew.reserve(nLen);
+
+    size_t nOffset(0);
+    while (nOffset < nLen)
+    {
+        const size_t nBckSlashPos(find(cBckSlash, nOffset));
+        const bool bBckSlashNotFound(nBckSlashPos == std::string::npos);
+        if (bBckSlashNotFound)
+        {
+            const size_t nAppendAll(std::string::npos);
+            strNew.append(*this, nOffset, nAppendAll);
+            break;
+        }
+        const size_t nAppendLen(nBckSlashPos - nOffset);
+        strNew.append(*this, nOffset, nAppendLen);
+        const bool bBckSlashIsLast(nBckSlashPos == nLen);
+        if (bBckSlashIsLast)
+        {
+            strNew.push_back(cBckSlash);
+            break;
+        }
+        const char cEscapedChar((*this)[nBckSlashPos + 1]);
+        const size_t nEscapedCharPos(std::string("\"\\").find(cEscapedChar));
+        const bool bEscapedCharNotFound(nEscapedCharPos == std::string::npos);
+        if (bEscapedCharNotFound)
+            strNew.push_back(cBckSlash);
+        strNew.push_back(cEscapedChar);
+        nOffset = nBckSlashPos + 2;
+    }
+
+    return strNew;
+}
+
+CMIUtilString
+CMIUtilString::ConvertToPrintableASCII(const char vChar, bool bEscapeQuotes)
+{
+    switch (vChar)
+    {
+        case '\a':
+            return "\\a";
+        case '\b':
+            return "\\b";
+        case '\t':
+            return "\\t";
+        case '\n':
+            return "\\n";
+        case '\v':
+            return "\\v";
+        case '\f':
+            return "\\f";
+        case '\r':
+            return "\\r";
+        case '\033':
+            return "\\e";
+        case '\\':
+            return "\\\\";
+        case '"':
+            if (bEscapeQuotes)
+                return "\\\"";
+            // fall thru
+        default:
+            if (::isprint(vChar))
+                return Format("%c", vChar);
+            else
+                return Format("\\x%02" PRIx8, vChar);
+    }
+}
+
+CMIUtilString
+CMIUtilString::ConvertCharValueToPrintableASCII(char vChar, bool bEscapeQuotes)
+{
+    switch (vChar)
+    {
+        case '\a':
+            return "\\a";
+        case '\b':
+            return "\\b";
+        case '\t':
+            return "\\t";
+        case '\n':
+            return "\\n";
+        case '\v':
+            return "\\v";
+        case '\f':
+            return "\\f";
+        case '\r':
+            return "\\r";
+        case '\033':
+            return "\\e";
+        case '\\':
+            return "\\\\";
+        case '"':
+            if (bEscapeQuotes)
+                return "\\\"";
+            // fall thru
+        default:
+            if (::isprint(vChar))
+                return Format("%c", vChar);
+            else
+                return CMIUtilString();
+    }
+}
+
+CMIUtilString
+CMIUtilString::ConvertToPrintableASCII(const char16_t vChar16, bool bEscapeQuotes)
+{
+    if (vChar16 == (char16_t)(char)vChar16)
+    {
+        // Convert char16_t to char (if possible)
+        CMIUtilString str = ConvertCharValueToPrintableASCII((char)vChar16, bEscapeQuotes);
+        if (str.length() > 0)
+            return str;
+    }
+    return Format("\\u%02" PRIx8 "%02" PRIx8,
+                      (vChar16 >> 8) & 0xff, vChar16 & 0xff);
+}
+
+CMIUtilString
+CMIUtilString::ConvertToPrintableASCII(const char32_t vChar32, bool bEscapeQuotes)
+{
+    if (vChar32 == (char32_t)(char)vChar32)
+    {
+        // Convert char32_t to char (if possible)
+        CMIUtilString str = ConvertCharValueToPrintableASCII((char)vChar32, bEscapeQuotes);
+        if (str.length() > 0)
+            return str;
+    }
+    return Format("\\U%02" PRIx8 "%02" PRIx8 "%02" PRIx8 "%02" PRIx8,
+                      (vChar32 >> 24) & 0xff, (vChar32 >> 16) & 0xff,
+                      (vChar32 >> 8) & 0xff, vChar32 & 0xff);
 }

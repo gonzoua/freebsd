@@ -16,7 +16,7 @@ namespace lldb {
 
 class SBTypeList;    
 
-class SBTypeMember
+class LLDB_API SBTypeMember
 {
 public:
     SBTypeMember ();
@@ -85,7 +85,13 @@ public:
     
     const char *
     GetName ();
-    
+
+    const char *
+    GetDemangledName ();
+
+    const char *
+    GetMangledName ();
+
     lldb::SBType
     GetType ();
     
@@ -153,7 +159,13 @@ public:
     IsArrayType ();
     
     bool
+    IsVectorType ();
+    
+    bool
     IsTypedefType ();
+    
+    bool
+    IsAnonymousType ();
     
     lldb::SBType
     GetPointerType();
@@ -175,6 +187,9 @@ public:
     
     lldb::SBType
     GetArrayElementType ();
+    
+    lldb::SBType
+    GetVectorElementType ();
 
     lldb::SBType
     GetCanonicalType();
@@ -284,7 +299,7 @@ protected:
     friend class SBTypeList;
     friend class SBValue;
         
-    SBType (const lldb_private::ClangASTType &);
+    SBType (const lldb_private::CompilerType &);
     SBType (const lldb::TypeSP &);
     SBType (const lldb::TypeImplSP &);
     

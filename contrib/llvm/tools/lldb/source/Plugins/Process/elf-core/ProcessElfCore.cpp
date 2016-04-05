@@ -10,6 +10,9 @@
 // C Includes
 #include <stdlib.h>
 
+// C++ Includes
+#include <mutex>
+
 // Other libraries and framework includes
 #include "lldb/Core/PluginManager.h"
 #include "lldb/Core/Module.h"
@@ -26,8 +29,6 @@
 
 #include "Plugins/ObjectFile/ELF/ObjectFileELF.h"
 #include "Plugins/DynamicLoader/POSIX-DYLD/DynamicLoaderPOSIXDYLD.h"
-#include "Plugins/Process/Utility/FreeBSDSignals.h"
-#include "Plugins/Process/Utility/LinuxSignals.h"
 
 // Project includes
 #include "ProcessElfCore.h"
@@ -56,7 +57,7 @@ ProcessElfCore::Terminate()
 
 
 lldb::ProcessSP
-ProcessElfCore::CreateInstance (Target &target, Listener &listener, const FileSpec *crash_file)
+ProcessElfCore::CreateInstance (lldb::TargetSP target_sp, Listener &listener, const FileSpec *crash_file)
 {
     lldb::ProcessSP process_sp;
     if (crash_file)
@@ -74,7 +75,7 @@ ProcessElfCore::CreateInstance (Target &target, Listener &listener, const FileSp
             if (elf_header.Parse(data, &data_offset))
             {
                 if (elf_header.e_type == llvm::ELF::ET_CORE)
-                    process_sp.reset(new ProcessElfCore (target, listener, *crash_file));
+                    process_sp.reset(new ProcessElfCore (target_sp, listener, *crash_file));
             }
         }
     }
@@ -82,12 +83,12 @@ ProcessElfCore::CreateInstance (Target &target, Listener &listener, const FileSp
 }
 
 bool
-ProcessElfCore::CanDebug(Target &target, bool plugin_specified_by_name)
+ProcessElfCore::CanDebug(lldb::TargetSP target_sp, bool plugin_specified_by_name)
 {
     // For now we are just making sure the file exists for a given module
     if (!m_core_module_sp && m_core_file.Exists())
     {
-        ModuleSpec core_module_spec(m_core_file, target.GetArchitecture());
+        ModuleSpec core_module_spec(m_core_file, target_sp->GetArchitecture());
         Error error (ModuleList::GetSharedModule (core_module_spec, m_core_module_sp,
                                                   NULL, NULL, NULL));
         if (m_core_module_sp)
@@ -103,9 +104,9 @@ ProcessElfCore::CanDebug(Target &target, bool plugin_specified_by_name)
 //----------------------------------------------------------------------
 // ProcessElfCore constructor
 //----------------------------------------------------------------------
-ProcessElfCore::ProcessElfCore(Target& target, Listener &listener,
+ProcessElfCore::ProcessElfCore(lldb::TargetSP target_sp, Listener &listener,
                                const FileSpec &core_file) :
-    Process (target, listener),
+    Process (target_sp, listener),
     m_core_module_sp (),
     m_core_file (core_file),
     m_dyld_plugin_name (),
@@ -191,7 +192,7 @@ ProcessElfCore::DoLoadCore ()
     const uint32_t num_segments = core->GetProgramHeaderCount();
     if (num_segments == 0)
     {
-        error.SetErrorString ("core file has no sections");
+        error.SetErrorString ("core file has no segments");
         return error;
     }
 
@@ -232,26 +233,29 @@ ProcessElfCore::DoLoadCore ()
     // it to match the core file which is always single arch.
     ArchSpec arch (m_core_module_sp->GetArchitecture());
     if (arch.IsValid())
-        m_target.SetArchitecture(arch);
+        GetTarget().SetArchitecture(arch);
 
-    switch (m_os)
+    SetUnixSignals(UnixSignals::Create(GetArchitecture()));
+
+    // Core files are useless without the main executable. See if we can locate the main
+    // executable using data we found in the core file notes.
+    lldb::ModuleSP exe_module_sp = GetTarget().GetExecutableModule();
+    if (!exe_module_sp)
     {
-        case llvm::Triple::FreeBSD:
+        // The first entry in the NT_FILE might be our executable
+        if (!m_nt_file_entries.empty())
         {
-            static UnixSignalsSP s_freebsd_signals_sp(new FreeBSDSignals ());
-            SetUnixSignals(s_freebsd_signals_sp);
-            break;
+            ModuleSpec exe_module_spec;
+            exe_module_spec.GetArchitecture() = arch;
+            exe_module_spec.GetFileSpec().SetFile(m_nt_file_entries[0].path.GetCString(), false);
+            if (exe_module_spec.GetFileSpec())
+            {
+                exe_module_sp = GetTarget().GetSharedModule(exe_module_spec);
+                if (exe_module_sp)
+                    GetTarget().SetExecutableModule(exe_module_sp, false);
+            }
         }
-        case llvm::Triple::Linux:
-        {
-            static UnixSignalsSP s_linux_signals_sp(new process_linux::LinuxSignals ());
-            SetUnixSignals(s_linux_signals_sp);
-            break;
-        }
-        default:
-            break;
     }
-
     return error;
 }
 
@@ -273,7 +277,7 @@ ProcessElfCore::UpdateThreadList (ThreadList &old_thread_list, ThreadList &new_t
     for (lldb::tid_t tid = 0; tid < num_threads; ++tid)
     {
         const ThreadData &td = m_thread_data[tid];
-        lldb::ThreadSP thread_sp(new ThreadElfCore (*this, tid, td));
+        lldb::ThreadSP thread_sp(new ThreadElfCore (*this, td));
         new_thread_list.AddThread (thread_sp);
     }
     return new_thread_list.GetSize(false) > 0;
@@ -367,31 +371,29 @@ ProcessElfCore::Clear()
     m_thread_list.Clear();
     m_os = llvm::Triple::UnknownOS;
 
-    static UnixSignalsSP s_default_unix_signals_sp(new UnixSignals());
-    SetUnixSignals(s_default_unix_signals_sp);
+    SetUnixSignals(std::make_shared<UnixSignals>());
 }
 
 void
 ProcessElfCore::Initialize()
 {
-    static bool g_initialized = false;
+    static std::once_flag g_once_flag;
 
-    if (g_initialized == false)
+    std::call_once(g_once_flag, []()
     {
-        g_initialized = true;
-        PluginManager::RegisterPlugin (GetPluginNameStatic(), GetPluginDescriptionStatic(), CreateInstance);
-    }
+        PluginManager::RegisterPlugin (GetPluginNameStatic(),
+          GetPluginDescriptionStatic(), CreateInstance);
+    });
 }
 
 lldb::addr_t
 ProcessElfCore::GetImageInfoAddress()
 {
-    Target *target = &GetTarget();
-    ObjectFile *obj_file = target->GetExecutableModule()->GetObjectFile();
-    Address addr = obj_file->GetImageInfoAddress(target);
+    ObjectFile *obj_file = GetTarget().GetExecutableModule()->GetObjectFile();
+    Address addr = obj_file->GetImageInfoAddress(&GetTarget());
 
     if (addr.IsValid())
-        return addr.GetLoadAddress(target);
+        return addr.GetLoadAddress(&GetTarget());
     return LLDB_INVALID_ADDRESS;
 }
 
@@ -402,7 +404,8 @@ enum {
     NT_PRPSINFO,
     NT_TASKSTRUCT,
     NT_PLATFORM,
-    NT_AUXV
+    NT_AUXV,
+    NT_FILE = 0x46494c45
 };
 
 namespace FREEBSD {
@@ -412,7 +415,8 @@ enum {
     NT_FPREGSET,
     NT_PRPSINFO,
     NT_THRMISC       = 7,
-    NT_PROCSTAT_AUXV = 16
+    NT_PROCSTAT_AUXV = 16,
+    NT_PPC_VMX       = 0x100
 };
 
 }
@@ -423,7 +427,8 @@ ParseFreeBSDPrStatus(ThreadData &thread_data, DataExtractor &data,
                      ArchSpec &arch)
 {
     lldb::offset_t offset = 0;
-    bool lp64 = (arch.GetMachine() == llvm::Triple::mips64 ||
+    bool lp64 = (arch.GetMachine() == llvm::Triple::aarch64 ||
+                 arch.GetMachine() == llvm::Triple::mips64 ||
                  arch.GetMachine() == llvm::Triple::ppc64 ||
                  arch.GetMachine() == llvm::Triple::x86_64);
     int pr_version = data.GetU32(&offset);
@@ -442,7 +447,7 @@ ParseFreeBSDPrStatus(ThreadData &thread_data, DataExtractor &data,
         offset += 16;
 
     thread_data.signo = data.GetU32(&offset); // pr_cursig
-    offset += 4;        // pr_pid
+    thread_data.tid = data.GetU32(&offset); // pr_pid
     if (lp64)
         offset += 4;
 
@@ -516,6 +521,7 @@ ProcessElfCore::ParseThreadContextsFromNoteSegment(const elf::ELFProgramHeader *
 
         // Store the NOTE information in the current thread
         DataExtractor note_data (segment_data, note_start, note_size);
+        note_data.SetAddressByteSize(m_core_module_sp->GetArchitecture().GetAddressByteSize());
         if (note.n_name == "FreeBSD")
         {
             m_os = llvm::Triple::FreeBSD;
@@ -538,11 +544,14 @@ ProcessElfCore::ParseThreadContextsFromNoteSegment(const elf::ELFProgramHeader *
                     // FIXME: FreeBSD sticks an int at the beginning of the note
                     m_auxv = DataExtractor(segment_data, note_start + 4, note_size - 4);
                     break;
+                case FREEBSD::NT_PPC_VMX:
+                    thread_data->vregset = note_data;
+                    break;
                 default:
                     break;
             }
         }
-        else
+        else if (note.n_name == "CORE")
         {
             switch (note.n_type)
             {
@@ -553,6 +562,8 @@ ProcessElfCore::ParseThreadContextsFromNoteSegment(const elf::ELFProgramHeader *
                     header_size = ELFLinuxPrStatus::GetSize(arch);
                     len = note_data.GetByteSize() - header_size;
                     thread_data->gpregset = DataExtractor(note_data, header_size, len);
+                    // FIXME: Obtain actual tid on Linux
+                    thread_data->tid = m_thread_data.size();
                     break;
                 case NT_FPREGSET:
                     thread_data->fpregset = note_data;
@@ -564,6 +575,28 @@ ProcessElfCore::ParseThreadContextsFromNoteSegment(const elf::ELFProgramHeader *
                     break;
                 case NT_AUXV:
                     m_auxv = DataExtractor(note_data);
+                    break;
+                case NT_FILE:
+                    {
+                        m_nt_file_entries.clear();
+                        lldb::offset_t offset = 0;
+                        const uint64_t count = note_data.GetAddress(&offset);
+                        note_data.GetAddress(&offset); // Skip page size
+                        for (uint64_t i = 0; i<count; ++i)
+                        {
+                            NT_FILE_Entry entry;
+                            entry.start = note_data.GetAddress(&offset);
+                            entry.end = note_data.GetAddress(&offset);
+                            entry.file_ofs = note_data.GetAddress(&offset);
+                            m_nt_file_entries.push_back(entry);
+                        }
+                        for (uint64_t i = 0; i<count; ++i)
+                        {
+                            const char *path = note_data.GetCStr(&offset);
+                            if (path && path[0])
+                                m_nt_file_entries[i].path.SetCString(path);
+                        }
+                    }
                     break;
                 default:
                     break;

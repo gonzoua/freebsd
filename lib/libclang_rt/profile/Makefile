@@ -8,10 +8,14 @@ LIB=	clang_rt.profile-${CRTARCH}
 
 SRCS=	GCDAProfiling.c\
 	InstrProfiling.c\
+	InstrProfilingValue.c\
 	InstrProfilingBuffer.c\
 	InstrProfilingFile.c\
+	InstrProfilingWriter.c\
 	InstrProfilingPlatformDarwin.c\
+	InstrProfilingPlatformLinux.c\
 	InstrProfilingPlatformOther.c\
 	InstrProfilingRuntime.cc\
+	InstrProfilingUtil.c
 
 .include <bsd.lib.mk>

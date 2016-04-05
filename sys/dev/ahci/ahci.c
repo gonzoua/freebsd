@@ -181,12 +181,12 @@ ahci_attach(device_t dev)
 	ctlr->sc_iomem.rm_type = RMAN_ARRAY;
 	ctlr->sc_iomem.rm_descr = "I/O memory addresses";
 	if ((error = rman_init(&ctlr->sc_iomem)) != 0) {
-		bus_release_resource(dev, SYS_RES_MEMORY, ctlr->r_rid, ctlr->r_mem);
+		ahci_free_mem(dev);
 		return (error);
 	}
 	if ((error = rman_manage_region(&ctlr->sc_iomem,
 	    rman_get_start(ctlr->r_mem), rman_get_end(ctlr->r_mem))) != 0) {
-		bus_release_resource(dev, SYS_RES_MEMORY, ctlr->r_rid, ctlr->r_mem);
+		ahci_free_mem(dev);
 		rman_fini(&ctlr->sc_iomem);
 		return (error);
 	}
@@ -250,8 +250,7 @@ ahci_attach(device_t dev)
 	    BUS_SPACE_MAXADDR_32BIT, BUS_SPACE_MAXADDR, NULL, NULL,
 	    BUS_SPACE_MAXSIZE, BUS_SPACE_UNRESTRICTED, BUS_SPACE_MAXSIZE,
 	    0, NULL, NULL, &ctlr->dma_tag)) {
-		bus_release_resource(dev, SYS_RES_MEMORY, ctlr->r_rid,
-		    ctlr->r_mem);
+		ahci_free_mem(dev);
 		rman_fini(&ctlr->sc_iomem);
 		return (ENXIO);
 	}
@@ -261,8 +260,7 @@ ahci_attach(device_t dev)
 	/* Setup interrupts. */
 	if ((error = ahci_setup_interrupt(dev)) != 0) {
 		bus_dma_tag_destroy(ctlr->dma_tag);
-		bus_release_resource(dev, SYS_RES_MEMORY, ctlr->r_rid,
-		    ctlr->r_mem);
+		ahci_free_mem(dev);
 		rman_fini(&ctlr->sc_iomem);
 		return (error);
 	}
@@ -367,9 +365,26 @@ ahci_detach(device_t dev)
 	bus_dma_tag_destroy(ctlr->dma_tag);
 	/* Free memory. */
 	rman_fini(&ctlr->sc_iomem);
+	ahci_free_mem(dev);
+	return (0);
+}
+
+void
+ahci_free_mem(device_t dev)
+{
+	struct ahci_controller *ctlr = device_get_softc(dev);
+
+	/* Release memory resources */
 	if (ctlr->r_mem)
 		bus_release_resource(dev, SYS_RES_MEMORY, ctlr->r_rid, ctlr->r_mem);
-	return (0);
+	if (ctlr->r_msix_table)
+		bus_release_resource(dev, SYS_RES_MEMORY,
+		    ctlr->r_msix_tab_rid, ctlr->r_msix_table);
+	if (ctlr->r_msix_pba)
+		bus_release_resource(dev, SYS_RES_MEMORY,
+		    ctlr->r_msix_pba_rid, ctlr->r_msix_pba);
+
+	ctlr->r_msix_pba = ctlr->r_mem = ctlr->r_msix_table = NULL;
 }
 
 int
@@ -468,6 +483,7 @@ ahci_intr(void *data)
 	/* AHCI declares level triggered IS. */
 	if (!(ctlr->quirks & AHCI_Q_EDGEIS))
 		ATA_OUTL(ctlr->r_mem, AHCI_IS, is);
+	ATA_RBL(ctlr->r_mem, AHCI_IS);
 }
 
 /*
@@ -486,6 +502,7 @@ ahci_intr_one(void *data)
 	    ctlr->interrupt[unit].function(arg);
 	/* AHCI declares level triggered IS. */
 	ATA_OUTL(ctlr->r_mem, AHCI_IS, 1 << unit);
+	ATA_RBL(ctlr->r_mem, AHCI_IS);
 }
 
 static void
@@ -501,15 +518,16 @@ ahci_intr_one_edge(void *data)
 	ATA_OUTL(ctlr->r_mem, AHCI_IS, 1 << unit);
 	if ((arg = ctlr->interrupt[unit].argument))
 		ctlr->interrupt[unit].function(arg);
+	ATA_RBL(ctlr->r_mem, AHCI_IS);
 }
 
 struct resource *
 ahci_alloc_resource(device_t dev, device_t child, int type, int *rid,
-    u_long start, u_long end, u_long count, u_int flags)
+    rman_res_t start, rman_res_t end, rman_res_t count, u_int flags)
 {
 	struct ahci_controller *ctlr = device_get_softc(dev);
 	struct resource *res;
-	long st;
+	rman_res_t st;
 	int offset, size, unit;
 
 	unit = (intptr_t)device_get_ivars(child);
@@ -1591,10 +1609,15 @@ ahci_execute_transaction(struct ahci_slot *slot)
 		if ((ch->quirks & AHCI_Q_NOBSYRES) == 0 &&
 		    (ch->quirks & AHCI_Q_ATI_PMP_BUG) == 0 &&
 		    softreset == 2 && et == AHCI_ERR_NONE) {
-			while ((val = fis[2]) & ATA_S_BUSY) {
-				DELAY(10);
-				if (count++ >= timeout)
+			for ( ; count < timeout; count++) {
+				bus_dmamap_sync(ch->dma.rfis_tag,
+				    ch->dma.rfis_map, BUS_DMASYNC_POSTREAD);
+				val = fis[2];
+				bus_dmamap_sync(ch->dma.rfis_tag,
+				    ch->dma.rfis_map, BUS_DMASYNC_PREREAD);
+				if ((val & ATA_S_BUSY) == 0)
 					break;
+				DELAY(10);
 			}
 		}
 

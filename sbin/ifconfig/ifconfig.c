@@ -43,11 +43,11 @@ static const char rcsid[] =
 
 #include <sys/param.h>
 #include <sys/ioctl.h>
-#include <sys/socket.h>
-#include <sys/time.h>
 #include <sys/module.h>
 #include <sys/linker.h>
 #include <sys/queue.h>
+#include <sys/socket.h>
+#include <sys/time.h>
 
 #include <net/ethernet.h>
 #include <net/if.h>
@@ -93,6 +93,7 @@ int	clearaddr;
 int	newaddr = 1;
 int	verbose;
 int	noload;
+int	printifname = 0;
 
 int	supmedia = 0;
 int	printkeys = 0;		/* Print keying material for interfaces. */
@@ -107,6 +108,8 @@ static	void usage(void);
 static struct afswtch *af_getbyname(const char *name);
 static struct afswtch *af_getbyfamily(int af);
 static void af_other_status(int);
+
+void printifnamemaybe(void);
 
 static struct option *opts = NULL;
 
@@ -297,6 +300,12 @@ sortifaddrs(struct ifaddrs *list,
 	return (result);
 }
 
+void printifnamemaybe()
+{
+	if (printifname)
+		printf("%s\n", name);
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -314,6 +323,12 @@ main(int argc, char *argv[])
 	size_t iflen;
 
 	all = downonly = uponly = namesonly = noload = verbose = 0;
+	
+	/*
+	 * Ensure we print interface name when expected to,
+	 * even if we terminate early due to error.
+	 */
+	atexit(printifnamemaybe);
 
 	/* Parse leading line options */
 	strlcpy(options, "adklmnuv", sizeof(options));
@@ -604,7 +619,6 @@ cmd_register(struct cmd *p)
 static const struct cmd *
 cmd_lookup(const char *name, int iscreate)
 {
-#define	N(a)	(sizeof(a)/sizeof(a[0]))
 	const struct cmd *p;
 
 	for (p = cmds; p != NULL; p = p->c_next)
@@ -618,7 +632,6 @@ cmd_lookup(const char *name, int iscreate)
 			}
 		}
 	return NULL;
-#undef N
 }
 
 struct callback {
@@ -995,7 +1008,7 @@ setifmetric(const char *val, int dummy __unused, int s,
 	strncpy(ifr.ifr_name, name, sizeof (ifr.ifr_name));
 	ifr.ifr_metric = atoi(val);
 	if (ioctl(s, SIOCSIFMETRIC, (caddr_t)&ifr) < 0)
-		warn("ioctl (set metric)");
+		err(1, "ioctl SIOCSIFMETRIC (set metric)");
 }
 
 static void
@@ -1005,7 +1018,7 @@ setifmtu(const char *val, int dummy __unused, int s,
 	strncpy(ifr.ifr_name, name, sizeof (ifr.ifr_name));
 	ifr.ifr_mtu = atoi(val);
 	if (ioctl(s, SIOCSIFMTU, (caddr_t)&ifr) < 0)
-		warn("ioctl (set mtu)");
+		err(1, "ioctl SIOCSIFMTU (set mtu)");
 }
 
 static void
@@ -1013,18 +1026,18 @@ setifname(const char *val, int dummy __unused, int s,
     const struct afswtch *afp)
 {
 	char *newname;
+	
+	strncpy(ifr.ifr_name, name, sizeof(ifr.ifr_name));
 
 	newname = strdup(val);
-	if (newname == NULL) {
-		warn("no memory to set ifname");
-		return;
-	}
+	if (newname == NULL)
+		err(1, "no memory to set ifname");
 	ifr.ifr_data = newname;
 	if (ioctl(s, SIOCSIFNAME, (caddr_t)&ifr) < 0) {
-		warn("ioctl (set name)");
 		free(newname);
-		return;
+		err(1, "ioctl SIOCSIFNAME (set name)");
 	}
+	printifname = 1;
 	strlcpy(name, newname, sizeof(name));
 	free(newname);
 }
@@ -1036,6 +1049,8 @@ setifdescr(const char *val, int dummy __unused, int s,
 {
 	char *newdescr;
 
+	strncpy(ifr.ifr_name, name, sizeof(ifr.ifr_name));
+	
 	ifr.ifr_buffer.length = strlen(val) + 1;
 	if (ifr.ifr_buffer.length == 1) {
 		ifr.ifr_buffer.buffer = newdescr = NULL;
@@ -1050,7 +1065,7 @@ setifdescr(const char *val, int dummy __unused, int s,
 	}
 
 	if (ioctl(s, SIOCSIFDESCR, (caddr_t)&ifr) < 0)
-		warn("ioctl (set descr)");
+		err(1, "ioctl SIOCSIFDESCR (set descr)");
 
 	free(newdescr);
 }
@@ -1390,10 +1405,8 @@ static struct cmd basic_cmds[] = {
 static __constructor void
 ifconfig_ctor(void)
 {
-#define	N(a)	(sizeof(a) / sizeof(a[0]))
 	size_t i;
 
-	for (i = 0; i < N(basic_cmds);  i++)
+	for (i = 0; i < nitems(basic_cmds);  i++)
 		cmd_register(&basic_cmds[i]);
-#undef N
 }

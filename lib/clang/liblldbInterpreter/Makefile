@@ -34,6 +34,8 @@ SRCS=	Args.cpp \
 	OptionValueFileSpec.cpp \
 	OptionValueFileSpecLIst.cpp \
 	OptionValueFormat.cpp \
+	OptionValueFormatEntity.cpp \
+	OptionValueLanguage.cpp \
 	OptionValuePathMappings.cpp \
 	OptionValueProperties.cpp \
 	OptionValueRegex.cpp \
@@ -45,10 +47,7 @@ SRCS=	Args.cpp \
 	OptionGroupWatchpoint.cpp \
 	Options.cpp \
 	Property.cpp \
-	PythonDataObjects.cpp \
-	ScriptInterpreter.cpp \
-	ScriptInterpreterNone.cpp \
-	ScriptInterpreterPython.cpp
+	ScriptInterpreter.cpp
 
 TGHDRS=	AttrList \
 	Attrs \

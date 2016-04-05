@@ -7,8 +7,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "lldb/lldb-python.h"
-
 #include "CommandObjectBreakpoint.h"
 #include "CommandObjectBreakpointCommand.h"
 
@@ -19,13 +17,16 @@
 #include "lldb/Breakpoint/Breakpoint.h"
 #include "lldb/Breakpoint/BreakpointIDList.h"
 #include "lldb/Breakpoint/BreakpointLocation.h"
+#include "lldb/Host/StringConvert.h"
 #include "lldb/Interpreter/Options.h"
+#include "lldb/Interpreter/OptionValueBoolean.h"
 #include "lldb/Interpreter/OptionValueString.h"
 #include "lldb/Interpreter/OptionValueUInt64.h"
 #include "lldb/Core/RegularExpression.h"
 #include "lldb/Core/StreamString.h"
 #include "lldb/Interpreter/CommandInterpreter.h"
 #include "lldb/Interpreter/CommandReturnObject.h"
+#include "lldb/Target/Language.h"
 #include "lldb/Target/Target.h"
 #include "lldb/Interpreter/CommandCompletions.h"
 #include "lldb/Target/StackFrame.h"
@@ -76,11 +77,10 @@ public:
     }
 
 
-    virtual
-    ~CommandObjectBreakpointSet () {}
+    ~CommandObjectBreakpointSet () override {}
 
-    virtual Options *
-    GetOptions ()
+    Options *
+    GetOptions () override
     {
         return &m_options;
     }
@@ -109,18 +109,20 @@ public:
             m_catch_bp (false),
             m_throw_bp (true),
             m_hardware (false),
-            m_language (eLanguageTypeUnknown),
+            m_exception_language (eLanguageTypeUnknown),
+            m_language (lldb::eLanguageTypeUnknown),
             m_skip_prologue (eLazyBoolCalculate),
-            m_one_shot (false)
+            m_one_shot (false),
+            m_all_files (false),
+            m_move_to_nearest_code (eLazyBoolCalculate)
         {
         }
 
 
-        virtual
-        ~CommandOptions () {}
+        ~CommandOptions () override {}
 
-        virtual Error
-        SetOptionValue (uint32_t option_idx, const char *option_arg)
+        Error
+        SetOptionValue (uint32_t option_idx, const char *option_arg) override
         {
             Error error;
             const int short_option = m_getopt_table[option_idx].val;
@@ -134,15 +136,23 @@ public:
                     }
                     break;
 
+                case 'A':
+                    m_all_files = true;
+                    break;
+
                 case 'b':
                     m_func_names.push_back (option_arg);
                     m_func_name_type_mask |= eFunctionNameTypeBase;
                     break;
 
                 case 'C':
-                    m_column = Args::StringToUInt32 (option_arg, 0);
+                {
+                    bool success;
+                    m_column = StringConvert::ToUInt32 (option_arg, 0, 0, &success);
+                    if (!success)
+                        error.SetErrorStringWithFormat("invalid column number: %s", option_arg);
                     break;
-
+                }
                 case 'c':
                     m_condition.assign(option_arg);
                     break;
@@ -153,7 +163,7 @@ public:
 
                 case 'E':
                 {
-                    LanguageType language = LanguageRuntime::GetLanguageTypeFromString (option_arg);
+                    LanguageType language = Language::GetLanguageTypeFromString (option_arg);
 
                     switch (language)
                     {
@@ -161,15 +171,16 @@ public:
                         case eLanguageTypeC:
                         case eLanguageTypeC99:
                         case eLanguageTypeC11:
-                            m_language = eLanguageTypeC;
+                            m_exception_language = eLanguageTypeC;
                             break;
                         case eLanguageTypeC_plus_plus:
                         case eLanguageTypeC_plus_plus_03:
                         case eLanguageTypeC_plus_plus_11:
-                            m_language = eLanguageTypeC_plus_plus;
+                        case eLanguageTypeC_plus_plus_14:
+                            m_exception_language = eLanguageTypeC_plus_plus;
                             break;
                         case eLanguageTypeObjC:
-                            m_language = eLanguageTypeObjC;
+                            m_exception_language = eLanguageTypeObjC;
                             break;
                         case eLanguageTypeObjC_plus_plus:
                             error.SetErrorStringWithFormat ("Set exception breakpoints separately for c++ and objective-c");
@@ -207,7 +218,7 @@ public:
 
                 case 'i':
                 {
-                    m_ignore_count = Args::StringToUInt32(option_arg, UINT32_MAX, 0);
+                    m_ignore_count = StringConvert::ToUInt32(option_arg, UINT32_MAX, 0);
                     if (m_ignore_count == UINT32_MAX)
                        error.SetErrorStringWithFormat ("invalid ignore count '%s'", option_arg);
                     break;
@@ -229,8 +240,34 @@ public:
                 break;
 
                 case 'l':
-                    m_line_num = Args::StringToUInt32 (option_arg, 0);
+                {
+                    bool success;
+                    m_line_num = StringConvert::ToUInt32 (option_arg, 0, 0, &success);
+                    if (!success)
+                        error.SetErrorStringWithFormat ("invalid line number: %s.", option_arg);
                     break;
+                }
+
+                case 'L':
+                    m_language = Language::GetLanguageTypeFromString (option_arg);
+                    if (m_language == eLanguageTypeUnknown)
+                        error.SetErrorStringWithFormat ("Unknown language type: '%s' for breakpoint", option_arg);
+                    break;
+
+                case 'm':
+                {
+                    bool success;
+                    bool value;
+                    value = Args::StringToBoolean (option_arg, true, &success);
+                    if (value)
+                        m_move_to_nearest_code = eLazyBoolYes;
+                    else
+                        m_move_to_nearest_code = eLazyBoolNo;
+                        
+                    if (!success)
+                        error.SetErrorStringWithFormat ("Invalid boolean value for move-to-nearest-code option: '%s'", option_arg);
+                    break;
+                }
 
                 case 'M':
                     m_func_names.push_back (option_arg);
@@ -249,6 +286,11 @@ public:
 
                 case 'o':
                     m_one_shot = true;
+                    break;
+
+                case 'O':
+                    m_exception_extra_args.AppendArgument ("-O");
+                    m_exception_extra_args.AppendArgument (option_arg);
                     break;
 
                 case 'p':
@@ -276,7 +318,7 @@ public:
 
                 case 't' :
                 {
-                    m_thread_id = Args::StringToUInt64(option_arg, LLDB_INVALID_THREAD_ID, 0);
+                    m_thread_id = StringConvert::ToUInt64(option_arg, LLDB_INVALID_THREAD_ID, 0);
                     if (m_thread_id == LLDB_INVALID_THREAD_ID)
                        error.SetErrorStringWithFormat ("invalid thread id string '%s'", option_arg);
                 }
@@ -297,7 +339,7 @@ public:
 
                 case 'x':
                 {
-                    m_thread_index = Args::StringToUInt32(option_arg, UINT32_MAX, 0);
+                    m_thread_index = StringConvert::ToUInt32(option_arg, UINT32_MAX, 0);
                     if (m_thread_id == UINT32_MAX)
                        error.SetErrorStringWithFormat ("invalid thread index string '%s'", option_arg);
                     
@@ -312,7 +354,7 @@ public:
             return error;
         }
         void
-        OptionParsingStarting ()
+        OptionParsingStarting () override
         {
             m_condition.clear();
             m_filenames.Clear();
@@ -332,15 +374,19 @@ public:
             m_catch_bp = false;
             m_throw_bp = true;
             m_hardware = false;
-            m_language = eLanguageTypeUnknown;
+            m_exception_language = eLanguageTypeUnknown;
+            m_language = lldb::eLanguageTypeUnknown;
             m_skip_prologue = eLazyBoolCalculate;
             m_one_shot = false;
             m_use_dummy = false;
             m_breakpoint_names.clear();
+            m_all_files = false;
+            m_exception_extra_args.Clear();
+            m_move_to_nearest_code = eLazyBoolCalculate;
         }
     
         const OptionDefinition*
-        GetDefinitions ()
+        GetDefinitions () override
         {
             return g_option_table;
         }
@@ -370,17 +416,21 @@ public:
         bool m_catch_bp;
         bool m_throw_bp;
         bool m_hardware; // Request to use hardware breakpoints
+        lldb::LanguageType m_exception_language;
         lldb::LanguageType m_language;
         LazyBool m_skip_prologue;
         bool m_one_shot;
         bool m_use_dummy;
+        bool m_all_files;
+        Args m_exception_extra_args;
+        LazyBool m_move_to_nearest_code;
 
     };
 
 protected:
-    virtual bool
+    bool
     DoExecute (Args& command,
-              CommandReturnObject &result)
+              CommandReturnObject &result) override
     {
         Target *target = GetSelectedOrDummyTarget(m_options.m_use_dummy);
 
@@ -411,7 +461,7 @@ protected:
             break_type = eSetTypeFunctionRegexp;
         else if (!m_options.m_source_text_regexp.empty())
             break_type = eSetTypeSourceRegexp;
-        else if (m_options.m_language != eLanguageTypeUnknown)
+        else if (m_options.m_exception_language != eLanguageTypeUnknown)
             break_type = eSetTypeException;
 
         Breakpoint *bp = NULL;
@@ -451,16 +501,38 @@ protected:
                                                    check_inlines,
                                                    m_options.m_skip_prologue,
                                                    internal,
-                                                   m_options.m_hardware).get();
+                                                   m_options.m_hardware,
+                                                   m_options.m_move_to_nearest_code).get();
                 }
                 break;
 
             case eSetTypeAddress: // Breakpoint by address
-                bp = target->CreateBreakpoint (m_options.m_load_addr,
-                                               internal,
-                                               m_options.m_hardware).get();
+                {
+                    // If a shared library has been specified, make an lldb_private::Address with the library, and
+                    // use that.  That way the address breakpoint will track the load location of the library.
+                    size_t num_modules_specified = m_options.m_modules.GetSize();
+                    if (num_modules_specified == 1)
+                    {
+                        const FileSpec *file_spec = m_options.m_modules.GetFileSpecPointerAtIndex(0);
+                        bp = target->CreateAddressInModuleBreakpoint (m_options.m_load_addr,
+                                                                      internal,
+                                                                      file_spec,
+                                                                      m_options.m_hardware).get();
+                    }
+                    else if (num_modules_specified == 0)
+                    {
+                        bp = target->CreateBreakpoint (m_options.m_load_addr,
+                                                       internal,
+                                                       m_options.m_hardware).get();
+                    }
+                    else
+                    {
+                        result.AppendError("Only one shared library can be specified for address breakpoints.");
+                        result.SetStatus(eReturnStatusFailed);
+                        return false;
+                    }
                 break;
-
+                }
             case eSetTypeFunctionName: // Breakpoint by function name
                 {
                     uint32_t name_type_mask = m_options.m_func_name_type_mask;
@@ -472,6 +544,7 @@ protected:
                                                    &(m_options.m_filenames),
                                                    m_options.m_func_names,
                                                    name_type_mask,
+                                                   m_options.m_language,
                                                    m_options.m_skip_prologue,
                                                    internal,
                                                    m_options.m_hardware).get();
@@ -494,6 +567,7 @@ protected:
                     bp = target->CreateFuncRegexBreakpoint (&(m_options.m_modules),
                                                             &(m_options.m_filenames),
                                                             regexp,
+                                                            m_options.m_language,
                                                             m_options.m_skip_prologue,
                                                             internal,
                                                             m_options.m_hardware).get();
@@ -503,7 +577,7 @@ protected:
                 {
                     const size_t num_files = m_options.m_filenames.GetSize();
                     
-                    if (num_files == 0)
+                    if (num_files == 0 && !m_options.m_all_files)
                     {
                         FileSpec file;
                         if (!GetDefaultFile (target, file, result))
@@ -532,15 +606,27 @@ protected:
                                                               &(m_options.m_filenames),
                                                               regexp,
                                                               internal,
-                                                              m_options.m_hardware).get();
+                                                              m_options.m_hardware,
+                                                              m_options.m_move_to_nearest_code).get();
                 }
                 break;
             case eSetTypeException:
                 {
-                    bp = target->CreateExceptionBreakpoint (m_options.m_language,
+                    Error precond_error;
+                    bp = target->CreateExceptionBreakpoint (m_options.m_exception_language,
                                                             m_options.m_catch_bp,
                                                             m_options.m_throw_bp,
-                                                            m_options.m_hardware).get();
+                                                            internal,
+                                                            &m_options.m_exception_extra_args,
+                                                            &precond_error).get();
+                    if (precond_error.Fail())
+                    {
+                        result.AppendErrorWithFormat("Error setting extra exception arguments: %s",
+                                                     precond_error.AsCString());
+                        target->RemoveBreakpointByID(bp->GetID());
+                        result.SetStatus(eReturnStatusFailed);
+                        return false;
+                    }
                 }
                 break;
             default:
@@ -652,6 +738,8 @@ private:
 #define LLDB_OPT_FILE ( LLDB_OPT_SET_FROM_TO(1, 9) & ~LLDB_OPT_SET_2 )
 #define LLDB_OPT_NOT_10 ( LLDB_OPT_SET_FROM_TO(1, 10) & ~LLDB_OPT_SET_10 )
 #define LLDB_OPT_SKIP_PROLOGUE ( LLDB_OPT_SET_1 | LLDB_OPT_SET_FROM_TO(3,8) )
+#define LLDB_OPT_MOVE_TO_NEAREST_CODE ( LLDB_OPT_SET_1 | LLDB_OPT_SET_9 )
+#define LLDB_OPT_EXPR_LANGUAGE ( LLDB_OPT_SET_FROM_TO(3, 8) )
 
 OptionDefinition
 CommandObjectBreakpointSet::CommandOptions::g_option_table[] =
@@ -699,14 +787,21 @@ CommandObjectBreakpointSet::CommandOptions::g_option_table[] =
     //    "Set the breakpoint by source location at this particular column."},
 
     { LLDB_OPT_SET_2, true, "address", 'a', OptionParser::eRequiredArgument, NULL, NULL, 0, eArgTypeAddressOrExpression,
-        "Set the breakpoint by address, at the specified address."},
+        "Set the breakpoint at the specified address.  "
+        "If the address maps uniquely to a particular "
+        "binary, then the address will be converted to a \"file\" address, so that the breakpoint will track that binary+offset no matter where "
+        "the binary eventually loads.  "
+        "Alternately, if you also specify the module - with the -s option - then the address will be treated as "
+        "a file address in that module, and resolved accordingly.  Again, this will allow lldb to track that offset on "
+        "subsequent reloads.  The module need not have been loaded at the time you specify this breakpoint, and will "
+        "get resolved when the module is loaded."},
 
     { LLDB_OPT_SET_3, true, "name", 'n', OptionParser::eRequiredArgument, NULL, NULL, CommandCompletions::eSymbolCompletion, eArgTypeFunctionName,
         "Set the breakpoint by function name.  Can be repeated multiple times to make one breakpoint for multiple names" },
 
     { LLDB_OPT_SET_4, true, "fullname", 'F', OptionParser::eRequiredArgument, NULL, NULL, CommandCompletions::eSymbolCompletion, eArgTypeFullName,
         "Set the breakpoint by fully qualified function names. For C++ this means namespaces and all arguments, and "
-        "for Objective C this means a full function prototype with class and selector.   "
+        "for Objective C this means a full function prototype with class and selector.  "
         "Can be repeated multiple times to make one breakpoint for multiple names." },
 
     { LLDB_OPT_SET_5, true, "selector", 'S', OptionParser::eRequiredArgument, NULL, NULL, 0, eArgTypeSelector,
@@ -727,6 +822,9 @@ CommandObjectBreakpointSet::CommandOptions::g_option_table[] =
         "specified with the -f option.  The -f option can be specified more than once.  "
         "If no source files are specified, uses the current \"default source file\"" },
 
+    { LLDB_OPT_SET_9, false, "all-files", 'A', OptionParser::eNoArgument,   NULL, NULL, 0, eArgTypeNone,
+        "All files are searched for source pattern matches." },
+
     { LLDB_OPT_SET_10, true, "language-exception", 'E', OptionParser::eRequiredArgument, NULL, NULL, 0, eArgTypeLanguage,
         "Set the breakpoint on exceptions thrown by the specified language (without options, on throw but not catch.)" },
 
@@ -736,6 +834,13 @@ CommandObjectBreakpointSet::CommandOptions::g_option_table[] =
     { LLDB_OPT_SET_10, false, "on-catch", 'h', OptionParser::eRequiredArgument, NULL, NULL, 0, eArgTypeBoolean,
         "Set the breakpoint on exception catcH." },
 
+//  Don't add this option till it actually does something useful...
+//    { LLDB_OPT_SET_10, false, "exception-typename", 'O', OptionParser::eRequiredArgument, NULL, NULL, 0, eArgTypeTypeName,
+//        "The breakpoint will only stop if an exception Object of this type is thrown.  Can be repeated multiple times to stop for multiple object types" },
+
+    { LLDB_OPT_EXPR_LANGUAGE, false, "language", 'L', OptionParser::eRequiredArgument, NULL, NULL, 0, eArgTypeLanguage,
+        "Specifies the Language to use when interpreting the breakpoint's expression (note: currently only implemented for setting breakpoints on identifiers).  If not set the target.language setting is used." },
+
     { LLDB_OPT_SKIP_PROLOGUE, false, "skip-prologue", 'K', OptionParser::eRequiredArgument, NULL, NULL, 0, eArgTypeBoolean,
         "sKip the prologue if the breakpoint is at the beginning of a function.  If not set the target.skip-prologue setting is used." },
 
@@ -744,6 +849,9 @@ CommandObjectBreakpointSet::CommandOptions::g_option_table[] =
 
     { LLDB_OPT_SET_ALL, false, "breakpoint-name", 'N', OptionParser::eRequiredArgument, NULL, NULL, 0, eArgTypeBreakpointName,
         "Adds this to the list of names for this breakopint."},
+
+    { LLDB_OPT_MOVE_TO_NEAREST_CODE, false, "move-to-nearest-code", 'm', OptionParser::eRequiredArgument, NULL, NULL, 0, eArgTypeBoolean,
+        "Move breakpoints to nearest code. If not set the target.move-to-nearest-code setting is used." },
 
     { 0, false, NULL, 0, 0, NULL, NULL, 0, eArgTypeNone, NULL }
 };
@@ -773,11 +881,10 @@ public:
     }
 
 
-    virtual
-    ~CommandObjectBreakpointModify () {}
+    ~CommandObjectBreakpointModify () override {}
 
-    virtual Options *
-    GetOptions ()
+    Options *
+    GetOptions () override
     {
         return &m_options;
     }
@@ -807,11 +914,10 @@ public:
         {
         }
 
-        virtual
-        ~CommandOptions () {}
+        ~CommandOptions () override {}
 
-        virtual Error
-        SetOptionValue (uint32_t option_idx, const char *option_arg)
+        Error
+        SetOptionValue (uint32_t option_idx, const char *option_arg) override
         {
             Error error;
             const int short_option = m_getopt_table[option_idx].val;
@@ -838,7 +944,7 @@ public:
                     break;
                 case 'i':
                 {
-                    m_ignore_count = Args::StringToUInt32(option_arg, UINT32_MAX, 0);
+                    m_ignore_count = StringConvert::ToUInt32(option_arg, UINT32_MAX, 0);
                     if (m_ignore_count == UINT32_MAX)
                        error.SetErrorStringWithFormat ("invalid ignore count '%s'", option_arg);
                 }
@@ -865,7 +971,7 @@ public:
                     }
                     else
                     {
-                        m_thread_id = Args::StringToUInt64(option_arg, LLDB_INVALID_THREAD_ID, 0);
+                        m_thread_id = StringConvert::ToUInt64(option_arg, LLDB_INVALID_THREAD_ID, 0);
                         if (m_thread_id == LLDB_INVALID_THREAD_ID)
                            error.SetErrorStringWithFormat ("invalid thread id string '%s'", option_arg);
                         else
@@ -896,7 +1002,7 @@ public:
                     }
                     else
                     {
-                        m_thread_index = Args::StringToUInt32 (option_arg, UINT32_MAX, 0);
+                        m_thread_index = StringConvert::ToUInt32 (option_arg, UINT32_MAX, 0);
                         if (m_thread_id == UINT32_MAX)
                            error.SetErrorStringWithFormat ("invalid thread index string '%s'", option_arg);
                         else
@@ -912,7 +1018,7 @@ public:
             return error;
         }
         void
-        OptionParsingStarting ()
+        OptionParsingStarting () override
         {
             m_ignore_count = 0;
             m_thread_id = LLDB_INVALID_THREAD_ID;
@@ -932,7 +1038,7 @@ public:
         }
         
         const OptionDefinition*
-        GetDefinitions ()
+        GetDefinitions () override
         {
             return g_option_table;
         }
@@ -964,8 +1070,8 @@ public:
     };
 
 protected:
-    virtual bool
-    DoExecute (Args& command, CommandReturnObject &result)
+    bool
+    DoExecute (Args& command, CommandReturnObject &result) override
     {
         Target *target = GetSelectedOrDummyTarget(m_options.m_use_dummy);
         if (target == NULL)
@@ -1092,12 +1198,11 @@ public:
     }
 
 
-    virtual
-    ~CommandObjectBreakpointEnable () {}
+    ~CommandObjectBreakpointEnable () override {}
 
 protected:
-    virtual bool
-    DoExecute (Args& command, CommandReturnObject &result)
+    bool
+    DoExecute (Args& command, CommandReturnObject &result) override
     {
         Target *target = GetSelectedOrDummyTarget();
         if (target == NULL)
@@ -1182,27 +1287,27 @@ public:
     CommandObjectBreakpointDisable (CommandInterpreter &interpreter) :
         CommandObjectParsed (interpreter,
                              "breakpoint disable",
-                             "Disable the specified breakpoint(s) without removing it/them.  If no breakpoints are specified, disable them all.",
+                             "Disable the specified breakpoint(s) without removing them.  If none are specified, disable all breakpoints.",
                              NULL)
     {
         SetHelpLong(
-"Disable the specified breakpoint(s) without removing it/them.  \n\
-If no breakpoints are specified, disable them all.\n\
-\n\
-Note: disabling a breakpoint will cause none of its locations to be hit\n\
-regardless of whether they are enabled or disabled.  So the sequence: \n\
-\n\
-    (lldb) break disable 1\n\
-    (lldb) break enable 1.1\n\
-\n\
-will NOT cause location 1.1 to get hit.  To achieve that, do:\n\
-\n\
-    (lldb) break disable 1.*\n\
-    (lldb) break enable 1.1\n\
-\n\
-The first command disables all the locations of breakpoint 1, \n\
+"Disable the specified breakpoint(s) without removing them.  \
+If none are specified, disable all breakpoints." R"(
+
+)" "Note: disabling a breakpoint will cause none of its locations to be hit \
+regardless of whether they are enabled or disabled.  After the sequence:" R"(
+
+    (lldb) break disable 1
+    (lldb) break enable 1.1
+
+execution will NOT stop at location 1.1.  To achieve that, type:
+
+    (lldb) break disable 1.*
+    (lldb) break enable 1.1
+
+)" "The first command disables all the locations of breakpoint 1, \
 the second re-enables the first location."
-                    );
+        );
         
         CommandArgumentEntry arg;
         CommandObject::AddIDsArgumentData(arg, eArgTypeBreakpointID, eArgTypeBreakpointIDRange);
@@ -1212,12 +1317,11 @@ the second re-enables the first location."
     }
 
 
-    virtual
-    ~CommandObjectBreakpointDisable () {}
+    ~CommandObjectBreakpointDisable () override {}
 
 protected:
-    virtual bool
-    DoExecute (Args& command, CommandReturnObject &result)
+    bool
+    DoExecute (Args& command, CommandReturnObject &result) override
     {
         Target *target = GetSelectedOrDummyTarget();
         if (target == NULL)
@@ -1322,11 +1426,10 @@ public:
     }
 
 
-    virtual
-    ~CommandObjectBreakpointList () {}
+    ~CommandObjectBreakpointList () override {}
 
-    virtual Options *
-    GetOptions ()
+    Options *
+    GetOptions () override
     {
         return &m_options;
     }
@@ -1342,11 +1445,10 @@ public:
         {
         }
 
-        virtual
-        ~CommandOptions () {}
+        ~CommandOptions () override {}
 
-        virtual Error
-        SetOptionValue (uint32_t option_idx, const char *option_arg)
+        Error
+        SetOptionValue (uint32_t option_idx, const char *option_arg) override
         {
             Error error;
             const int short_option = m_getopt_table[option_idx].val;
@@ -1377,7 +1479,7 @@ public:
         }
 
         void
-        OptionParsingStarting ()
+        OptionParsingStarting () override
         {
             m_level = lldb::eDescriptionLevelFull;
             m_internal = false;
@@ -1385,7 +1487,7 @@ public:
         }
 
         const OptionDefinition *
-        GetDefinitions ()
+        GetDefinitions () override
         {
             return g_option_table;
         }
@@ -1403,8 +1505,8 @@ public:
     };
 
 protected:
-    virtual bool
-    DoExecute (Args& command, CommandReturnObject &result)
+    bool
+    DoExecute (Args& command, CommandReturnObject &result) override
     {
         Target *target = GetSelectedOrDummyTarget(m_options.m_use_dummy);
 
@@ -1519,11 +1621,10 @@ public:
     {
     }
 
-    virtual
-    ~CommandObjectBreakpointClear () {}
+    ~CommandObjectBreakpointClear () override {}
 
-    virtual Options *
-    GetOptions ()
+    Options *
+    GetOptions () override
     {
         return &m_options;
     }
@@ -1539,11 +1640,10 @@ public:
         {
         }
 
-        virtual
-        ~CommandOptions () {}
+        ~CommandOptions () override {}
 
-        virtual Error
-        SetOptionValue (uint32_t option_idx, const char *option_arg)
+        Error
+        SetOptionValue (uint32_t option_idx, const char *option_arg) override
         {
             Error error;
             const int short_option = m_getopt_table[option_idx].val;
@@ -1555,7 +1655,7 @@ public:
                     break;
 
                 case 'l':
-                    m_line_num = Args::StringToUInt32 (option_arg, 0);
+                    m_line_num = StringConvert::ToUInt32 (option_arg, 0);
                     break;
 
                 default:
@@ -1567,14 +1667,14 @@ public:
         }
 
         void
-        OptionParsingStarting ()
+        OptionParsingStarting () override
         {
             m_filename.clear();
             m_line_num = 0;
         }
 
         const OptionDefinition*
-        GetDefinitions ()
+        GetDefinitions () override
         {
             return g_option_table;
         }
@@ -1591,8 +1691,8 @@ public:
     };
 
 protected:
-    virtual bool
-    DoExecute (Args& command, CommandReturnObject &result)
+    bool
+    DoExecute (Args& command, CommandReturnObject &result) override
     {
         Target *target = GetSelectedOrDummyTarget();
         if (target == NULL)
@@ -1719,11 +1819,10 @@ public:
         m_arguments.push_back (arg);   
     }
 
-    virtual
-    ~CommandObjectBreakpointDelete () {}
+    ~CommandObjectBreakpointDelete () override {}
 
-    virtual Options *
-    GetOptions ()
+    Options *
+    GetOptions () override
     {
         return &m_options;
     }
@@ -1739,11 +1838,10 @@ public:
         {
         }
 
-        virtual
-        ~CommandOptions () {}
+        ~CommandOptions () override {}
 
-        virtual Error
-        SetOptionValue (uint32_t option_idx, const char *option_arg)
+        Error
+        SetOptionValue (uint32_t option_idx, const char *option_arg) override
         {
             Error error;
             const int short_option = m_getopt_table[option_idx].val;
@@ -1767,14 +1865,14 @@ public:
         }
 
         void
-        OptionParsingStarting ()
+        OptionParsingStarting () override
         {
             m_use_dummy = false;
             m_force = false;
         }
 
         const OptionDefinition*
-        GetDefinitions ()
+        GetDefinitions () override
         {
             return g_option_table;
         }
@@ -1789,8 +1887,8 @@ public:
     };
 
 protected:
-    virtual bool
-    DoExecute (Args& command, CommandReturnObject &result)
+    bool
+    DoExecute (Args& command, CommandReturnObject &result) override
     {
         Target *target = GetSelectedOrDummyTarget(m_options.m_use_dummy);
 
@@ -1909,27 +2007,26 @@ public:
 
     }
 
-    virtual
-    ~BreakpointNameOptionGroup ()
+    ~BreakpointNameOptionGroup () override
     {
     }
     
-    virtual uint32_t
-    GetNumDefinitions ()
+    uint32_t
+    GetNumDefinitions () override
     {
       return sizeof (g_breakpoint_name_options) / sizeof (OptionDefinition);
     }
 
-    virtual const OptionDefinition*
-    GetDefinitions ()
+    const OptionDefinition*
+    GetDefinitions () override
     {
         return g_breakpoint_name_options;
     }
 
-    virtual Error
+    Error
     SetOptionValue (CommandInterpreter &interpreter,
                     uint32_t option_idx,
-                    const char *option_value)
+                    const char *option_value) override
     {
         Error error;
         const int short_option = g_breakpoint_name_options[option_idx].short_option;
@@ -1938,15 +2035,15 @@ public:
         {
         case 'N':
             if (BreakpointID::StringIsBreakpointName(option_value, error) && error.Success())
-                m_name.SetValueFromCString(option_value);
+                m_name.SetValueFromString(option_value);
             break;
           
         case 'B':
-            if (m_breakpoint.SetValueFromCString(option_value).Fail())
+            if (m_breakpoint.SetValueFromString(option_value).Fail())
                 error.SetErrorStringWithFormat ("unrecognized value \"%s\" for breakpoint", option_value);
             break;
         case 'D':
-            if (m_use_dummy.SetValueFromCString(option_value).Fail())
+            if (m_use_dummy.SetValueFromString(option_value).Fail())
                 error.SetErrorStringWithFormat ("unrecognized value \"%s\" for use-dummy", option_value);
             break;
 
@@ -1957,8 +2054,8 @@ public:
         return error;
     }
 
-    virtual void
-    OptionParsingStarting (CommandInterpreter &interpreter)
+    void
+    OptionParsingStarting (CommandInterpreter &interpreter) override
     {
         m_name.Clear();
         m_breakpoint.Clear();
@@ -1995,18 +2092,17 @@ public:
             m_option_group.Finalize();
         }
 
-    virtual
-    ~CommandObjectBreakpointNameAdd () {}
+    ~CommandObjectBreakpointNameAdd () override {}
 
   Options *
-  GetOptions ()
+  GetOptions () override
   {
     return &m_option_group;
   }
   
 protected:
-    virtual bool
-    DoExecute (Args& command, CommandReturnObject &result)
+    bool
+    DoExecute (Args& command, CommandReturnObject &result) override
     {
         if (!m_name_options.m_name.OptionWasSet())
         {
@@ -2091,18 +2187,17 @@ public:
         m_option_group.Finalize();
     }
 
-    virtual
-    ~CommandObjectBreakpointNameDelete () {}
+    ~CommandObjectBreakpointNameDelete () override {}
 
   Options *
-  GetOptions ()
+  GetOptions () override
   {
     return &m_option_group;
   }
   
 protected:
-    virtual bool
-    DoExecute (Args& command, CommandReturnObject &result)
+    bool
+    DoExecute (Args& command, CommandReturnObject &result) override
     {
         if (!m_name_options.m_name.OptionWasSet())
         {
@@ -2176,19 +2271,17 @@ public:
         m_option_group.Finalize();
     }
 
-    virtual
-    ~CommandObjectBreakpointNameList () {}
+    ~CommandObjectBreakpointNameList () override {}
 
   Options *
-  GetOptions ()
+  GetOptions () override
   {
     return &m_option_group;
   }
   
 protected:
-protected:
-    virtual bool
-    DoExecute (Args& command, CommandReturnObject &result)
+    bool
+    DoExecute (Args& command, CommandReturnObject &result) override
     {
         Target *target = GetSelectedOrDummyTarget(m_name_options.m_use_dummy.GetCurrentValue());
 
@@ -2273,8 +2366,7 @@ public:
 
     }
 
-    virtual
-    ~CommandObjectBreakpointName ()
+    ~CommandObjectBreakpointName () override
     {
     }
 

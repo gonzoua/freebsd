@@ -173,6 +173,30 @@ typedef struct acpi_pkg_info
 #define DB_DWORD_DISPLAY    4
 #define DB_QWORD_DISPLAY    8
 
+
+/*
+ * utnonansi - Non-ANSI C library functions
+ */
+void
+AcpiUtStrupr (
+    char                    *SrcString);
+
+void
+AcpiUtStrlwr (
+    char                    *SrcString);
+
+int
+AcpiUtStricmp (
+    char                    *String1,
+    char                    *String2);
+
+ACPI_STATUS
+AcpiUtStrtoul64 (
+    char                    *String,
+    UINT32                  Base,
+    UINT64                  *RetInteger);
+
+
 /*
  * utglobal - Global data structures and procedures
  */
@@ -245,8 +269,6 @@ void
 AcpiUtSubsystemShutdown (
     void);
 
-
-#define ACPI_IS_ASCII(c)  ((c) < 0x80)
 
 /*
  * utcopy - Object construction and conversion interfaces
@@ -406,6 +428,7 @@ void
 AcpiUtReportWarning (
     char                    *ModuleName,
     UINT32                  LineNumber);
+
 
 /*
  * utdelete - Object deletion and reference counts
@@ -719,7 +742,7 @@ BOOLEAN
 AcpiUtIsPciRootBridge (
     char                    *Id);
 
-#if (defined ACPI_ASL_COMPILER || defined ACPI_EXEC_APP)
+#if (defined ACPI_ASL_COMPILER || defined ACPI_EXEC_APP || defined ACPI_NAMES_APP)
 BOOLEAN
 AcpiUtIsAmlTable (
     ACPI_TABLE_HEADER       *Table);
@@ -732,10 +755,10 @@ AcpiUtWalkPackageTree (
     ACPI_PKG_CALLBACK       WalkCallback,
     void                    *Context);
 
-
 /* Values for Base above (16=Hex, 10=Decimal) */
 
 #define ACPI_ANY_BASE        0
+
 
 UINT32
 AcpiUtDwordByteSwap (
@@ -809,27 +832,6 @@ AcpiUtGetResourceEndTag (
  * utstring - String and character utilities
  */
 void
-AcpiUtStrupr (
-    char                    *SrcString);
-
-#ifdef ACPI_ASL_COMPILER
-void
-AcpiUtStrlwr (
-    char                    *SrcString);
-
-int
-AcpiUtStricmp (
-    char                    *String1,
-    char                    *String2);
-#endif
-
-ACPI_STATUS
-AcpiUtStrtoul64 (
-    char                    *String,
-    UINT32                  Base,
-    UINT64                  *RetInteger);
-
-void
 AcpiUtPrintString (
     char                    *String,
     UINT16                  MaxLength);
@@ -865,15 +867,6 @@ AcpiUtSafeStrcat (
     char                    *Dest,
     ACPI_SIZE               DestSize,
     char                    *Source);
-
-#ifndef _KERNEL
-BOOLEAN
-AcpiUtSafeStrncat (
-    char                    *Dest,
-    ACPI_SIZE               DestSize,
-    char                    *Source,
-    ACPI_SIZE               MaxTransferLength);
-#endif
 #endif
 
 
@@ -956,6 +949,7 @@ AcpiUtCreateList (
 
 #endif /* ACPI_DBG_TRACK_ALLOCATIONS */
 
+
 /*
  * utaddress - address range check
  */
@@ -981,6 +975,7 @@ AcpiUtCheckAddressRange (
 void
 AcpiUtDeleteAddressLists (
     void);
+
 
 /*
  * utxferror - various error/warning output functions
@@ -1028,6 +1023,7 @@ AcpiUtMethodError (
     const char              *Path,
     ACPI_STATUS             LookupStatus);
 
+
 /*
  * Utility functions for ACPI names and IDs
  */
@@ -1042,6 +1038,7 @@ AcpiAhMatchHardwareId (
 const char *
 AcpiAhMatchUuid (
     UINT8                   *Data);
+
 
 /*
  * utprint - printf/vprintf output functions
@@ -1083,6 +1080,7 @@ AcpiUtFilePrintf (
     const char              *Format,
     ...);
 #endif
+
 
 /*
  * utuuid -- UUID support functions

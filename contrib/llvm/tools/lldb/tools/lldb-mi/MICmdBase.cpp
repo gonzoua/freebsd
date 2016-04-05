@@ -7,22 +7,12 @@
 //
 //===----------------------------------------------------------------------===//
 
-//++
-// File:        MICmdBase.cpp
-//
-// Overview:    CMICmdBase implementation.
-//
-// Environment: Compilers:  Visual C++ 12.
-//                          gcc (Ubuntu/Linaro 4.8.1-10ubuntu9) 4.8.1
-//              Libraries:  See MIReadmetxt.
-//
-// Copyright:   None.
-//--
-
 // In-house headers:
 #include "MICmdBase.h"
 #include "MICmnMIValueConst.h"
 #include "MICmnLLDBDebugSessionInfo.h"
+#include "MICmdArgValOptionLong.h"
+#include "MICmdArgValConsume.h"
 
 //++ ------------------------------------------------------------------------------------
 // Details: CMICmdBase constructor.
@@ -31,10 +21,17 @@
 // Return:  None.
 // Throws:  None.
 //--
-CMICmdBase::CMICmdBase(void)
+CMICmdBase::CMICmdBase()
     : m_pSelfCreatorFn(nullptr)
     , m_rLLDBDebugSessionInfo(CMICmnLLDBDebugSessionInfo::Instance())
     , m_bHasResultRecordExtra(false)
+    , m_constStrArgThreadGroup("thread-group")
+    , m_constStrArgThread("thread")
+    , m_constStrArgFrame("frame")
+    , m_constStrArgConsume("--")
+    , m_ThreadGrpArgMandatory(false)
+    , m_ThreadArgMandatory(false)
+    , m_FrameArgMandatory(false)
 {
 }
 
@@ -45,7 +42,7 @@ CMICmdBase::CMICmdBase(void)
 // Return:  None.
 // Throws:  None.
 //--
-CMICmdBase::~CMICmdBase(void)
+CMICmdBase::~CMICmdBase()
 {
 }
 
@@ -57,7 +54,7 @@ CMICmdBase::~CMICmdBase(void)
 // Throws:  None.
 //--
 const SMICmdData &
-CMICmdBase::GetCmdData(void) const
+CMICmdBase::GetCmdData() const
 {
     return m_cmdData;
 }
@@ -71,7 +68,7 @@ CMICmdBase::GetCmdData(void) const
 // Throws:  None.
 //--
 const CMIUtilString &
-CMICmdBase::GetErrorDescription(void) const
+CMICmdBase::GetErrorDescription() const
 {
     return m_strCurrentErrDescription;
 }
@@ -81,13 +78,28 @@ CMICmdBase::GetErrorDescription(void) const
 //          options description string.
 // Type:    Overridden.
 // Args:    None.
-// Return:  CMIUtilString & -   Command decription.
+// Return:  CMIUtilString & -   Command description.
 // Throws:  None.
 //--
 const CMIUtilString &
-CMICmdBase::GetMiCmd(void) const
+CMICmdBase::GetMiCmd() const
 {
     return m_strMiCmd;
+}
+
+//++ ------------------------------------------------------------------------------------
+// Details: Help parse the arguments that are common to all commands.
+// Args:    None.
+// Return:  None
+// Throws:  None.
+//--
+void
+CMICmdBase::AddCommonArgs()
+{
+    m_setCmdArgs.Add(new CMICmdArgValOptionLong(m_constStrArgThreadGroup, m_ThreadGrpArgMandatory, true, CMICmdArgValListBase::eArgValType_ThreadGrp, 1));
+    m_setCmdArgs.Add(new CMICmdArgValOptionLong(m_constStrArgThread, m_ThreadArgMandatory, true, CMICmdArgValListBase::eArgValType_Number, 1));
+    m_setCmdArgs.Add(new CMICmdArgValOptionLong(m_constStrArgFrame, m_FrameArgMandatory, true, CMICmdArgValListBase::eArgValType_Number, 1));
+    m_setCmdArgs.Add(new CMICmdArgValConsume(m_constStrArgConsume, false));
 }
 
 //++ ------------------------------------------------------------------------------------
@@ -95,16 +107,13 @@ CMICmdBase::GetMiCmd(void) const
 //          provide data about its status or provide information to other objects.
 // Type:    Overridden.
 // Args:    None.
-// Return:  MIstatus::success - Functional succeeded.
-//          MIstatus::failure - Functional failed.
+// Return:  None.
 // Throws:  None.
 //--
-bool
+void
 CMICmdBase::SetCmdData(const SMICmdData &vCmdData)
 {
     m_cmdData = vCmdData;
-
-    return MIstatus::success;
 }
 
 //++ ------------------------------------------------------------------------------------
@@ -116,7 +125,7 @@ CMICmdBase::SetCmdData(const SMICmdData &vCmdData)
 // Throws:  None.
 //--
 CMICmdFactory::CmdCreatorFnPtr
-CMICmdBase::GetCmdCreatorFn(void) const
+CMICmdBase::GetCmdCreatorFn() const
 {
     return m_pSelfCreatorFn;
 }
@@ -132,7 +141,7 @@ CMICmdBase::GetCmdCreatorFn(void) const
 // Throws:  None.
 //--
 void
-CMICmdBase::CmdFinishedTellInvoker(void) const
+CMICmdBase::CmdFinishedTellInvoker() const
 {
     CMICmdInvoker::Instance().CmdExecuteFinished(const_cast<CMICmdBase &>(*this));
 }
@@ -146,14 +155,14 @@ CMICmdBase::CmdFinishedTellInvoker(void) const
 // Throws:  None.
 //--
 const CMIUtilString &
-CMICmdBase::GetMIResultRecord(void) const
+CMICmdBase::GetMIResultRecord() const
 {
     return m_miResultRecord.GetString();
 }
 
 //++ ------------------------------------------------------------------------------------
 // Details: Retrieve from the command additional MI result to its 1 line response.
-//          Because of using LLDB addtional 'fake'/hack output is sometimes required to
+//          Because of using LLDB additional 'fake'/hack output is sometimes required to
 //          help the driver client operate i.e. Eclipse.
 // Type:    Overridden.
 // Args:    None.
@@ -161,14 +170,14 @@ CMICmdBase::GetMIResultRecord(void) const
 // Throws:  None.
 //--
 const CMIUtilString &
-CMICmdBase::GetMIResultRecordExtra(void) const
+CMICmdBase::GetMIResultRecordExtra() const
 {
     return m_miResultRecordExtra;
 }
 
 //++ ------------------------------------------------------------------------------------
 // Details: Hss *this command got additional MI result to its 1 line response.
-//          Because of using LLDB addtional 'fake'/hack output is sometimes required to
+//          Because of using LLDB additional 'fake'/hack output is sometimes required to
 //          help the driver client operate i.e. Eclipse.
 // Type:    Overridden.
 // Args:    None.
@@ -176,7 +185,7 @@ CMICmdBase::GetMIResultRecordExtra(void) const
 // Throws:  None.
 //--
 bool
-CMICmdBase::HasMIResultRecordExtra(void) const
+CMICmdBase::HasMIResultRecordExtra() const
 {
     return m_bHasResultRecordExtra;
 }
@@ -210,7 +219,7 @@ CMICmdBase::SetError(const CMIUtilString &rErrMsg)
 // Throws:  None.
 //--
 MIuint
-CMICmdBase::GetGUID(void)
+CMICmdBase::GetGUID()
 {
     MIuint64 vptr = reinterpret_cast<MIuint64>(this);
     MIuint id = (vptr)&0xFFFFFFFF;
@@ -229,7 +238,7 @@ CMICmdBase::GetGUID(void)
 // Throws:  None.
 //--
 bool
-CMICmdBase::ParseArgs(void)
+CMICmdBase::ParseArgs()
 {
     // Do nothing - override to implement
 
@@ -248,7 +257,7 @@ CMICmdBase::ParseArgs(void)
 // Throws:  None.
 //--
 bool
-CMICmdBase::ParseValidateCmdOptions(void)
+CMICmdBase::ParseValidateCmdOptions()
 {
     CMICmdArgContext argCntxt(m_cmdData.strMiCmdOption);
     if (m_setCmdArgs.Validate(m_cmdData.strMiCmd, argCntxt))
@@ -271,7 +280,7 @@ CMICmdBase::ParseValidateCmdOptions(void)
 // Throws:  None.
 //--
 bool
-CMICmdBase::GetExitAppOnCommandFailure(void) const
+CMICmdBase::GetExitAppOnCommandFailure() const
 {
     return false;
 }

@@ -32,7 +32,7 @@
 # define SANITIZER_WEAK_ATTRIBUTE  __attribute__((weak))
 #endif
 
-#if SANITIZER_LINUX && !defined(SANITIZER_GO)
+#if (SANITIZER_LINUX || SANITIZER_WINDOWS) && !defined(SANITIZER_GO)
 # define SANITIZER_SUPPORTS_WEAK_HOOKS 1
 #else
 # define SANITIZER_SUPPORTS_WEAK_HOOKS 0
@@ -80,7 +80,15 @@ typedef signed   char s8;
 typedef signed   short s16;  // NOLINT
 typedef signed   int s32;
 typedef signed   long long s64;  // NOLINT
+#if SANITIZER_WINDOWS
+// On Windows, files are HANDLE, which is a synonim of void*.
+// Use void* to avoid including <windows.h> everywhere.
+typedef void* fd_t;
+typedef unsigned error_t;
+#else
 typedef int fd_t;
+typedef int error_t;
+#endif
 
 // WARNING: OFF_T may be different from OS type off_t, depending on the value of
 // _FILE_OFFSET_BITS. This definition of OFF_T matches the ABI of system calls
@@ -109,7 +117,10 @@ using namespace __sanitizer;  // NOLINT
 // Common defs.
 #define INLINE inline
 #define INTERFACE_ATTRIBUTE SANITIZER_INTERFACE_ATTRIBUTE
-#define WEAK SANITIZER_WEAK_ATTRIBUTE
+#define SANITIZER_WEAK_DEFAULT_IMPL \
+  extern "C" SANITIZER_INTERFACE_ATTRIBUTE SANITIZER_WEAK_ATTRIBUTE NOINLINE
+#define SANITIZER_WEAK_CXX_DEFAULT_IMPL \
+  extern "C++" SANITIZER_INTERFACE_ATTRIBUTE SANITIZER_WEAK_ATTRIBUTE NOINLINE
 
 // Platform-specific defs.
 #if defined(_MSC_VER)
@@ -121,7 +132,6 @@ using namespace __sanitizer;  // NOLINT
 # define NOINLINE __declspec(noinline)
 # define NORETURN __declspec(noreturn)
 # define THREADLOCAL   __declspec(thread)
-# define NOTHROW
 # define LIKELY(x) (x)
 # define UNLIKELY(x) (x)
 # define PREFETCH(x) /* _mm_prefetch(x, _MM_HINT_NTA) */
@@ -135,7 +145,6 @@ using namespace __sanitizer;  // NOLINT
 # define NOINLINE __attribute__((noinline))
 # define NORETURN  __attribute__((noreturn))
 # define THREADLOCAL   __thread
-# define NOTHROW throw()
 # define LIKELY(x)     __builtin_expect(!!(x), 1)
 # define UNLIKELY(x)   __builtin_expect(!!(x), 0)
 # if defined(__i386__) || defined(__x86_64__)
@@ -152,6 +161,12 @@ using namespace __sanitizer;  // NOLINT
 #else
 # define UNUSED
 # define USED
+#endif
+
+#if !defined(_MSC_VER) || defined(__clang__) || MSC_PREREQ(1900)
+# define NOEXCEPT noexcept
+#else
+# define NOEXCEPT throw()
 #endif
 
 // Unaligned versions of basic types.
@@ -295,6 +310,7 @@ extern "C" void* _ReturnAddress(void);
   do {                                                             \
     volatile uptr enable_fp;                                       \
     enable_fp = GET_CURRENT_FRAME();                               \
+    (void)enable_fp;                                               \
   } while (0)
 
 #endif  // SANITIZER_DEFS_H

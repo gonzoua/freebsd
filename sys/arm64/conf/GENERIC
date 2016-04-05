@@ -22,13 +22,13 @@ cpu		ARM64
 ident		GENERIC
 
 makeoptions	DEBUG=-g		# Build kernel with gdb(1) debug symbols
-makeoptions	NO_MODULES=1		# We don't yet support modules on arm64
+makeoptions	WITH_CTF=1		# Run ctfconvert(1) for DTrace support
 
 options 	SCHED_ULE		# ULE scheduler
 options 	PREEMPTION		# Enable kernel thread preemption
 options 	INET			# InterNETworking
 options 	INET6			# IPv6 communications protocols
-options 	IPSEC                   # IP (v4/v6) security
+options 	IPSEC			# IP (v4/v6) security
 options 	TCP_OFFLOAD		# TCP offload
 options 	SCTP			# Stream Control Transmission Protocol
 options 	FFS			# Berkeley Fast Filesystem
@@ -38,8 +38,8 @@ options 	UFS_DIRHASH		# Improve performance on big directories
 options 	UFS_GJOURNAL		# Enable gjournal-based UFS journaling
 options 	QUOTA			# Enable disk quotas for UFS
 options 	MD_ROOT			# MD is a potential root device
-options 	NFSCL			# New Network Filesystem Client
-options 	NFSD			# New Network Filesystem Server
+options 	NFSCL			# Network Filesystem Client
+options 	NFSD			# Network Filesystem Server
 options 	NFSLOCKD		# Network Lock Manager
 options 	NFS_ROOT		# NFS usable as /, requires NFSCL
 options 	MSDOSFS			# MSDOS Filesystem
@@ -84,14 +84,54 @@ options 	WITNESS			# Enable checks to detect deadlocks and cycles
 options 	WITNESS_SKIPSPIN	# Don't run witness on spinlocks for speed
 options 	MALLOC_DEBUG_MAXZONES=8	# Separate malloc(9) zones
 
+# SoC support
+options 	SOC_CAVM_THUNDERX
+options 	SOC_HISI_HI6220
+
+# VirtIO support
 device		virtio
 device		virtio_mmio
 device		virtio_blk
 device		vtnet
 
+# Bus drivers
+device		pci
+options 	PCI_IOV		# PCI SR-IOV support
+
+# Ethernet NICs
+device		mii
+device		miibus		# MII bus support
+device		em		# Intel PRO/1000 Gigabit Ethernet Family
+device		igb		# Intel PRO/1000 PCIE Server Gigabit Family
+device		ix		# Intel 10Gb Ethernet Family
+device		msk		# Marvell/SysKonnect Yukon II Gigabit Ethernet
+device		vnic		# Cavium ThunderX NIC
+
+# Block devices
+device		ahci
+device		scbus
+device		da
+
+# ATA/SCSI peripherals
+device		pass		# Passthrough device (direct ATA/SCSI access)
+
+# MMC/SD/SDIO Card slot support
+device		mmc			# mmc/sd bus
+device		mmcsd			# mmc/sd flash cards
+device		dwmmc
+
 # Serial (COM) ports
 device		uart		# Generic UART driver
+device		uart_ns8250	# ns8250-type UART driver
 device		pl011
+
+# USB support
+options 	USB_DEBUG		# enable debug msgs
+device		dwcotg			# DWC OTG controller
+device		xhci			# XHCI PCI->USB interface (USB 3.0)
+device		usb			# USB Bus (required)
+device		ukbd			# Keyboard
+device		umass			# Disks/Mass storage - Requires scbus and da
 
 # Pseudo devices.
 device		loop		# Network loopback
@@ -108,6 +148,9 @@ device		psci		# Support for ARM PSCI
 # Be aware of the administrative consequences of enabling this!
 # Note that 'bpf' is required for DHCP.
 device		bpf		# Berkeley packet filter
+
+# Chip-specific errata
+options 	THUNDERX_PASS_1_1_ERRATA
 
 options 	FDT
 device		acpi

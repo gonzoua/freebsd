@@ -34,20 +34,22 @@
 /*
  * ath statistics class.
  */
-#include <sys/types.h>
+
+#include <sys/param.h>
 #include <sys/file.h>
 #include <sys/sockio.h>
 #include <sys/socket.h>
+
 #include <net/if.h>
 #include <net/if_media.h>
 #include <net/if_var.h>
 
+#include <err.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <signal.h>
 #include <string.h>
 #include <unistd.h>
-#include <err.h>
 
 #include "ah.h"
 #include "ah_desc.h"
@@ -57,6 +59,8 @@
 #include "if_athioctl.h"
 
 #include "athstats.h"
+
+#include "ctrl.h"
 
 #ifdef ATH_SUPPORT_ANI
 #define HAL_EP_RND(x,mul) \
@@ -439,10 +443,9 @@ struct _athstats {
 
 struct athstatfoo_p {
 	struct athstatfoo base;
-	int s;
 	int optstats;
+	struct ath_driver_req req;
 #define	ATHSTATS_ANI	0x0001
-	struct ifreq ifr;
 	struct ath_diag atd;
 	struct _athstats cur;
 	struct _athstats total;
@@ -453,7 +456,8 @@ ath_setifname(struct athstatfoo *wf0, const char *ifname)
 {
 	struct athstatfoo_p *wf = (struct athstatfoo_p *) wf0;
 
-	strncpy(wf->ifr.ifr_name, ifname, sizeof (wf->ifr.ifr_name));
+	ath_driver_req_close(&wf->req);
+	(void) ath_driver_req_open(&wf->req, ifname);
 #ifdef ATH_SUPPORT_ANI
 	strncpy(wf->atd.ad_name, ifname, sizeof (wf->atd.ad_name));
 	wf->optstats |= ATHSTATS_ANI;
@@ -465,30 +469,34 @@ ath_zerostats(struct athstatfoo *wf0)
 {
 	struct athstatfoo_p *wf = (struct athstatfoo_p *) wf0;
 
-	if (ioctl(wf->s, SIOCZATHSTATS, &wf->ifr) < 0)
-		err(-1, "ioctl: %s", wf->ifr.ifr_name);
+	if (ath_driver_req_zero_stats(&wf->req) < 0)
+		exit(-1);
 }
 
 static void
 ath_collect(struct athstatfoo_p *wf, struct _athstats *stats)
 {
-	wf->ifr.ifr_data = (caddr_t) &stats->ath;
-	if (ioctl(wf->s, SIOCGATHSTATS, &wf->ifr) < 0)
-		err(1, "ioctl: %s", wf->ifr.ifr_name);
+
+	if (ath_driver_req_fetch_stats(&wf->req, &stats->ath) < 0)
+		exit(1);
 #ifdef ATH_SUPPORT_ANI
 	if (wf->optstats & ATHSTATS_ANI) {
+
+		/* XXX TODO: convert */
 		wf->atd.ad_id = HAL_DIAG_ANI_CURRENT; /* HAL_DIAG_ANI_CURRENT */
 		wf->atd.ad_out_data = (caddr_t) &stats->ani_state;
 		wf->atd.ad_out_size = sizeof(stats->ani_state);
-		if (ioctl(wf->s, SIOCGATHDIAG, &wf->atd) < 0) {
-			warn("ioctl: %s", wf->atd.ad_name);
+		if (ath_driver_req_fetch_diag(&wf->req, SIOCGATHDIAG,
+		    &wf->atd) < 0) {
 			wf->optstats &= ~ATHSTATS_ANI;
 		}
+
+		/* XXX TODO: convert */
 		wf->atd.ad_id = HAL_DIAG_ANI_STATS; /* HAL_DIAG_ANI_STATS */
 		wf->atd.ad_out_data = (caddr_t) &stats->ani_stats;
 		wf->atd.ad_out_size = sizeof(stats->ani_stats);
-		if (ioctl(wf->s, SIOCGATHDIAG, &wf->atd) < 0)
-			warn("ioctl: %s", wf->atd.ad_name);
+		(void) ath_driver_req_fetch_diag(&wf->req, SIOCGATHDIAG,
+		    &wf->atd);
 	}
 #endif /* ATH_SUPPORT_ANI */
 }
@@ -1058,12 +1066,13 @@ BSDSTAT_DEFINE_BOUNCE(athstatfoo)
 struct athstatfoo *
 athstats_new(const char *ifname, const char *fmtstring)
 {
-#define	N(a)	(sizeof(a) / sizeof(a[0]))
 	struct athstatfoo_p *wf;
 
 	wf = calloc(1, sizeof(struct athstatfoo_p));
 	if (wf != NULL) {
-		bsdstat_init(&wf->base.base, "athstats", athstats, N(athstats));
+		ath_driver_req_init(&wf->req);
+		bsdstat_init(&wf->base.base, "athstats", athstats,
+		    nitems(athstats));
 		/* override base methods */
 		wf->base.base.collect_cur = ath_collect_cur;
 		wf->base.base.collect_tot = ath_collect_tot;
@@ -1081,13 +1090,8 @@ athstats_new(const char *ifname, const char *fmtstring)
 		wf->base.setstamac = wlan_setstamac;
 #endif
 		wf->base.zerostats = ath_zerostats;
-		wf->s = socket(AF_INET, SOCK_DGRAM, 0);
-		if (wf->s < 0)
-			err(1, "socket");
-
 		ath_setifname(&wf->base, ifname);
 		wf->base.setfmt(&wf->base, fmtstring);
 	}
 	return &wf->base;
-#undef N
 }

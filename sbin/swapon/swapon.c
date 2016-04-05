@@ -313,15 +313,15 @@ static char *
 swap_on_geli_args(const char *mntops)
 {
 	const char *aalgo, *ealgo, *keylen_str, *sectorsize_str;
-	const char *aflag, *eflag, *lflag, *sflag;
+	const char *aflag, *eflag, *lflag, *Tflag, *sflag;
 	char *p, *args, *token, *string, *ops;
-	int argsize, pagesize;
+	int pagesize;
 	size_t pagesize_len;
 	u_long ul;
 
 	/* Use built-in defaults for geli(8). */
 	aalgo = ealgo = keylen_str = "";
-	aflag = eflag = lflag = "";
+	aflag = eflag = lflag = Tflag = "";
 
 	/* We will always specify sectorsize. */
 	sflag = " -s ";
@@ -365,6 +365,8 @@ swap_on_geli_args(const char *mntops)
 					free(ops);
 					return (NULL);
 				}
+			} else if ((p = strstr(token, "notrim")) == token) {
+				Tflag = " -T ";
 			} else if (strcmp(token, "sw") != 0) {
 				warnx("Invalid option: %s", token);
 				free(ops);
@@ -387,8 +389,8 @@ swap_on_geli_args(const char *mntops)
 		sectorsize_str = p;
 	}
 
-	argsize = asprintf(&args, "%s%s%s%s%s%s%s%s -d",
-	    aflag, aalgo, eflag, ealgo, lflag, keylen_str,
+	(void)asprintf(&args, "%s%s%s%s%s%s%s%s%s -d",
+	    aflag, aalgo, eflag, ealgo, lflag, keylen_str, Tflag,
 	    sflag, sectorsize_str);
 
 	free(ops);
@@ -640,6 +642,7 @@ run_cmd(int *ofd, const char *cmdline, ...)
 	rv = vasprintf(&cmd, cmdline, ap);
 	if (rv == -1) {
 		warn("%s", __func__);
+		va_end(ap);
 		return (rv);
 	}
 	va_end(ap);

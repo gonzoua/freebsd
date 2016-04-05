@@ -92,6 +92,7 @@ struct secpolicy {
 	u_int state;
 #define	IPSEC_SPSTATE_DEAD	0
 #define	IPSEC_SPSTATE_ALIVE	1
+	u_int32_t priority;		/* priority of this policy */
 	u_int32_t id;			/* It's unique number on the system. */
 	/*
 	 * lifetime handler.
@@ -257,6 +258,15 @@ struct ipsecstat {
 #ifdef _KERNEL
 #include <sys/counter.h>
 
+struct ipsec_ctx_data;
+#define	IPSEC_INIT_CTX(_ctx, _mp, _sav, _af, _enc) do {	\
+	(_ctx)->mp = (_mp);				\
+	(_ctx)->sav = (_sav);				\
+	(_ctx)->af = (_af);				\
+	(_ctx)->enc = (_enc);				\
+} while(0)
+int	ipsec_run_hhooks(struct ipsec_ctx_data *ctx, int direction);
+
 VNET_DECLARE(int, ipsec_debug);
 #define	V_ipsec_debug		VNET(ipsec_debug)
 
@@ -337,7 +347,7 @@ extern void ah4_ctlinput(int cmd, struct sockaddr *sa, void *);
 extern int esp4_input(struct mbuf **mp, int *offp, int proto);
 extern void esp4_ctlinput(int cmd, struct sockaddr *sa, void *);
 extern int ipcomp4_input(struct mbuf **mp, int *offp, int proto);
-extern int ipsec4_common_input(struct mbuf *m, ...);
+extern int ipsec_common_input(struct mbuf *m, int, int, int, int); 
 extern int ipsec4_common_input_cb(struct mbuf *m, struct secasvar *sav,
 			int skip, int protoff);
 extern int ipsec4_process_packet(struct mbuf *, struct ipsecrequest *);
@@ -351,14 +361,6 @@ extern	struct mbuf *m_makespace(struct mbuf *m0, int skip, int hlen, int *off);
 extern	caddr_t m_pad(struct mbuf *m, int n);
 extern	int m_striphdr(struct mbuf *m, int skip, int hlen);
 
-#ifdef DEV_ENC
-#define	ENC_BEFORE	0x0001
-#define	ENC_AFTER	0x0002
-#define	ENC_IN		0x0100
-#define	ENC_OUT		0x0200
-extern	int ipsec_filter(struct mbuf **, int, int);
-extern	void ipsec_bpf(struct mbuf *, struct secasvar *, int, int);
-#endif
 #endif /* _KERNEL */
 
 #ifndef _KERNEL

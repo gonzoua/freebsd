@@ -481,9 +481,19 @@ ffs_reallocblks(ap)
 		struct cluster_save *a_buflist;
 	} */ *ap;
 {
+	struct ufsmount *ump;
 
-	if (doreallocblks == 0)
+	/*
+	 * If the underlying device can do deletes, then skip reallocating
+	 * the blocks of this file into contiguous sequences. Devices that
+	 * benefit from BIO_DELETE also benefit from not moving the data.
+	 * These devices are flash and therefore work less well with this
+	 * optimization. Also skip if reallocblks has been disabled globally.
+	 */
+	ump = VTOI(ap->a_vp)->i_ump;
+	if (ump->um_candelete || doreallocblks == 0)
 		return (ENOSPC);
+
 	/*
 	 * We can't wait in softdep prealloc as it may fsync and recurse
 	 * here.  Instead we simply fail to reallocate blocks if this
@@ -492,7 +502,7 @@ ffs_reallocblks(ap)
 	if (DOINGSOFTDEP(ap->a_vp))
 		if (softdep_prealloc(ap->a_vp, MNT_NOWAIT) != 0)
 			return (ENOSPC);
-	if (VTOI(ap->a_vp)->i_ump->um_fstype == UFS1)
+	if (ump->um_fstype == UFS1)
 		return (ffs_reallocblks_ufs1(ap));
 	return (ffs_reallocblks_ufs2(ap));
 }
@@ -2260,8 +2270,6 @@ ffs_blkfree_cg(ump, fs, devvp, bno, size, inum, dephd)
 	bdwrite(bp);
 }
 
-TASKQUEUE_DEFINE_THREAD(ffs_trim);
-
 struct ffs_blkfree_trim_params {
 	struct task task;
 	struct ufsmount *ump;
@@ -2284,6 +2292,7 @@ ffs_blkfree_trim_task(ctx, pending)
 	ffs_blkfree_cg(tp->ump, tp->ump->um_fs, tp->devvp, tp->bno, tp->size,
 	    tp->inum, tp->pdephd);
 	vn_finished_secondary_write(UFSTOVFS(tp->ump));
+	atomic_add_int(&tp->ump->um_trim_inflight, -1);
 	free(tp, M_TEMP);
 }
 
@@ -2296,7 +2305,7 @@ ffs_blkfree_trim_completed(bip)
 	tp = bip->bio_caller2;
 	g_destroy_bio(bip);
 	TASK_INIT(&tp->task, 0, ffs_blkfree_trim_task, tp);
-	taskqueue_enqueue(taskqueue_ffs_trim, &tp->task);
+	taskqueue_enqueue(tp->ump->um_trim_tq, &tp->task);
 }
 
 void
@@ -2340,6 +2349,7 @@ ffs_blkfree(ump, fs, devvp, bno, size, inum, vtype, dephd)
 	 * reordering, TRIM might be issued after we reuse the block
 	 * and write some new data into it.
 	 */
+	atomic_add_int(&ump->um_trim_inflight, 1);
 	tp = malloc(sizeof(struct ffs_blkfree_trim_params), M_TEMP, M_WAITOK);
 	tp->ump = ump;
 	tp->devvp = devvp;

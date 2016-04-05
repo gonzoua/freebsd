@@ -7,8 +7,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "lldb/lldb-python.h"
-
 // C Includes
 
 // C++ Includes
@@ -23,9 +21,8 @@
 #include "lldb/Core/StreamString.h"
 #include "lldb/DataFormatters/TypeSynthetic.h"
 #include "lldb/Interpreter/CommandInterpreter.h"
-#include "lldb/Interpreter/ScriptInterpreterPython.h"
-#include "lldb/Symbol/ClangASTType.h"
-#include "lldb/Target/StackFrame.h"
+#include "lldb/Interpreter/ScriptInterpreter.h"
+#include "lldb/Symbol/CompilerType.h"
 #include "lldb/Target/Target.h"
 
 using namespace lldb;
@@ -68,18 +65,24 @@ size_t
 TypeFilterImpl::FrontEnd::GetIndexOfChildWithName (const ConstString &name)
 {
     const char* name_cstr = name.GetCString();
-    for (size_t i = 0; i < filter->GetCount(); i++)
+    if (name_cstr)
     {
-        const char* expr_cstr = filter->GetExpressionPathAtIndex(i);
-        if (expr_cstr)
+        for (size_t i = 0; i < filter->GetCount(); i++)
         {
-            if (*expr_cstr == '.')
-                expr_cstr++;
-            else if (*expr_cstr == '-' && *(expr_cstr+1) == '>')
-                expr_cstr += 2;
+            const char* expr_cstr = filter->GetExpressionPathAtIndex(i);
+            if (expr_cstr)
+            {
+                if (*expr_cstr == '.')
+                    expr_cstr++;
+                else if (*expr_cstr == '-' && *(expr_cstr+1) == '>')
+                    expr_cstr += 2;
+            }
+            if (expr_cstr)
+            {
+                if (!::strcmp(name_cstr, expr_cstr))
+                    return i;
+            }
         }
-        if (!::strcmp(name_cstr, expr_cstr))
-            return i;
     }
     return UINT32_MAX;
 }
@@ -107,11 +110,10 @@ std::string
 CXXSyntheticChildren::GetDescription()
 {
     StreamString sstr;
-    sstr.Printf("%s%s%s Generator at %p - %s",
+    sstr.Printf("%s%s%s %s",
                 Cascades() ? "" : " (not cascading)",
                 SkipsPointers() ? " (skip pointers)" : "",
                 SkipsReferences() ? " (skip references)" : "",
-                reinterpret_cast<void*>(reinterpret_cast<intptr_t>(m_create_callback)),
                 m_description.c_str());
 
     return sstr.GetString();
@@ -132,7 +134,7 @@ lldb::ValueObjectSP
 SyntheticChildrenFrontEnd::CreateValueObjectFromAddress (const char* name,
                                                          uint64_t address,
                                                          const ExecutionContext& exe_ctx,
-                                                         ClangASTType type)
+                                                         CompilerType type)
 {
     ValueObjectSP valobj_sp(ValueObject::CreateValueObjectFromAddress(name, address, exe_ctx, type));
     if (valobj_sp)
@@ -144,7 +146,7 @@ lldb::ValueObjectSP
 SyntheticChildrenFrontEnd::CreateValueObjectFromData (const char* name,
                                                       const DataExtractor& data,
                                                       const ExecutionContext& exe_ctx,
-                                                      ClangASTType type)
+                                                      CompilerType type)
 {
     ValueObjectSP valobj_sp(ValueObject::CreateValueObjectFromData(name, data, exe_ctx, type));
     if (valobj_sp)
@@ -190,7 +192,7 @@ ScriptedSyntheticChildren::FrontEnd::GetChildAtIndex (size_t idx)
 bool
 ScriptedSyntheticChildren::FrontEnd::IsValid ()
 {
-    return m_wrapper_sp.get() != nullptr && m_wrapper_sp->operator bool() && m_interpreter != nullptr;
+    return (m_wrapper_sp && m_wrapper_sp->IsValid() && m_interpreter);
 }
 
 size_t
@@ -198,7 +200,15 @@ ScriptedSyntheticChildren::FrontEnd::CalculateNumChildren ()
 {
     if (!m_wrapper_sp || m_interpreter == NULL)
         return 0;
-    return m_interpreter->CalculateNumChildren(m_wrapper_sp);
+    return m_interpreter->CalculateNumChildren(m_wrapper_sp, UINT32_MAX);
+}
+
+size_t
+ScriptedSyntheticChildren::FrontEnd::CalculateNumChildren (uint32_t max)
+{
+    if (!m_wrapper_sp || m_interpreter == NULL)
+        return 0;
+    return m_interpreter->CalculateNumChildren(m_wrapper_sp, max);
 }
 
 bool

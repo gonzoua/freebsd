@@ -46,6 +46,7 @@
 #include <sys/stdint.h>		/* for people using printf mainly */
 
 extern int cold;		/* nonzero if we are doing a cold boot */
+extern int suspend_blocked;	/* block suspend due to pending shutdown */
 extern int rebooting;		/* kern_reboot() has been called. */
 extern const char *panicstr;	/* panic message */
 extern char version[];		/* system version */
@@ -82,12 +83,12 @@ void	kassert_panic(const char *fmt, ...)  __printflike(1, 2);
 #ifdef	INVARIANTS		/* The option is always available */
 #define	KASSERT(exp,msg) do {						\
 	if (__predict_false(!(exp)))					\
-		kassert_panic msg;						\
+		kassert_panic msg;					\
 } while (0)
 #define	VNASSERT(exp, vp, msg) do {					\
 	if (__predict_false(!(exp))) {					\
 		vn_printf(vp, "VNASSERT failed\n");			\
-		kassert_panic msg;						\
+		kassert_panic msg;					\
 	}								\
 } while (0)
 #else
@@ -147,10 +148,14 @@ extern char **kenvp;
 extern const void *zero_region;	/* address space maps to a zeroed page	*/
 
 extern int unmapped_buf_allowed;
-extern int iosize_max_clamp;
-extern int devfs_iosize_max_clamp;
-#define	IOSIZE_MAX	(iosize_max_clamp ? INT_MAX : SSIZE_MAX)
-#define	DEVFS_IOSIZE_MAX	(devfs_iosize_max_clamp ? INT_MAX : SSIZE_MAX)
+
+#ifdef __LP64__
+#define	IOSIZE_MAX		iosize_max()
+#define	DEVFS_IOSIZE_MAX	devfs_iosize_max()
+#else
+#define	IOSIZE_MAX		SSIZE_MAX
+#define	DEVFS_IOSIZE_MAX	SSIZE_MAX
+#endif
 
 /*
  * General function declarations.
@@ -206,6 +211,7 @@ int	kvprintf(char const *, void (*)(int, void*), void *, int,
 	    __va_list) __printflike(1, 0);
 void	log(int, const char *, ...) __printflike(2, 3);
 void	log_console(struct uio *);
+void	vlog(int, const char *, __va_list) __printflike(2, 0);
 int	asprintf(char **ret, struct malloc_type *mtp, const char *format, 
 	    ...) __printflike(3, 4);
 int	printf(const char *, ...) __printflike(1, 2);
@@ -401,6 +407,11 @@ struct cdev;
 dev_t dev2udev(struct cdev *x);
 const char *devtoname(struct cdev *cdev);
 
+#ifdef __LP64__
+size_t	devfs_iosize_max(void);
+size_t	iosize_max(void);
+#endif
+
 int poll_no_poll(int events);
 
 /* XXX: Should be void nanodelay(u_int nsec); */
@@ -411,7 +422,6 @@ struct root_hold_token;
 
 struct root_hold_token *root_mount_hold(const char *identifier);
 void root_mount_rel(struct root_hold_token *h);
-void root_mount_wait(void);
 int root_mounted(void);
 
 

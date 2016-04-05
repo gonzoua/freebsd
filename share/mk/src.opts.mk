@@ -80,7 +80,8 @@ __DEFAULT_YES_OPTIONS = \
     DYNAMICROOT \
     ED_CRYPTO \
     EE \
-    ELFTOOLCHAIN_TOOLS \
+    ELFCOPY_AS_OBJCOPY \
+    ELFTOOLCHAIN_BOOTSTRAP \
     EXAMPLES \
     FDT \
     FILE \
@@ -156,7 +157,6 @@ __DEFAULT_YES_OPTIONS = \
     SOURCELESS_UCODE \
     SVNLITE \
     SYSCONS \
-    SYSINSTALL \
     TALK \
     TCP_WRAPPERS \
     TCSH \
@@ -178,13 +178,13 @@ __DEFAULT_YES_OPTIONS = \
 __DEFAULT_NO_OPTIONS = \
     BSD_GREP \
     CLANG_EXTRAS \
+    DTRACE_TESTS \
     EISA \
     HESIOD \
-    LLDB \
+    LIBSOFT \
     NAND \
     OFED \
     OPENLDAP \
-    OPENSSH_NONE_CIPHER \
     SHARED_TOOLCHAIN \
     SORT_THREADS \
     SVN
@@ -210,34 +210,49 @@ __TT=${MACHINE}
 .endif
 
 .include <bsd.compiler.mk>
-.if !${COMPILER_FEATURES:Mc++11}
-# If the compiler is not C++11 capable, disable clang and use gcc instead.
-__DEFAULT_YES_OPTIONS+=GCC GCC_BOOTSTRAP GNUCXX
-__DEFAULT_NO_OPTIONS+=CLANG CLANG_BOOTSTRAP CLANG_FULL CLANG_IS_CC
-.elif ${__T} == "aarch64" || ${__T} == "amd64" || ${__T} == "i386"
-# On x86 and arm64, clang is enabled, and will be installed as the default cc.
+# If the compiler is not C++11 capable, disable Clang and use GCC instead.
+# This means that architectures that have GCC 4.2 as default can not
+# build Clang without using an external compiler.
+
+.if ${COMPILER_FEATURES:Mc++11} && (${__T} == "aarch64" || \
+    ${__T} == "amd64" || ${__TT} == "arm" || ${__T} == "i386")
+# Clang is enabled, and will be installed as the default /usr/bin/cc.
 __DEFAULT_YES_OPTIONS+=CLANG CLANG_BOOTSTRAP CLANG_FULL CLANG_IS_CC
 __DEFAULT_NO_OPTIONS+=GCC GCC_BOOTSTRAP GNUCXX
-.elif ${__TT} == "arm"
-# On arm, clang is enabled, and it is installed as the default cc, but
-# since gcc is unable to build the full clang, disable it by default.
-__DEFAULT_YES_OPTIONS+=CLANG CLANG_BOOTSTRAP CLANG_IS_CC
-__DEFAULT_NO_OPTIONS+=CLANG_FULL GCC GCC_BOOTSTRAP GNUCXX
-.elif ${__T:Mpowerpc*}
-# On powerpc, clang is enabled, but gcc is installed as the default cc.
+.elif ${COMPILER_FEATURES:Mc++11} && ${__T:Mpowerpc*}
+# On powerpc, if an external compiler that supports C++11 is used as ${CC},
+# then Clang is enabled, but GCC is installed as the default /usr/bin/cc.
 __DEFAULT_YES_OPTIONS+=CLANG CLANG_FULL GCC GCC_BOOTSTRAP GNUCXX
 __DEFAULT_NO_OPTIONS+=CLANG_BOOTSTRAP CLANG_IS_CC
 .else
-# Everything else disables clang, and uses gcc instead.
+# Everything else disables Clang, and uses GCC instead.
 __DEFAULT_YES_OPTIONS+=GCC GCC_BOOTSTRAP GNUCXX
 __DEFAULT_NO_OPTIONS+=CLANG CLANG_BOOTSTRAP CLANG_FULL CLANG_IS_CC
 .endif
-.if ${__T} == "aarch64"
+# In-tree binutils/gcc are older versions without modern architecture support.
+.if ${__T} == "aarch64" || ${__T} == "riscv64"
 BROKEN_OPTIONS+=BINUTILS BINUTILS_BOOTSTRAP GCC GCC_BOOTSTRAP GDB
+__DEFAULT_YES_OPTIONS+=LLVM_LIBUNWIND
+.else
+__DEFAULT_NO_OPTIONS+=LLVM_LIBUNWIND
+.endif
+.if ${__T} == "riscv64"
+BROKEN_OPTIONS+=PROFILE # "sorry, unimplemented: profiler support for RISC-V"
+BROKEN_OPTIONS+=TESTS   # "undefined reference to `_Unwind_Resume'"
+BROKEN_OPTIONS+=CXX     # "libcxxrt.so: undefined reference to `_Unwind_Resume_or_Rethrow'"
+.endif
+.if ${__T} == "aarch64" || ${__T} == "amd64"
+__DEFAULT_YES_OPTIONS+=LLDB
+.else
+__DEFAULT_NO_OPTIONS+=LLDB
 .endif
 # LLVM lacks support for FreeBSD 64-bit atomic operations for ARMv4/ARMv5
 .if ${__T} == "arm" || ${__T} == "armeb"
 BROKEN_OPTIONS+=LLDB
+.endif
+# Only doing soft float API stuff on armv6
+.if ${__T} != "armv6"
+BROKEN_OPTIONS+=LIBSOFT
 .endif
 
 .include <bsd.mkopt.mk>
@@ -319,6 +334,10 @@ MK_KERBEROS:=	no
 MK_AUTHPF:=	no
 .endif
 
+.if ${MK_TESTS} == "no"
+MK_DTRACE_TESTS:= no
+.endif
+
 .if ${MK_TEXTPROC} == "no"
 MK_GROFF:=	no
 .endif
@@ -326,6 +345,7 @@ MK_GROFF:=	no
 .if ${MK_CROSS_COMPILER} == "no"
 MK_BINUTILS_BOOTSTRAP:= no
 MK_CLANG_BOOTSTRAP:= no
+MK_ELFTOOLCHAIN_BOOTSTRAP:= no
 MK_GCC_BOOTSTRAP:= no
 .endif
 
@@ -335,6 +355,7 @@ MK_CLANG:=	no
 MK_GCC:=	no
 MK_GDB:=	no
 MK_INCLUDES:=	no
+MK_LLDB:=	no
 .endif
 
 .if ${MK_CLANG} == "no"

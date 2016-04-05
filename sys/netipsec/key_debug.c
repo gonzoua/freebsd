@@ -36,10 +36,10 @@
 #include "opt_ipsec.h"
 #endif
 
-#include <sys/types.h>
 #include <sys/param.h>
 #ifdef _KERNEL
 #include <sys/systm.h>
+#include <sys/malloc.h>
 #include <sys/mbuf.h>
 #include <sys/queue.h>
 #endif
@@ -577,11 +577,6 @@ kdebug_secasv(struct secasvar *sav)
 		kdebug_sadb_key((struct sadb_ext *)sav->key_auth);
 	if (sav->key_enc != NULL)
 		kdebug_sadb_key((struct sadb_ext *)sav->key_enc);
-	if (sav->iv != NULL) {
-		printf("  iv=");
-		ipsec_hexdump(sav->iv, sav->ivlen ? sav->ivlen : 8);
-		printf("\n");
-	}
 
 	if (sav->replay != NULL)
 		kdebug_secreplay(sav->replay);

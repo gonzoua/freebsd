@@ -102,11 +102,6 @@ CFLAGS+=	-I${.CURDIR}/../../../../lib/libstand/
 DPADD=		${LIBFICL} ${LIBOFW} ${LIBFDT} ${LIBSTAND}
 LDADD=		${LIBFICL} ${LIBOFW} ${LIBFDT} ${LIBSTAND}
 
-SC_DFLT_FONT=cp437
-
-font.h:
-	uudecode < /usr/share/syscons/fonts/${SC_DFLT_FONT}-8x16.fnt && file2c 'u_char dflt_font_16[16*256] = {' '};' < ${SC_DFLT_FONT}-8x16 > font.h && uudecode < /usr/share/syscons/fonts/${SC_DFLT_FONT}-8x14.fnt && file2c 'u_char dflt_font_14[14*256] = {' '};' < ${SC_DFLT_FONT}-8x14 >> font.h && uudecode < /usr/share/syscons/fonts/${SC_DFLT_FONT}-8x8.fnt && file2c 'u_char dflt_font_8[8*256] = {' '};' < ${SC_DFLT_FONT}-8x8 >> font.h
-
 vers.c:	${.CURDIR}/../../common/newvers.sh ${.CURDIR}/version
 	sh ${.CURDIR}/../../common/newvers.sh ${.CURDIR}/version ${NEWVERSWHAT}
 
@@ -117,12 +112,6 @@ loader.help: help.common help.kboot ${.CURDIR}/../../fdt/help.fdt
 .PATH: ${.CURDIR}/../../forth
 .include	"${.CURDIR}/../../forth/Makefile.inc"
 
-.if !exists(${DESTDIR}/boot/loader.rc)
-FILES+= loader.rc
-.endif
-
-.if !exists(${DESTDIR}/boot/menu.rc)
-FILES+= menu.rc
-.endif
+FILES+= loader.rc menu.rc
 
 .include <bsd.prog.mk>

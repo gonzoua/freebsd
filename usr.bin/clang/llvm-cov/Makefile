@@ -8,7 +8,6 @@ SRCDIR=	tools/llvm-cov
 SRCS=	CodeCoverage.cpp \
 	CoverageFilters.cpp \
 	CoverageReport.cpp \
-	CoverageSummary.cpp \
 	CoverageSummaryInfo.cpp \
 	SourceCoverageView.cpp \
 	TestingSupport.cpp \
@@ -22,5 +21,7 @@ LIBDEPS=llvmprofiledata \
 	llvmbitreader \
 	llvmcore \
 	llvmsupport
+
+LIBADD+=	z
 
 .include "../clang.prog.mk"

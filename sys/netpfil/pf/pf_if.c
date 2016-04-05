@@ -41,6 +41,7 @@ __FBSDID("$FreeBSD$");
 
 #include <sys/param.h>
 #include <sys/kernel.h>
+#include <sys/eventhandler.h>
 #include <sys/lock.h>
 #include <sys/mbuf.h>
 #include <sys/rwlock.h>
@@ -581,7 +582,7 @@ pfi_address_add(struct sockaddr *sa, int af, int net)
 			    __func__, V_pfi_buffer_cnt, PFI_BUFFER_MAX);
 			return;
 		}
-		memcpy(V_pfi_buffer, p, V_pfi_buffer_cnt * sizeof(*V_pfi_buffer));
+		memcpy(p, V_pfi_buffer, V_pfi_buffer_max * sizeof(*V_pfi_buffer));
 		/* no need to zero buffer */
 		free(V_pfi_buffer, PFI_MTYPE);
 		V_pfi_buffer = p;

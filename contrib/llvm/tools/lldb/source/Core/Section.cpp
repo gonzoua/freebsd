@@ -12,6 +12,7 @@
 #include "lldb/Symbol/ObjectFile.h"
 #include "lldb/Target/SectionLoadList.h"
 #include "lldb/Target/Target.h"
+#include "lldb/Utility/ConvertEnum.h"
 
 #include <limits>
 
@@ -316,6 +317,25 @@ Section::Slide (addr_t slide_amount, bool slide_children)
         return true;
     }
     return false;
+}
+
+lldb::offset_t
+Section::GetSectionData (void *dst, lldb::offset_t dst_len, lldb::offset_t offset)
+{
+    if (m_obj_file)
+        return m_obj_file->ReadSectionData (this,
+                                            offset,
+                                            dst,
+                                            dst_len);
+    return 0;
+}
+
+lldb::offset_t
+Section::GetSectionData (DataExtractor& section_data) const
+{
+    if (m_obj_file)
+        return m_obj_file->ReadSectionData (this, section_data);
+    return 0;
 }
 
 #pragma mark SectionList

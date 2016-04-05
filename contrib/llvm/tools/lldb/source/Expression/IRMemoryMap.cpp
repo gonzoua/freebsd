@@ -47,7 +47,7 @@ IRMemoryMap::~IRMemoryMap ()
 }
 
 lldb::addr_t
-IRMemoryMap::FindSpace (size_t size)
+IRMemoryMap::FindSpace (size_t size, bool zero_memory)
 {
     lldb::TargetSP target_sp = m_target_wp.lock();
     lldb::ProcessSP process_sp = m_process_wp.lock();
@@ -60,7 +60,10 @@ IRMemoryMap::FindSpace (size_t size)
     {
         Error alloc_error;
 
-        ret = process_sp->AllocateMemory(size, lldb::ePermissionsReadable | lldb::ePermissionsWritable, alloc_error);
+        if (!zero_memory)
+            ret = process_sp->AllocateMemory(size, lldb::ePermissionsReadable | lldb::ePermissionsWritable, alloc_error);
+        else
+            ret = process_sp->CallocateMemory(size, lldb::ePermissionsReadable | lldb::ePermissionsWritable, alloc_error);
 
         if (!alloc_error.Success())
             return LLDB_INVALID_ADDRESS;
@@ -225,7 +228,7 @@ IRMemoryMap::Allocation::Allocation (lldb::addr_t process_alloc,
 }
 
 lldb::addr_t
-IRMemoryMap::Malloc (size_t size, uint8_t alignment, uint32_t permissions, AllocationPolicy policy, Error &error)
+IRMemoryMap::Malloc (size_t size, uint8_t alignment, uint32_t permissions, AllocationPolicy policy, bool zero_memory, Error &error)
 {
     lldb_private::Log *log (lldb_private::GetLogIfAllCategoriesSet (LIBLLDB_LOG_EXPRESSIONS));
     error.Clear();
@@ -263,7 +266,11 @@ IRMemoryMap::Malloc (size_t size, uint8_t alignment, uint32_t permissions, Alloc
             log->Printf ("IRMemoryMap::%s process_sp=0x%" PRIx64 ", process_sp->CanJIT()=%s, process_sp->IsAlive()=%s", __FUNCTION__, (lldb::addr_t) process_sp.get (), process_sp && process_sp->CanJIT () ? "true" : "false", process_sp && process_sp->IsAlive () ? "true" : "false");
         if (process_sp && process_sp->CanJIT() && process_sp->IsAlive())
         {
-            allocation_address = process_sp->AllocateMemory(allocation_size, permissions, error);
+            if (!zero_memory)
+              allocation_address = process_sp->AllocateMemory(allocation_size, permissions, error);
+            else
+              allocation_address = process_sp->CallocateMemory(allocation_size, permissions, error);
+
             if (!error.Success())
                 return LLDB_INVALID_ADDRESS;
         }
@@ -287,7 +294,11 @@ IRMemoryMap::Malloc (size_t size, uint8_t alignment, uint32_t permissions, Alloc
         {
             if (process_sp->CanJIT() && process_sp->IsAlive())
             {
-                allocation_address = process_sp->AllocateMemory(allocation_size, permissions, error);
+                if (!zero_memory)
+                  allocation_address = process_sp->AllocateMemory(allocation_size, permissions, error);
+                else
+                  allocation_address = process_sp->CallocateMemory(allocation_size, permissions, error);
+
                 if (!error.Success())
                     return LLDB_INVALID_ADDRESS;
             }
@@ -416,6 +427,32 @@ IRMemoryMap::Free (lldb::addr_t process_address, Error &error)
     }
 
     m_allocations.erase(iter);
+}
+
+bool
+IRMemoryMap::GetAllocSize(lldb::addr_t address, size_t &size)
+{
+    AllocationMap::iterator iter = FindAllocation(address, size);
+    if (iter == m_allocations.end())
+        return false;
+
+    Allocation &al = iter->second;
+
+    if (address > (al.m_process_start + al.m_size))
+    {
+        size = 0;
+        return false;
+    }
+
+    if (address > al.m_process_start)
+    {
+        int dif = address - al.m_process_start;
+        size = al.m_size - dif;
+        return true;
+    }
+
+    size = al.m_size;
+    return true;
 }
 
 void

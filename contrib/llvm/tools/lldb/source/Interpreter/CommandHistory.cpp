@@ -7,8 +7,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include <inttypes.h>
+
 #include "lldb/Interpreter/CommandHistory.h"
-#include "lldb/Interpreter/Args.h"
+#include "lldb/Host/StringConvert.h"
 
 using namespace lldb;
 using namespace lldb_private;
@@ -47,7 +49,7 @@ CommandHistory::FindString (const char* input_str) const
     if (input_str[1] == '-')
     {
         bool success;
-        size_t idx = Args::StringToUInt32 (input_str+2, 0, 0, &success);
+        size_t idx = StringConvert::ToUInt32 (input_str+2, 0, 0, &success);
         if (!success)
             return nullptr;
         if (idx > m_history.size())
@@ -66,7 +68,7 @@ CommandHistory::FindString (const char* input_str) const
     else
     {
         bool success;
-        uint32_t idx = Args::StringToUInt32 (input_str+1, 0, 0, &success);
+        uint32_t idx = StringConvert::ToUInt32 (input_str+1, 0, 0, &success);
         if (!success)
             return nullptr;
         if (idx >= m_history.size())
@@ -128,9 +130,9 @@ CommandHistory::Dump (Stream& stream,
                       size_t stop_idx) const
 {
     Mutex::Locker locker(m_mutex);
-    stop_idx = std::min(stop_idx, m_history.size() - 1);
+    stop_idx = std::min(stop_idx + 1, m_history.size());
     for (size_t counter = start_idx;
-         counter <= stop_idx;
+         counter < stop_idx;
          counter++)
     {
         const std::string hist_item = m_history[counter];

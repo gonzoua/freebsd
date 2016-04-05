@@ -335,6 +335,7 @@ struct ata_params {
 #define ATA_UDMA6               0x46
 #define ATA_SA150               0x47
 #define ATA_SA300               0x48
+#define ATA_SA600               0x49
 #define ATA_DMA_MAX             0x4f
 
 
@@ -367,6 +368,9 @@ struct ata_params {
 #define ATA_WRITE_LOG_EXT               0x3f
 #define ATA_READ_VERIFY                 0x40
 #define ATA_READ_VERIFY48               0x42
+#define ATA_WRITE_UNCORRECTABLE48       0x45    /* write uncorrectable 48bit LBA */
+#define         ATA_WU_PSEUDO           0x55    /* pseudo-uncorrectable error */
+#define         ATA_WU_FLAGGED          0xaa    /* flagged-uncorrectable error */
 #define ATA_READ_LOG_DMA_EXT            0x47    /* read log DMA ext - PIO Data-In */
 #define ATA_READ_FPDMA_QUEUED           0x60    /* read DMA NCQ */
 #define ATA_WRITE_FPDMA_QUEUED          0x61    /* write DMA NCQ */
@@ -398,6 +402,7 @@ struct ata_params {
 #define ATA_IDLE_CMD                    0xe3    /* idle */
 #define ATA_READ_BUFFER                 0xe4    /* read buffer */
 #define ATA_READ_PM                     0xe4    /* read portmultiplier */
+#define ATA_CHECK_POWER_MODE            0xe5    /* device power mode */
 #define ATA_SLEEP                       0xe6    /* sleep */
 #define ATA_FLUSHCACHE                  0xe7    /* flush cache to disk */
 #define ATA_WRITE_PM                    0xe8    /* write portmultiplier */

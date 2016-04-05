@@ -64,6 +64,10 @@ StringExtractorGDBRemote::GetServerPacketType () const
     const char *packet_cstr = m_packet.c_str();
     switch (m_packet[0])
     {
+
+    case '%':
+        return eServerPacketType_notify;
+
     case '\x03':
         if (packet_size == 1) return eServerPacketType_interrupt;
         break;
@@ -78,7 +82,7 @@ StringExtractorGDBRemote::GetServerPacketType () const
 
     case 'A':
         return eServerPacketType_A;
-            
+
     case 'Q':
 
         switch (packet_cstr[1])
@@ -118,7 +122,7 @@ StringExtractorGDBRemote::GetServerPacketType () const
             break;
         }
         break;
-            
+
     case 'q':
         switch (packet_cstr[1])
         {
@@ -136,6 +140,14 @@ StringExtractorGDBRemote::GetServerPacketType () const
             if (packet_size == 2)                               return eServerPacketType_qC;
             break;
 
+        case 'E':
+            if (PACKET_STARTS_WITH ("qEcho:"))                  return eServerPacketType_qEcho;
+            break;
+
+        case 'F':
+            if (PACKET_STARTS_WITH ("qFileLoadAddress:"))       return eServerPacketType_qFileLoadAddress;
+            break;
+
         case 'G':
             if (PACKET_STARTS_WITH ("qGroupName:"))             return eServerPacketType_qGroupName;
             if (PACKET_MATCHES ("qGetWorkingDir"))              return eServerPacketType_qGetWorkingDir;
@@ -151,15 +163,16 @@ StringExtractorGDBRemote::GetServerPacketType () const
         case 'K':
             if (PACKET_STARTS_WITH ("qKillSpawnedProcess"))     return eServerPacketType_qKillSpawnedProcess;
             break;
-        
+
         case 'L':
             if (PACKET_STARTS_WITH ("qLaunchGDBServer"))        return eServerPacketType_qLaunchGDBServer;
             if (PACKET_MATCHES ("qLaunchSuccess"))              return eServerPacketType_qLaunchSuccess;
             break;
-            
+
         case 'M':
             if (PACKET_STARTS_WITH ("qMemoryRegionInfo:"))      return eServerPacketType_qMemoryRegionInfo;
             if (PACKET_MATCHES ("qMemoryRegionInfo"))           return eServerPacketType_qMemoryRegionInfoSupported;
+            if (PACKET_STARTS_WITH ("qModuleInfo:"))             return eServerPacketType_qModuleInfo;
             break;
 
         case 'P':
@@ -169,7 +182,11 @@ StringExtractorGDBRemote::GetServerPacketType () const
             if (PACKET_STARTS_WITH ("qPlatform_chmod:"))        return eServerPacketType_qPlatform_chmod;
             if (PACKET_MATCHES ("qProcessInfo"))                return eServerPacketType_qProcessInfo;
             break;
-                
+        
+        case 'Q':
+            if (PACKET_MATCHES ("qQueryGDBServer"))             return eServerPacketType_qQueryGDBServer;
+            break;
+
         case 'R':
             if (PACKET_STARTS_WITH ("qRcmd,"))                  return eServerPacketType_qRcmd;
             if (PACKET_STARTS_WITH ("qRegisterInfo"))           return eServerPacketType_qRegisterInfo;
@@ -206,6 +223,12 @@ StringExtractorGDBRemote::GetServerPacketType () const
             break;
         }
         break;
+
+    case 'j':
+        if (PACKET_MATCHES("jSignalsInfo"))                     return eServerPacketType_jSignalsInfo;
+        if (PACKET_MATCHES("jThreadsInfo"))                     return eServerPacketType_jThreadsInfo;
+
+
     case 'v':
             if (PACKET_STARTS_WITH("vFile:"))
             {
@@ -265,6 +288,9 @@ StringExtractorGDBRemote::GetServerPacketType () const
       case 'H':
         return eServerPacketType_H;
 
+      case 'I':
+        return eServerPacketType_I;
+
       case 'k':
         if (packet_size == 1) return eServerPacketType_k;
         break;
@@ -287,6 +313,12 @@ StringExtractorGDBRemote::GetServerPacketType () const
 
       case 'S':
         return eServerPacketType_S;
+
+      case 'x':
+        return eServerPacketType_x;
+
+      case 'X':
+        return eServerPacketType_X;
 
       case 'T':
         return eServerPacketType_T;

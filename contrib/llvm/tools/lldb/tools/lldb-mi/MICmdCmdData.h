@@ -7,9 +7,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-//++
-// File:        MICmdCmdData.h
-//
 // Overview:    CMICmdCmdDataEvaluateExpression     interface.
 //              CMICmdCmdDataDisassemble            interface.
 //              CMICmdCmdDataReadMemoryBytes        interface.
@@ -19,6 +16,7 @@
 //              CMICmdCmdDataListRegisterChanged    interface.
 //              CMICmdCmdDataWriteMemoryBytes       interface.
 //              CMICmdCmdDataWriteMemory            interface.
+//              CMICmdCmdDataInfoLine               interface.
 //
 //              To implement new MI commands derive a new command class from the command base
 //              class. To enable the new command for interpretation add the new command class
@@ -29,50 +27,45 @@
 //              For an introduction to adding a new command see CMICmdCmdSupportInfoMiCmdQuery
 //              command class as an example.
 //
-// Environment: Compilers:  Visual C++ 12.
-//                          gcc (Ubuntu/Linaro 4.8.1-10ubuntu9) 4.8.1
-//              Libraries:  See MIReadmetxt.
-//
-// Copyright:   None.
-//--
 
 #pragma once
+
+// Third party headers:
+#include "lldb/API/SBCommandReturnObject.h"
 
 // In-house headers:
 #include "MICmdBase.h"
 #include "MICmnMIValueTuple.h"
 #include "MICmnMIValueList.h"
+#include "MICmnLLDBDebugSessionInfoVarObj.h"
 
 //++ ============================================================================
 // Details: MI command class. MI commands derived from the command base class.
 //          *this class implements MI command "data-evaluate-expression".
-// Gotchas: None.
-// Authors: Illya Rudkin 26/03/2014.
-// Changes: None.
 //--
 class CMICmdCmdDataEvaluateExpression : public CMICmdBase
 {
     // Statics:
   public:
     // Required by the CMICmdFactory when registering *this command
-    static CMICmdBase *CreateSelf(void);
+    static CMICmdBase *CreateSelf();
 
     // Methods:
   public:
-    /* ctor */ CMICmdCmdDataEvaluateExpression(void);
+    /* ctor */ CMICmdCmdDataEvaluateExpression();
 
     // Overridden:
   public:
     // From CMICmdInvoker::ICmd
-    virtual bool Execute(void);
-    virtual bool Acknowledge(void);
-    virtual bool ParseArgs(void);
+    bool Execute() override;
+    bool Acknowledge() override;
+    bool ParseArgs() override;
     // From CMICmnBase
-    /* dtor */ virtual ~CMICmdCmdDataEvaluateExpression(void);
+    /* dtor */ ~CMICmdCmdDataEvaluateExpression() override;
 
     // Methods:
   private:
-    bool HaveInvalidCharacterInExpression(const CMIUtilString &vrExpr, MIchar &vrwInvalidChar);
+    bool HaveInvalidCharacterInExpression(const CMIUtilString &vrExpr, char &vrwInvalidChar);
 
     // Attributes:
   private:
@@ -80,47 +73,39 @@ class CMICmdCmdDataEvaluateExpression : public CMICmdBase
     bool m_bEvaluatedExpression; // True = yes is expression evaluated, false = failed
     CMIUtilString m_strValue;
     CMICmnMIValueTuple m_miValueTuple;
-    bool m_bCompositeVarType; // True = yes composite type, false = internal type
     bool m_bFoundInvalidChar; // True = yes found unexpected character in the expression, false = all ok
-    MIchar m_cExpressionInvalidChar;
-    const CMIUtilString m_constStrArgThread; // Not specified in MI spec but Eclipse gives this option. Not handled by command.
-    const CMIUtilString m_constStrArgFrame;  // Not specified in MI spec but Eclipse gives this option. Not handled by command.
+    char m_cExpressionInvalidChar;
     const CMIUtilString m_constStrArgExpr;
 };
 
 //++ ============================================================================
 // Details: MI command class. MI commands derived from the command base class.
 //          *this class implements MI command "data-disassemble".
-// Gotchas: None.
-// Authors: Illya Rudkin 19/05/2014.
-// Changes: None.
 //--
 class CMICmdCmdDataDisassemble : public CMICmdBase
 {
     // Statics:
   public:
     // Required by the CMICmdFactory when registering *this command
-    static CMICmdBase *CreateSelf(void);
+    static CMICmdBase *CreateSelf();
 
     // Methods:
   public:
-    /* ctor */ CMICmdCmdDataDisassemble(void);
+    /* ctor */ CMICmdCmdDataDisassemble();
 
     // Overridden:
   public:
     // From CMICmdInvoker::ICmd
-    virtual bool Execute(void);
-    virtual bool Acknowledge(void);
-    virtual bool ParseArgs(void);
+    bool Execute() override;
+    bool Acknowledge() override;
+    bool ParseArgs() override;
     // From CMICmnBase
-    /* dtor */ virtual ~CMICmdCmdDataDisassemble(void);
+    /* dtor */ ~CMICmdCmdDataDisassemble() override;
 
     // Attributes:
   private:
-    const CMIUtilString m_constStrArgThread;    // Not specified in MI spec but Eclipse gives this option. Not handled by command.
     const CMIUtilString m_constStrArgAddrStart; // MI spec non mandatory, *this command mandatory
     const CMIUtilString m_constStrArgAddrEnd;   // MI spec non mandatory, *this command mandatory
-    const CMIUtilString m_constStrArgConsume;
     const CMIUtilString m_constStrArgMode;
     CMICmnMIValueList m_miValueList;
 };
@@ -128,129 +113,84 @@ class CMICmdCmdDataDisassemble : public CMICmdBase
 //++ ============================================================================
 // Details: MI command class. MI commands derived from the command base class.
 //          *this class implements MI command "data-read-memory-bytes".
-// Gotchas: None.
-// Authors: Illya Rudkin 20/05/2014.
-// Changes: None.
 //--
 class CMICmdCmdDataReadMemoryBytes : public CMICmdBase
 {
     // Statics:
   public:
     // Required by the CMICmdFactory when registering *this command
-    static CMICmdBase *CreateSelf(void);
+    static CMICmdBase *CreateSelf();
 
     // Methods:
   public:
-    /* ctor */ CMICmdCmdDataReadMemoryBytes(void);
+    /* ctor */ CMICmdCmdDataReadMemoryBytes();
 
     // Overridden:
   public:
     // From CMICmdInvoker::ICmd
-    virtual bool Execute(void);
-    virtual bool Acknowledge(void);
-    virtual bool ParseArgs(void);
+    bool Execute() override;
+    bool Acknowledge() override;
+    bool ParseArgs() override;
     // From CMICmnBase
-    /* dtor */ virtual ~CMICmdCmdDataReadMemoryBytes(void);
+    /* dtor */ ~CMICmdCmdDataReadMemoryBytes() override;
 
     // Attributes:
   private:
-    const CMIUtilString m_constStrArgThread; // Not specified in MI spec but Eclipse gives this option. Not handled by command.
     const CMIUtilString m_constStrArgByteOffset;
-    const CMIUtilString m_constStrArgAddrStart;
+    const CMIUtilString m_constStrArgAddrExpr;
     const CMIUtilString m_constStrArgNumBytes;
-    MIuchar *m_pBufferMemory;
+    unsigned char *m_pBufferMemory;
     MIuint64 m_nAddrStart;
     MIuint64 m_nAddrNumBytesToRead;
-    MIuint64 m_nAddrOffset;
 };
 
 //++ ============================================================================
 // Details: MI command class. MI commands derived from the command base class.
 //          *this class implements MI command "data-read-memory".
-// Gotchas: None.
-// Authors: Illya Rudkin 21/05/2014.
-// Changes: None.
 //--
 class CMICmdCmdDataReadMemory : public CMICmdBase
 {
     // Statics:
   public:
     // Required by the CMICmdFactory when registering *this command
-    static CMICmdBase *CreateSelf(void);
+    static CMICmdBase *CreateSelf();
 
     // Methods:
   public:
-    /* ctor */ CMICmdCmdDataReadMemory(void);
+    /* ctor */ CMICmdCmdDataReadMemory();
 
     // Overridden:
   public:
     // From CMICmdInvoker::ICmd
-    virtual bool Execute(void);
-    virtual bool Acknowledge(void);
+    bool Execute() override;
+    bool Acknowledge() override;
     // From CMICmnBase
-    /* dtor */ virtual ~CMICmdCmdDataReadMemory(void);
+    /* dtor */ ~CMICmdCmdDataReadMemory() override;
 };
 
 //++ ============================================================================
 // Details: MI command class. MI commands derived from the command base class.
 //          *this class implements MI command "data-list-register-names".
-// Gotchas: None.
-// Authors: Illya Rudkin 21/05/2014.
-// Changes: None.
 //--
 class CMICmdCmdDataListRegisterNames : public CMICmdBase
 {
     // Statics:
   public:
     // Required by the CMICmdFactory when registering *this command
-    static CMICmdBase *CreateSelf(void);
+    static CMICmdBase *CreateSelf();
 
     // Methods:
   public:
-    /* ctor */ CMICmdCmdDataListRegisterNames(void);
+    /* ctor */ CMICmdCmdDataListRegisterNames();
 
     // Overridden:
   public:
     // From CMICmdInvoker::ICmd
-    virtual bool Execute(void);
-    virtual bool Acknowledge(void);
-    virtual bool ParseArgs(void);
+    bool Execute() override;
+    bool Acknowledge() override;
+    bool ParseArgs() override;
     // From CMICmnBase
-    /* dtor */ virtual ~CMICmdCmdDataListRegisterNames(void);
-
-    // Attributes:
-  private:
-    const CMIUtilString m_constStrArgThreadGroup; // Not specified in MI spec but Eclipse gives this option
-    const CMIUtilString m_constStrArgRegNo;       // Not handled by *this command
-    CMICmnMIValueList m_miValueList;
-};
-
-//++ ============================================================================
-// Details: MI command class. MI commands derived from the command base class.
-//          *this class implements MI command "data-list-register-values".
-// Gotchas: None.
-// Authors: Illya Rudkin 21/05/2014.
-// Changes: None.
-//--
-class CMICmdCmdDataListRegisterValues : public CMICmdBase
-{
-    // Statics:
-  public:
-    // Required by the CMICmdFactory when registering *this command
-    static CMICmdBase *CreateSelf(void);
-
-    // Methods:
-  public:
-    /* ctor */ CMICmdCmdDataListRegisterValues(void);
-
-    // Overridden:
-  public:
-    // From CMICmdInvoker::ICmd
-    virtual bool Execute(void);
-    virtual bool Acknowledge(void);
-    virtual bool ParseArgs(void);
-    // From CMICmnBase
-    /* dtor */ virtual ~CMICmdCmdDataListRegisterValues(void);
+    /* dtor */ ~CMICmdCmdDataListRegisterNames() override;
 
     // Methods:
   private:
@@ -258,71 +198,97 @@ class CMICmdCmdDataListRegisterValues : public CMICmdBase
 
     // Attributes:
   private:
-    const CMIUtilString m_constStrArgThread; // Not specified in MI spec but Eclipse gives this option
+    const CMIUtilString m_constStrArgRegNo;       // Not handled by *this command
+    CMICmnMIValueList m_miValueList;
+};
+
+//++ ============================================================================
+// Details: MI command class. MI commands derived from the command base class.
+//          *this class implements MI command "data-list-register-values".
+//--
+class CMICmdCmdDataListRegisterValues : public CMICmdBase
+{
+    // Statics:
+  public:
+    // Required by the CMICmdFactory when registering *this command
+    static CMICmdBase *CreateSelf();
+
+    // Methods:
+  public:
+    /* ctor */ CMICmdCmdDataListRegisterValues();
+
+    // Overridden:
+  public:
+    // From CMICmdInvoker::ICmd
+    bool Execute() override;
+    bool Acknowledge() override;
+    bool ParseArgs() override;
+    // From CMICmnBase
+    /* dtor */ ~CMICmdCmdDataListRegisterValues() override;
+
+    // Methods:
+  private:
+    lldb::SBValue GetRegister(const MIuint vRegisterIndex) const;
+    void AddToOutput(const MIuint vnIndex, const lldb::SBValue &vrValue, CMICmnLLDBDebugSessionInfoVarObj::varFormat_e veVarFormat);
+
+    // Attributes:
+  private:
     const CMIUtilString m_constStrArgSkip;   // Not handled by *this command
     const CMIUtilString m_constStrArgFormat;
     const CMIUtilString m_constStrArgRegNo;
     CMICmnMIValueList m_miValueList;
-    lldb::SBProcess *m_pProcess;
 };
 
 //++ ============================================================================
 // Details: MI command class. MI commands derived from the command base class.
 //          *this class implements MI command "data-list-changed-registers".
-// Gotchas: None.
-// Authors: Illya Rudkin 22/05/2014.
-// Changes: None.
 //--
 class CMICmdCmdDataListRegisterChanged : public CMICmdBase
 {
     // Statics:
   public:
     // Required by the CMICmdFactory when registering *this command
-    static CMICmdBase *CreateSelf(void);
+    static CMICmdBase *CreateSelf();
 
     // Methods:
   public:
-    /* ctor */ CMICmdCmdDataListRegisterChanged(void);
+    /* ctor */ CMICmdCmdDataListRegisterChanged();
 
     // Overridden:
   public:
     // From CMICmdInvoker::ICmd
-    virtual bool Execute(void);
-    virtual bool Acknowledge(void);
+    bool Execute() override;
+    bool Acknowledge() override;
     // From CMICmnBase
-    /* dtor */ virtual ~CMICmdCmdDataListRegisterChanged(void);
+    /* dtor */ ~CMICmdCmdDataListRegisterChanged() override;
 };
 
 //++ ============================================================================
 // Details: MI command class. MI commands derived from the command base class.
 //          *this class implements MI command "data-read-memory-bytes".
-// Gotchas: None.
-// Authors: Illya Rudkin 30/05/2014.
-// Changes: None.
 //--
 class CMICmdCmdDataWriteMemoryBytes : public CMICmdBase
 {
     // Statics:
   public:
     // Required by the CMICmdFactory when registering *this command
-    static CMICmdBase *CreateSelf(void);
+    static CMICmdBase *CreateSelf();
 
     // Methods:
   public:
-    /* ctor */ CMICmdCmdDataWriteMemoryBytes(void);
+    /* ctor */ CMICmdCmdDataWriteMemoryBytes();
 
     // Overridden:
   public:
     // From CMICmdInvoker::ICmd
-    virtual bool Execute(void);
-    virtual bool Acknowledge(void);
-    virtual bool ParseArgs(void);
+    bool Execute() override;
+    bool Acknowledge() override;
+    bool ParseArgs() override;
     // From CMICmnBase
-    /* dtor */ virtual ~CMICmdCmdDataWriteMemoryBytes(void);
+    /* dtor */ ~CMICmdCmdDataWriteMemoryBytes() override;
 
     // Attributes:
   private:
-    const CMIUtilString m_constStrArgThread; // Not specified in MI spec but Eclipse gives this option. Not handled by command.
     const CMIUtilString m_constStrArgAddr;
     const CMIUtilString m_constStrArgContents;
     const CMIUtilString m_constStrArgCount;
@@ -333,33 +299,29 @@ class CMICmdCmdDataWriteMemoryBytes : public CMICmdBase
 // Details: MI command class. MI commands derived from the command base class.
 //          *this class implements MI command "data-read-memory".
 //          Not specified in MI spec but Eclipse gives *this command.
-// Gotchas: None.
-// Authors: Illya Rudkin 02/05/2014.
-// Changes: None.
 //--
 class CMICmdCmdDataWriteMemory : public CMICmdBase
 {
     // Statics:
   public:
     // Required by the CMICmdFactory when registering *this command
-    static CMICmdBase *CreateSelf(void);
+    static CMICmdBase *CreateSelf();
 
     // Methods:
   public:
-    /* ctor */ CMICmdCmdDataWriteMemory(void);
+    /* ctor */ CMICmdCmdDataWriteMemory();
 
     // Overridden:
   public:
     // From CMICmdInvoker::ICmd
-    virtual bool Execute(void);
-    virtual bool Acknowledge(void);
-    virtual bool ParseArgs(void);
+    bool Execute() override;
+    bool Acknowledge() override;
+    bool ParseArgs() override;
     // From CMICmnBase
-    /* dtor */ virtual ~CMICmdCmdDataWriteMemory(void);
+    /* dtor */ ~CMICmdCmdDataWriteMemory() override;
 
     // Attributes:
   private:
-    const CMIUtilString m_constStrArgThread;   // Not specified in MI spec but Eclipse gives this option. Not handled by command.
     const CMIUtilString m_constStrArgOffset;   // Not specified in MI spec but Eclipse gives this option.
     const CMIUtilString m_constStrArgAddr;     // Not specified in MI spec but Eclipse gives this option.
     const CMIUtilString m_constStrArgD;        // Not specified in MI spec but Eclipse gives this option.
@@ -368,5 +330,36 @@ class CMICmdCmdDataWriteMemory : public CMICmdBase
     MIuint64 m_nAddr;
     CMIUtilString m_strContents;
     MIuint64 m_nCount;
-    MIuchar *m_pBufferMemory;
+    unsigned char *m_pBufferMemory;
+};
+
+//++ ============================================================================
+// Details: MI command class. MI commands derived from the command base class.
+//          *this class implements MI command "data-info-line".
+//          See MIExtensions.txt for details.
+//--
+class CMICmdCmdDataInfoLine : public CMICmdBase
+{
+    // Statics:
+  public:
+    // Required by the CMICmdFactory when registering *this command
+    static CMICmdBase *CreateSelf();
+
+    // Methods:
+  public:
+    /* ctor */ CMICmdCmdDataInfoLine();
+
+    // Overridden:
+  public:
+    // From CMICmdInvoker::ICmd
+    bool Execute() override;
+    bool Acknowledge() override;
+    bool ParseArgs() override;
+    // From CMICmnBase
+    /* dtor */ ~CMICmdCmdDataInfoLine() override;
+
+    // Attributes:
+  private:
+    lldb::SBCommandReturnObject m_lldbResult;
+    const CMIUtilString m_constStrArgLocation;
 };

@@ -7,12 +7,12 @@
 //
 //===----------------------------------------------------------------------===//
 
-
 // C Includes
 // C++ Includes
 // Other libraries and framework includes
-// Project includes
+#include "llvm/Support/Casting.h"
 
+// Project includes
 #include "lldb/Core/Address.h"
 #include "lldb/Breakpoint/Breakpoint.h"
 #include "lldb/Breakpoint/BreakpointLocation.h"
@@ -31,8 +31,6 @@
 #include "lldb/Symbol/SymbolContext.h"
 #include "lldb/Target/Target.h"
 #include "lldb/Target/ThreadSpec.h"
-#include "lldb/lldb-private-log.h"
-#include "llvm/Support/Casting.h"
 
 using namespace lldb;
 using namespace lldb_private;
@@ -60,7 +58,8 @@ Breakpoint::Breakpoint(Target &target,
     m_resolver_sp (resolver_sp),
     m_options (),
     m_locations (*this),
-    m_resolve_indirect_symbols(resolve_indirect_symbols)
+    m_resolve_indirect_symbols(resolve_indirect_symbols),
+    m_hit_count(0)
 {
     m_being_created = false;
 }
@@ -72,7 +71,8 @@ Breakpoint::Breakpoint (Target &new_target, Breakpoint &source_bp) :
     m_name_list (source_bp.m_name_list),
     m_options (source_bp.m_options),
     m_locations(*this),
-    m_resolve_indirect_symbols(source_bp.m_resolve_indirect_symbols)
+    m_resolve_indirect_symbols(source_bp.m_resolve_indirect_symbols),
+    m_hit_count(0)
 {
     // Now go through and copy the filter & resolver:
     m_resolver_sp = source_bp.m_resolver_sp->CopyForBreakpoint(*this);
@@ -82,9 +82,7 @@ Breakpoint::Breakpoint (Target &new_target, Breakpoint &source_bp) :
 //----------------------------------------------------------------------
 // Destructor
 //----------------------------------------------------------------------
-Breakpoint::~Breakpoint()
-{
-}
+Breakpoint::~Breakpoint() = default;
 
 const lldb::TargetSP
 Breakpoint::GetTargetSP ()
@@ -207,7 +205,7 @@ Breakpoint::IgnoreCountShouldStop ()
 uint32_t
 Breakpoint::GetHitCount () const
 {
-    return m_locations.GetHitCount();
+    return m_hit_count;
 }
 
 bool
@@ -235,7 +233,7 @@ Breakpoint::SetThreadID (lldb::tid_t thread_id)
 lldb::tid_t
 Breakpoint::GetThreadID () const
 {
-    if (m_options.GetThreadSpecNoCreate() == NULL)
+    if (m_options.GetThreadSpecNoCreate() == nullptr)
         return LLDB_INVALID_THREAD_ID;
     else
         return m_options.GetThreadSpecNoCreate()->GetTID();
@@ -254,7 +252,7 @@ Breakpoint::SetThreadIndex (uint32_t index)
 uint32_t
 Breakpoint::GetThreadIndex() const
 {
-    if (m_options.GetThreadSpecNoCreate() == NULL)
+    if (m_options.GetThreadSpecNoCreate() == nullptr)
         return 0;
     else
         return m_options.GetThreadSpecNoCreate()->GetIndex();
@@ -263,7 +261,7 @@ Breakpoint::GetThreadIndex() const
 void
 Breakpoint::SetThreadName (const char *thread_name)
 {
-    if (m_options.GetThreadSpec()->GetName() != NULL
+    if (m_options.GetThreadSpec()->GetName() != nullptr
         && ::strcmp (m_options.GetThreadSpec()->GetName(), thread_name) == 0)
         return;
         
@@ -274,8 +272,8 @@ Breakpoint::SetThreadName (const char *thread_name)
 const char *
 Breakpoint::GetThreadName () const
 {
-    if (m_options.GetThreadSpecNoCreate() == NULL)
-        return NULL;
+    if (m_options.GetThreadSpecNoCreate() == nullptr)
+        return nullptr;
     else
         return m_options.GetThreadSpecNoCreate()->GetName();
 }
@@ -283,7 +281,7 @@ Breakpoint::GetThreadName () const
 void 
 Breakpoint::SetQueueName (const char *queue_name)
 {
-    if (m_options.GetThreadSpec()->GetQueueName() != NULL
+    if (m_options.GetThreadSpec()->GetQueueName() != nullptr
         && ::strcmp (m_options.GetThreadSpec()->GetQueueName(), queue_name) == 0)
         return;
         
@@ -294,8 +292,8 @@ Breakpoint::SetQueueName (const char *queue_name)
 const char *
 Breakpoint::GetQueueName () const
 {
-    if (m_options.GetThreadSpecNoCreate() == NULL)
-        return NULL;
+    if (m_options.GetThreadSpecNoCreate() == nullptr)
+        return nullptr;
     else
         return m_options.GetThreadSpecNoCreate()->GetQueueName();
 }
@@ -455,7 +453,6 @@ Breakpoint::ModulesChanged (ModuleList &module_list, bool load, bool delete_loca
 
             if (!seen)
                 new_modules.AppendIfNeeded (module_sp);
-
         }
         
         if (new_modules.GetSize() > 0)
@@ -473,7 +470,7 @@ Breakpoint::ModulesChanged (ModuleList &module_list, bool load, bool delete_loca
             removed_locations_event = new BreakpointEventData (eBreakpointEventTypeLocationsRemoved, 
                                                                shared_from_this());
         else
-            removed_locations_event = NULL;
+            removed_locations_event = nullptr;
         
         size_t num_modules = module_list.GetSize();
         for (size_t i = 0; i < num_modules; i++)
@@ -501,7 +498,6 @@ Breakpoint::ModulesChanged (ModuleList &module_list, bool load, bool delete_loca
                         }
                         if (delete_locations)
                             locations_to_remove.Add (break_loc_sp);
-                            
                     }
                 }
                 
@@ -567,7 +563,7 @@ SymbolContextsMightBeEquivalent(SymbolContext &old_sc, SymbolContext &new_sc)
     }
     return equivalent_scs;
 }
-}
+} // anonymous namespace
 
 void
 Breakpoint::ModuleReplaced (ModuleSP old_module_sp, ModuleSP new_module_sp)
@@ -739,7 +735,7 @@ Breakpoint::ModuleReplaced (ModuleSP old_module_sp, ModuleSP new_module_sp)
             locations_event = new BreakpointEventData (eBreakpointEventTypeLocationsRemoved,
                                                                shared_from_this());
         else
-            locations_event = NULL;
+            locations_event = nullptr;
 
         for (BreakpointLocationSP loc_sp : locations_to_remove.BreakpointLocations())
         {
@@ -803,7 +799,7 @@ Breakpoint::AddName (const char *new_name, Error &error)
 void
 Breakpoint::GetDescription (Stream *s, lldb::DescriptionLevel level, bool show_locations)
 {
-    assert (s != NULL);
+    assert (s != nullptr);
     
     if (!m_kind_description.empty())
     {
@@ -848,6 +844,9 @@ Breakpoint::GetDescription (Stream *s, lldb::DescriptionLevel level, bool show_l
 
         GetOptions()->GetDescription(s, level);
         
+        if (m_precondition_sp)
+            m_precondition_sp->GetDescription(*s, level);
+        
         if (level == lldb::eDescriptionLevelFull)
         {
             if (!m_name_list.empty())
@@ -875,25 +874,18 @@ Breakpoint::GetDescription (Stream *s, lldb::DescriptionLevel level, bool show_l
         {
             s->Printf ("no locations (pending).");
         }
-        else if (num_locations == 1)
+        else if (num_locations == 1 && !show_locations)
         {
-            // If there is one location only, we'll just print that location information.  But don't do this if
-            // show locations is true, then that will be handled below.
-            if (show_locations == false)
-            {
-                GetLocationAtIndex(0)->GetDescription(s, level);
-            }
-            else
-            {
-                s->Printf ("%zd locations.", num_locations);
-            }
+            // There is only one location, so we'll just print that location information.
+            GetLocationAtIndex(0)->GetDescription(s, level);
         }
         else
         {
-            s->Printf ("%zd locations.", num_locations);
+            s->Printf ("%" PRIu64 " locations.", static_cast<uint64_t>(num_locations));
         }
         s->EOL();
         break;
+
     case lldb::eDescriptionLevelVerbose:
         // Verbose mode does a debug dump of the breakpoint
         Dump (s);
@@ -928,7 +920,6 @@ Breakpoint::GetResolverDescription (Stream *s)
         m_resolver_sp->GetDescription (s);
 }
 
-
 bool
 Breakpoint::GetMatchingFileLine (const ConstString &filename, uint32_t line_number, BreakpointLocationCollection &loc_coll)
 {
@@ -955,6 +946,34 @@ Breakpoint::GetFilterDescription (Stream *s)
     m_filter_sp->GetDescription (s);
 }
 
+bool
+Breakpoint::EvaluatePrecondition (StoppointCallbackContext &context)
+{
+    if (!m_precondition_sp)
+        return true;
+
+    return m_precondition_sp->EvaluatePrecondition(context);
+}
+
+bool
+Breakpoint::BreakpointPrecondition::EvaluatePrecondition(StoppointCallbackContext &context)
+{
+    return true;
+}
+
+void
+Breakpoint::BreakpointPrecondition::GetDescription(Stream &stream, lldb::DescriptionLevel level)
+{
+}
+
+Error
+Breakpoint::BreakpointPrecondition::ConfigurePrecondition(Args &options)
+{
+    Error error;
+    error.SetErrorString("Base breakpoint precondition has no options.");
+    return error;
+}
+
 void
 Breakpoint::SendBreakpointChangedEvent (lldb::BreakpointEventType eventKind)
 {
@@ -971,8 +990,7 @@ Breakpoint::SendBreakpointChangedEvent (lldb::BreakpointEventType eventKind)
 void
 Breakpoint::SendBreakpointChangedEvent (BreakpointEventData *data)
 {
-
-    if (data == NULL)
+    if (data == nullptr)
         return;
         
     if (!m_being_created
@@ -991,9 +1009,7 @@ Breakpoint::BreakpointEventData::BreakpointEventData (BreakpointEventType sub_ty
 {
 }
 
-Breakpoint::BreakpointEventData::~BreakpointEventData ()
-{
-}
+Breakpoint::BreakpointEventData::~BreakpointEventData() = default;
 
 const ConstString &
 Breakpoint::BreakpointEventData::GetFlavorString ()
@@ -1007,7 +1023,6 @@ Breakpoint::BreakpointEventData::GetFlavor () const
 {
     return BreakpointEventData::GetFlavorString ();
 }
-
 
 BreakpointSP &
 Breakpoint::BreakpointEventData::GetBreakpoint ()
@@ -1035,7 +1050,7 @@ Breakpoint::BreakpointEventData::GetEventDataFromEvent (const Event *event)
         if (event_data && event_data->GetFlavor() == BreakpointEventData::GetFlavorString())
             return static_cast <const BreakpointEventData *> (event->GetData());
     }
-    return NULL;
+    return nullptr;
 }
 
 BreakpointEventType
@@ -1043,7 +1058,7 @@ Breakpoint::BreakpointEventData::GetBreakpointEventTypeFromEvent (const EventSP 
 {
     const BreakpointEventData *data = GetEventDataFromEvent (event_sp.get());
 
-    if (data == NULL)
+    if (data == nullptr)
         return eBreakpointEventTypeInvalidType;
     else
         return data->GetBreakpointEventType();

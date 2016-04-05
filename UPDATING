@@ -13,8 +13,8 @@ Items affecting the ports and packages system can be found in
 
 NOTE: FreeBSD has switched from gcc to clang. If you have trouble bootstrapping
 from older versions of FreeBSD, try WITHOUT_CLANG and WITH_GCC to bootstrap to
-the tip of head, and then rebuild without this option. The bootstrap process from
-older version of current across the gcc/clang cutover is a bit fragile.
+the tip of head, and then rebuild without this option. The bootstrap process
+from older version of current across the gcc/clang cutover is a bit fragile.
 
 NOTE TO PEOPLE WHO THINK THAT FreeBSD 11.x IS SLOW:
 	FreeBSD 11.x has many debugging features turned on, in both the kernel
@@ -30,6 +30,236 @@ NOTE TO PEOPLE WHO THINK THAT FreeBSD 11.x IS SLOW:
 	debugging, define MALLOC_PRODUCTION in /etc/make.conf, or to merely
 	disable the most expensive debugging functionality run
 	"ln -s 'abort:false,junk:false' /etc/malloc.conf".)
+
+20160330:
+	The FAST_DEPEND build option has been removed and its functionality is
+	now the one true way.  The old mkdep(1) style of 'make depend' has
+	been removed.  See 20160311 for further details.
+
+20160317:
+	Resource range types have grown from unsigned long to uintmax_t.  All
+	drivers, and anything using libdevinfo, need to be recompiled.
+
+20160311:
+	WITH_FAST_DEPEND is now enabled by default for in-tree and out-of-tree
+	builds.  It no longer runs mkdep(1) during 'make depend', and the
+	'make depend' stage can safely be skipped now as it is auto ran
+	when building 'make all' and will generate all SRCS and DPSRCS before
+	building anything else.  Dependencies are gathered at compile time with
+	-MF flags kept in separate .depend files per object file.  Users should
+	run 'make cleandepend' once if using -DNO_CLEAN to clean out older
+	stale .depend files.
+
+20160306:
+	On amd64, clang 3.8.0 can now insert sections of type AMD64_UNWIND into
+	kernel modules.  Therefore, if you load any kernel modules at boot time,
+	please install the boot loaders after you install the kernel, but before
+	rebooting, e.g.:
+
+	make buildworld
+	make kernel KERNCONF=YOUR_KERNEL_HERE
+	make -C sys/boot install
+	<reboot in single user>
+
+	Then follow the usual steps, described in the General Notes section,
+	below.
+
+20160305:
+	Clang, llvm, lldb and compiler-rt have been upgraded to 3.8.0.  Please
+	see the 20141231 entry below for information about prerequisites and
+	upgrading, if you are not already using clang 3.5.0 or higher.
+
+20160301:
+	The AIO subsystem is now a standard part of the kernel.  The
+	VFS_AIO kernel option and aio.ko kernel module have been removed.
+	Due to stability concerns, asynchronous I/O requests are only
+	permitted on sockets and raw disks by default.  To enable
+	asynchronous I/O requests on all file types, set the
+	vfs.aio.enable_unsafe sysctl to a non-zero value.
+
+20160226:
+	The ELF object manipulation tool objcopy is now provided by the
+	ELF Tool Chain project rather than by GNU binutils. It should be a
+	drop-in replacement, with the addition of arm64 support. The
+	(temporary) src.conf knob WITHOUT_ELFCOPY_AS_OBJCOPY knob may be set
+	to obtain the GNU version if necessary.
+
+20160129:
+	Building ZFS pools on top of zvols is prohibited by default.  That
+	feature has never worked safely; it's always been prone to deadlocks.
+	Using a zvol as the backing store for a VM guest's virtual disk will
+	still work, even if the guest is using ZFS.  Legacy behavior can be
+	restored by setting vfs.zfs.vol.recursive=1.
+
+20160119:
+	The NONE and HPN patches has been removed from OpenSSH.  They are
+	still available in the security/openssh-portable port.
+
+20160113:
+	With the addition of ypldap(8), a new _ypldap user is now required
+	during installworld. "mergemaster -p" can be used to add the user
+	prior to installworld, as documented in the handbook.
+
+20151216:
+	The tftp loader (pxeboot) now uses the option root-path directive. As a
+	consequence it no longer looks for a pxeboot.4th file on the tftp
+	server. Instead it uses the regular /boot infrastructure as with the
+	other loaders.
+
+20151211:
+	The code to start recording plug and play data into the modules has
+	been committed. While the old tools will properly build a new kernel,
+	a number of warnings about "unknown metadata record 4" will be produced
+	for an older kldxref. To avoid such warnings, make sure to rebuild
+	the kernel toolchain (or world). Make sure that you have r292078 or
+	later when trying to build 292077 or later before rebuilding.
+
+20151207:
+	Debug data files are now built by default with 'make buildworld' and
+	installed with 'make installworld'. This facilitates debugging but
+	requires more disk space both during the build and for the installed
+	world. Debug files may be disabled by setting WITHOUT_DEBUG_FILES=yes
+	in src.conf(5).
+
+20151130:
+	r291527 changed the internal interface between the nfsd.ko and
+	nfscommon.ko modules. As such, they must both be upgraded to-gether.
+	__FreeBSD_version has been bumped because of this.
+
+20151108:
+	Add support for unicode collation strings leads to a change of
+	order of files listed by ls(1) for example. To get back to the old
+	behaviour, set LC_COLLATE environment variable to "C".
+
+	Databases administrators will need to reindex their databases given
+	collation results will be different.
+
+	Due to a bug in install(1) it is recommended to remove the ancient
+	locales before running make installworld.
+
+	rm -rf /usr/share/locale/*
+
+20151030:
+	The OpenSSL has been upgraded to 1.0.2d.  Any binaries requiring
+	libcrypto.so.7 or libssl.so.7 must be recompiled.
+
+20151020:
+	Qlogic 24xx/25xx firmware images were updated from 5.5.0 to 7.3.0.
+	Kernel modules isp_2400_multi and isp_2500_multi were removed and
+	should be replaced with isp_2400 and isp_2500 modules respectively.
+
+20151017:
+	The build previously allowed using 'make -n' to not recurse into
+	sub-directories while showing what commands would be executed, and
+	'make -n -n' to recursively show commands.  Now 'make -n' will recurse
+	and 'make -N' will not.
+
+20151012:
+	If you specify SENDMAIL_MC or SENDMAIL_CF in make.conf, mergemaster
+	and etcupdate will now use this file. A custom sendmail.cf is now
+	updated via this mechanism rather than via installworld.  If you had
+	excluded sendmail.cf in mergemaster.rc or etcupdate.conf, you may
+	want to remove the exclusion or change it to "always install".
+	/etc/mail/sendmail.cf is now managed the same way regardless of
+	whether SENDMAIL_MC/SENDMAIL_CF is used.  If you are not using
+	SENDMAIL_MC/SENDMAIL_CF there should be no change in behavior.
+
+20151011:
+	Compatibility shims for legacy ATA device names have been removed.
+	It includes ATA_STATIC_ID kernel option, kern.cam.ada.legacy_aliases
+	and kern.geom.raid.legacy_aliases loader tunables, kern.devalias.*
+	environment variables, /dev/ad* and /dev/ar* symbolic links.
+
+20151006:
+	Clang, llvm, lldb, compiler-rt and libc++ have been upgraded to 3.7.0.
+	Please see the 20141231 entry below for information about prerequisites
+	and upgrading, if you are not already using clang 3.5.0 or higher.
+
+20150924:
+	Kernel debug files have been moved to /usr/lib/debug/boot/kernel/,
+	and renamed from .symbols to .debug. This reduces the size requirements
+	on the boot partition or file system and provides consistency with
+	userland debug files.
+
+	When using the supported kernel installation method the
+	/usr/lib/debug/boot/kernel directory will be renamed (to kernel.old)
+	as is done with /boot/kernel.
+
+	Developers wishing to maintain the historical behavior of installing
+	debug files in /boot/kernel/ can set KERN_DEBUGDIR="" in src.conf(5).
+
+20150827:
+	The wireless drivers had undergone changes that remove the 'parent
+	interface' from the ifconfig -l output. The rc.d network scripts
+	used to check presence of a parent interface in the list, so old
+	scripts would fail to start wireless networking. Thus, etcupdate(3)
+	or mergemaster(8) run is required after kernel update, to update your
+	rc.d scripts in /etc.
+
+20150827:
+	pf no longer supports 'scrub fragment crop' or 'scrub fragment drop-ovl'
+	These configurations are now automatically interpreted as
+	'scrub fragment reassemble'.
+
+20150817:
+	Kernel-loadable modules for the random(4) device are back. To use
+	them, the kernel must have
+
+	device	random
+	options	RANDOM_LOADABLE
+
+	kldload(8) can then be used to load random_fortuna.ko
+	or random_yarrow.ko. Please note that due to the indirect
+	function calls that the loadable modules need to provide,
+	the build-in variants will be slightly more efficient.
+
+	The random(4) kernel option RANDOM_DUMMY has been retired due to
+	unpopularity. It was not all that useful anyway.
+
+20150813:
+	The WITHOUT_ELFTOOLCHAIN_TOOLS src.conf(5) knob has been retired.
+	Control over building the ELF Tool Chain tools is now provided by
+	the WITHOUT_TOOLCHAIN knob.
+
+20150810:
+	The polarity of Pulse Per Second (PPS) capture events with the
+	uart(4) driver has been corrected.  Prior to this change the PPS
+	"assert" event corresponded to the trailing edge of a positive PPS
+	pulse and the "clear" event was the leading edge of the next pulse.
+
+	As the width of a PPS pulse in a typical GPS receiver is on the
+	order of 1 millisecond, most users will not notice any significant
+	difference with this change.
+
+	Anyone who has compensated for the historical polarity reversal by
+	configuring a negative offset equal to the pulse width will need to
+	remove that workaround.
+
+20150809:
+	The default group assigned to /dev/dri entries has been changed
+	from 'wheel' to 'video' with the id of '44'. If you want to have
+	access to the dri devices please add yourself to the video group
+	with:
+
+	# pw groupmod video -m $USER
+
+20150806:
+	The menu.rc and loader.rc files will now be replaced during 
+	upgrades. Please migrate local changes to menu.rc.local and
+	loader.rc.local instead.
+
+20150805:
+	GNU Binutils versions of addr2line, c++filt, nm, readelf, size,
+	strings and strip have been removed. The src.conf(5) knob
+	WITHOUT_ELFTOOLCHAIN_TOOLS no longer provides the binutils tools.
+
+20150728:
+	As ZFS requires more kernel stack pages than is the default on some
+	architectures e.g. i386, it now warns if KSTACK_PAGES is less than
+	ZFS_MIN_KSTACK_PAGES (which is 4 at the time of writing).
+
+	Please consider using 'options KSTACK_PAGES=X' where X is greater
+	than or equal to ZFS_MIN_KSTACK_PAGES i.e. 4 in such configurations.
 
 20150706:
 	sendmail has been updated to 8.15.2.  Starting with FreeBSD 11.0
@@ -61,12 +291,12 @@ NOTE TO PEOPLE WHO THINK THAT FreeBSD 11.x IS SLOW:
 	like it always used to, and the difference will be irrelevant.
 
 	If you remove 'device random', you get *NO* kernel-processed
-	entopy at all. This may be acceptable to folks building
+	entropy at all. This may be acceptable to folks building
 	embedded systems, but has complications. Carry on reading,
 	and it is assumed you know what you need.
 
 	*PLEASE* read random(4) and random(9) if you are in the
-	habit of tweeking kernel configs, and/or if you are a member
+	habit of tweaking kernel configs, and/or if you are a member
 	of the embedded community, wanting specific and not-usual
 	behaviour from your security subsystems.
 
@@ -87,7 +317,7 @@ NOTE TO PEOPLE WHO THINK THAT FreeBSD 11.x IS SLOW:
 20150616:
 	FreeBSD's old make (fmake) has been removed from the system. It is
 	available as the devel/fmake port or via pkg install fmake.
-	
+
 20150615:
 	The fix for the issue described in the 20150614 sendmail entry
 	below has been been committed in revision 284436.  The work
@@ -110,7 +340,7 @@ NOTE TO PEOPLE WHO THINK THAT FreeBSD 11.x IS SLOW:
 	this interoperability, sendmail can be configured to use a
 	2048 bit DH parameter by:
 
-	1. Edit /etc/mail/`hostname`.mc 
+	1. Edit /etc/mail/`hostname`.mc
 	2. If a setting for confDH_PARAMETERS does not exist or
 	   exists and is set to a string beginning with '5',
 	   replace it with '2'.
@@ -216,14 +446,14 @@ NOTE TO PEOPLE WHO THINK THAT FreeBSD 11.x IS SLOW:
 	taken from the ELF Tool Chain project rather than GNU binutils. They
 	should be drop-in replacements, with the addition of arm64 support.
 	The WITHOUT_ELFTOOLCHAIN_TOOLS= knob may be used to obtain the
-	binutils tools, if necessary.
+	binutils tools, if necessary. See 20150805 for updated information.
 
 20150105:
 	The default Unbound configuration now enables remote control
 	using a local socket.  Users who have already enabled the
 	local_unbound service should regenerate their configuration
 	by running "service local_unbound setup" as root.
-	
+
 20150102:
 	The GNU texinfo and GNU info pages have been removed.
 	To be able to view GNU info pages please install texinfo from ports.
@@ -570,6 +800,10 @@ NOTE TO PEOPLE WHO THINK THAT FreeBSD 11.x IS SLOW:
 	  # pkg install pkg; ldd /usr/local/sbin/pkg | grep bsdyml
 
 20131010:
+	The stable/10 branch has been created in subversion from head
+	revision r256279.
+
+20131010:
 	The rc.d/jail script has been updated to support jail(8)
 	configuration file.  The "jail_<jname>_*" rc.conf(5) variables
 	for per-jail configuration are automatically converted to
@@ -614,7 +848,7 @@ NOTE TO PEOPLE WHO THINK THAT FreeBSD 11.x IS SLOW:
 	The GNU Compiler Collection and C++ standard library (libstdc++)
 	are no longer built by default on platforms where clang is the system
 	compiler.  You can enable them with the WITH_GCC and WITH_GNUCXX
-	options in src.conf.  
+	options in src.conf.
 
 20130905:
 	The PROCDESC kernel option is now part of the GENERIC kernel
@@ -704,14 +938,6 @@ NOTE TO PEOPLE WHO THINK THAT FreeBSD 11.x IS SLOW:
 	Most of network statistics structures were changed to be able
 	keep 64-bits counters. Thus all tools, that work with networking
 	statistics, must be rebuilt (netstat(1), bsnmpd(1), etc.)
-
-20130629:
-	Fix targets that run multiple make's to use && rather than ;
-	so that subsequent steps depend on success of previous.
-
-	NOTE: if building 'universe' with -j* on stable/8 or stable/9
-	it would be better to start the build using bmake, to avoid
-	overloading the machine.
 
 20130618:
 	Fix a bug that allowed a tracing process (e.g. gdb) to write
@@ -968,7 +1194,7 @@ NOTE TO PEOPLE WHO THINK THAT FreeBSD 11.x IS SLOW:
 20120727:
 	The sparc64 ZFS loader has been changed to no longer try to auto-
 	detect ZFS providers based on diskN aliases but now requires these
-	to be explicitly listed in the OFW boot-device environment variable. 
+	to be explicitly listed in the OFW boot-device environment variable.
 
 20120712:
 	The OpenSSL has been upgraded to 1.0.1c.  Any binaries requiring
@@ -1111,6 +1337,13 @@ COMMON ITEMS:
 	installing anything can help undo problems. Not having a root shell
 	around can lead to problems if pam has changed too much from your
 	starting point to allow continued authentication after the upgrade.
+
+	This file should be read as a log of events. When a later event changes
+	information of a prior event, the prior event should not be deleted.
+	Instead, a pointer to the entry with the new information should be
+	placed in the old entry. Readers of this file should also sanity check
+	older entries before relying on them blindly. Authors of new entries
+	should write them with this in mind.
 
 	ZFS notes
 	---------
@@ -1282,7 +1515,7 @@ FORMAT:
 
 This file contains a list, in reverse chronological order, of major
 breakages in tracking -current.  It is not guaranteed to be a complete
-list of such breakages, and only contains entries since October 10, 2007.
+list of such breakages, and only contains entries since September 23, 2011.
 If you need to see UPDATING entries from before that date, you will need
 to fetch an UPDATING file from an older FreeBSD release.
 

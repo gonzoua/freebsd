@@ -96,13 +96,8 @@ static int xen_pv_start_all_aps(void);
 /*---------------------------- Extern Declarations ---------------------------*/
 #ifdef SMP
 /* Variables used by amd64 mp_machdep to start APs */
-extern struct mtx ap_boot_mtx;
-extern void *bootstacks[];
 extern char *doublefault_stack;
 extern char *nmi_stack;
-extern void *dpcpu;
-extern int bootAP;
-extern char *bootSTK;
 #endif
 
 /*
@@ -215,7 +210,7 @@ start_xen_ap(int cpu)
 {
 	struct vcpu_guest_context *ctxt;
 	int ms, cpus = mp_naps;
-	const size_t stacksize = KSTACK_PAGES * PAGE_SIZE;
+	const size_t stacksize = kstack_pages * PAGE_SIZE;
 
 	/* allocate and set up an idle stack data page */
 	bootstacks[cpu] =
@@ -227,7 +222,7 @@ start_xen_ap(int cpu)
 	dpcpu =
 	    (void *)kmem_malloc(kernel_arena, DPCPU_SIZE, M_WAITOK | M_ZERO);
 
-	bootSTK = (char *)bootstacks[cpu] + KSTACK_PAGES * PAGE_SIZE - 8;
+	bootSTK = (char *)bootstacks[cpu] + kstack_pages * PAGE_SIZE - 8;
 	bootAP = cpu;
 
 	ctxt = malloc(sizeof(*ctxt), M_TEMP, M_WAITOK | M_ZERO);
@@ -301,7 +296,7 @@ xen_pv_set_env(void)
 	for (cmd_line_next = cmd_line; strsep(&cmd_line_next, ",") != NULL;)
 		;
 
-	init_static_kenv(cmd_line, env_size);
+	init_static_kenv(cmd_line, 0);
 }
 
 static void
@@ -387,6 +382,7 @@ xen_pv_parse_preload_data(u_int64_t modulep)
 	caddr_t		 kmdp;
 	vm_ooffset_t	 off;
 	vm_paddr_t	 metadata;
+	char             *envp;
 
 	if (HYPERVISOR_start_info->mod_start != 0) {
 		preload_metadata = (caddr_t)(HYPERVISOR_start_info->mod_start);
@@ -409,8 +405,10 @@ xen_pv_parse_preload_data(u_int64_t modulep)
 		preload_bootstrap_relocate(off);
 
 		boothowto = MD_FETCH(kmdp, MODINFOMD_HOWTO, int);
-		kern_envp = MD_FETCH(kmdp, MODINFOMD_ENVP, char *);
-		kern_envp += off;
+		envp = MD_FETCH(kmdp, MODINFOMD_ENVP, char *);
+		if (envp != NULL)
+			envp += off;
+		init_static_kenv(envp, 0);
 	} else {
 		/* Parse the extra boot information given by Xen */
 		xen_pv_set_env();

@@ -35,25 +35,23 @@
 #              <(sed -e 's/fortuna/wombat/g' \
 #                    -e 's/FORTUNA/WOMBAT/g' fortuna.c) | less
 #
-cc -g -O0 -pthread -DRANDOM_DEBUG \
+cc -g -O0 -pthread \
 	-I../.. -lstdthreads -Wall \
 	unit_test.c \
 	yarrow.c \
 	hash.c \
 	../../crypto/rijndael/rijndael-api-fst.c \
 	../../crypto/rijndael/rijndael-alg-fst.c \
-	../../crypto/sha2/sha2.c \
 	../../crypto/sha2/sha256c.c \
 	-lz \
 	-o yunit_test
-cc -g -O0 -pthread -DRANDOM_DEBUG \
+cc -g -O0 -pthread \
 	-I../.. -lstdthreads -Wall \
 	unit_test.c \
 	fortuna.c \
 	hash.c \
 	../../crypto/rijndael/rijndael-api-fst.c \
 	../../crypto/rijndael/rijndael-alg-fst.c \
-	../../crypto/sha2/sha2.c \
 	../../crypto/sha2/sha256c.c \
 	-lz \
 	-o funit_test

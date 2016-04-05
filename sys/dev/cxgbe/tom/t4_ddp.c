@@ -405,6 +405,19 @@ handle_ddp_data(struct toepcb *toep, __be32 ddp_report, __be32 rcv_nxt, int len)
 	}
 
 	tp = intotcpcb(inp);
+
+	/*
+	 * For RX_DDP_COMPLETE, len will be zero and rcv_nxt is the
+	 * sequence number of the next byte to receive.  The length of
+	 * the data received for this message must be computed by
+	 * comparing the new and old values of rcv_nxt.
+	 * 
+	 * For RX_DATA_DDP, len might be non-zero, but it is only the
+	 * length of the most recent DMA.  It does not include the
+	 * total length of the data received since the previous update
+	 * for this DDP buffer.  rcv_nxt is the sequence number of the
+	 * first received byte from the most recent DMA.
+	 */
 	len += be32toh(rcv_nxt) - tp->rcv_nxt;
 	tp->rcv_nxt += len;
 	tp->t_rcvtime = ticks;
@@ -500,7 +513,6 @@ do_rx_data_ddp(struct sge_iq *iq, const struct rss_header *rss, struct mbuf *m)
 	unsigned int tid = GET_TID(cpl);
 	uint32_t vld;
 	struct toepcb *toep = lookup_tid(sc, tid);
-	struct tom_data *td = toep->td;
 
 	KASSERT(m == NULL, ("%s: wasn't expecting payload", __func__));
 	KASSERT(toep->tid == tid, ("%s: toep tid/atid mismatch", __func__));
@@ -512,16 +524,11 @@ do_rx_data_ddp(struct sge_iq *iq, const struct rss_header *rss, struct mbuf *m)
 		panic("%s: DDP error 0x%x (tid %d, toep %p)",
 		    __func__, vld, tid, toep);
 	}
+
 	if (toep->ulp_mode == ULP_MODE_ISCSI) {
-		m = m_get(M_NOWAIT, MT_DATA);
-		if (m == NULL)
-			CXGBE_UNIMPLEMENTED("mbuf alloc failure");
-		memcpy(mtod(m, unsigned char *), cpl,
-		    sizeof(struct cpl_rx_data_ddp));
-        	if (!t4_cpl_iscsi_callback(td, toep, m, CPL_RX_DATA_DDP))
-			return (0);
-		m_freem(m);
-        }
+		sc->cpl_handler[CPL_RX_ISCSI_DDP](iq, rss, m);
+		return (0);
+	}
 
 	handle_ddp_data(toep, cpl->u.ddp_report, cpl->seq, be16toh(cpl->len));
 

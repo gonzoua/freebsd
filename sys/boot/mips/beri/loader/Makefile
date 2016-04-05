@@ -72,7 +72,7 @@ CFLAGS+=	-DLOADER_BZIP2_SUPPORT
 # Enable BootForth
 BOOT_FORTH=	yes
 CFLAGS+=	-DBOOT_FORTH -I${.CURDIR}/../../../ficl
-CFLAGS+=	-I${.CURDIR}/../../../ficl/mips
+CFLAGS+=	-I${.CURDIR}/../../../ficl/mips64
 LIBFICL=	${.OBJDIR}/../../../ficl/libficl.a
 .endif
 
@@ -125,13 +125,7 @@ loader.help: help.common help.mips
 .PATH: ${.CURDIR}/../../../forth
 .include	"${.CURDIR}/../../../forth/Makefile.inc"
 
-.if !exists(${DESTDIR}/boot/loader.rc)
-FILES+= loader.rc
-.endif
-
-.if !exists(${DESTDIR}/boot/menu.rc)
-FILES+= menu.rc
-.endif
+FILES+= loader.rc menu.rc
 
 .if defined(LOADER_USB_SUPPORT)
 # Do garbage collection

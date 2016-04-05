@@ -7,7 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "Utility/StringExtractor.h"
+#include "lldb/Utility/StringExtractor.h"
 
 // C Includes
 #include <stdlib.h>
@@ -120,19 +120,30 @@ StringExtractor::DecodeHexU8()
 
 //----------------------------------------------------------------------
 // Extract an unsigned character from two hex ASCII chars in the packet
-// string
+// string, or return fail_value on failure
 //----------------------------------------------------------------------
 uint8_t
 StringExtractor::GetHexU8 (uint8_t fail_value, bool set_eof_on_fail)
+{
+    // On success, fail_value will be overwritten with the next
+    // character in the stream
+    GetHexU8Ex(fail_value, set_eof_on_fail);
+    return fail_value;
+}
+
+bool
+StringExtractor::GetHexU8Ex (uint8_t& ch, bool set_eof_on_fail)
 {
     int byte = DecodeHexU8();
     if (byte == -1)
     {
         if (set_eof_on_fail || m_index >= m_packet.size())
             m_index = UINT64_MAX;
-        return fail_value;
+        // ch should not be changed in case of failure
+        return false;
     }
-    return (uint8_t)byte;
+    ch = (uint8_t)byte;
+    return true;
 }
 
 uint32_t
@@ -143,7 +154,7 @@ StringExtractor::GetU32 (uint32_t fail_value, int base)
         char *end = nullptr;
         const char *start = m_packet.c_str();
         const char *cstr = start + m_index;
-        uint32_t result = ::strtoul (cstr, &end, base);
+        uint32_t result = static_cast<uint32_t>(::strtoul (cstr, &end, base));
 
         if (end && end != cstr)
         {
@@ -162,7 +173,7 @@ StringExtractor::GetS32 (int32_t fail_value, int base)
         char *end = nullptr;
         const char *start = m_packet.c_str();
         const char *cstr = start + m_index;
-        int32_t result = ::strtol (cstr, &end, base);
+        int32_t result = static_cast<int32_t>(::strtol (cstr, &end, base));
         
         if (end && end != cstr)
         {
@@ -476,3 +487,12 @@ StringExtractor::GetNameColonValue (std::string &name, std::string &value)
     m_index = UINT64_MAX;
     return false;
 }
+
+void
+StringExtractor::SkipSpaces ()
+{
+    const size_t n = m_packet.size();
+    while (m_index < n && isspace(m_packet[m_index]))
+        ++m_index;
+}
+

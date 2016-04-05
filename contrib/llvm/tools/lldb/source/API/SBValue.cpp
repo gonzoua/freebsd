@@ -7,8 +7,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "lldb/lldb-python.h"
-
 #include "lldb/API/SBValue.h"
 
 #include "lldb/API/SBDeclaration.h"
@@ -63,13 +61,19 @@ public:
                lldb::DynamicValueType use_dynamic,
                bool use_synthetic,
                const char *name = NULL) :
-    m_valobj_sp(in_valobj_sp),
+    m_valobj_sp(),
     m_use_dynamic(use_dynamic),
     m_use_synthetic(use_synthetic),
     m_name (name)
     {
-        if (!m_name.IsEmpty() && m_valobj_sp)
-            m_valobj_sp->SetName(m_name);
+        if (in_valobj_sp)
+        {
+            if ( (m_valobj_sp = in_valobj_sp->GetQualifiedRepresentationIfAvailable(lldb::eNoDynamicValues, false)) )
+            {
+                if (!m_name.IsEmpty())
+                    m_valobj_sp->SetName(m_name);
+            }
+        }
     }
 
     ValueImpl (const ValueImpl& rhs) :
@@ -152,10 +156,20 @@ public:
             return ValueObjectSP();
         }
 
-        if (value_sp->GetDynamicValue(m_use_dynamic))
-            value_sp = value_sp->GetDynamicValue(m_use_dynamic);
-        if (value_sp->GetSyntheticValue(m_use_synthetic))
-            value_sp = value_sp->GetSyntheticValue(m_use_synthetic);
+        if (m_use_dynamic != eNoDynamicValues)
+        {
+            ValueObjectSP dynamic_sp = value_sp->GetDynamicValue(m_use_dynamic);
+            if (dynamic_sp)
+                value_sp = dynamic_sp;
+        }
+
+        if (m_use_synthetic)
+        {
+            ValueObjectSP synthetic_sp = value_sp->GetSyntheticValue(m_use_synthetic);
+            if (synthetic_sp)
+                value_sp = synthetic_sp;
+        }
+
         if (!value_sp)
             error.SetErrorString("invalid value object");
         if (!m_name.IsEmpty())
@@ -608,7 +622,8 @@ SBValue::GetValueDidChange ()
     lldb::ValueObjectSP value_sp(GetSP(locker));
     if (value_sp)
     {
-        result = value_sp->GetValueDidChange ();
+        if (value_sp->UpdateValueIfNeeded(false))
+            result = value_sp->GetValueDidChange ();
     }
     if (log)
         log->Printf ("SBValue(%p)::GetValueDidChange() => %i",
@@ -617,7 +632,6 @@ SBValue::GetValueDidChange ()
     return result;
 }
 
-#ifndef LLDB_DISABLE_PYTHON
 const char *
 SBValue::GetSummary ()
 {
@@ -666,7 +680,6 @@ SBValue::GetSummary (lldb::SBStream& stream,
     }
     return cstr;
 }
-#endif // LLDB_DISABLE_PYTHON
 
 const char *
 SBValue::GetLocation ()
@@ -738,7 +751,6 @@ SBValue::GetTypeFormat ()
     return format;
 }
 
-#ifndef LLDB_DISABLE_PYTHON
 lldb::SBTypeSummary
 SBValue::GetTypeSummary ()
 {
@@ -756,7 +768,6 @@ SBValue::GetTypeSummary ()
     }
     return summary;
 }
-#endif // LLDB_DISABLE_PYTHON
 
 lldb::SBTypeFilter
 SBValue::GetTypeFilter ()
@@ -816,7 +827,7 @@ SBValue::CreateChildAtOffset (const char *name, uint32_t offset, SBType type)
         TypeImplSP type_sp (type.GetSP());
         if (type.IsValid())
         {
-            sb_value.SetSP(value_sp->GetSyntheticChildAtOffset(offset, type_sp->GetClangASTType(false), true),GetPreferDynamicValue(),GetPreferSyntheticValue(), name);
+            sb_value.SetSP(value_sp->GetSyntheticChildAtOffset(offset, type_sp->GetCompilerType(false), true),GetPreferDynamicValue(),GetPreferSyntheticValue(), name);
         }
     }
     Log *log(lldb_private::GetLogIfAllCategoriesSet (LIBLLDB_LOG_API));
@@ -841,7 +852,7 @@ SBValue::Cast (SBType type)
     lldb::ValueObjectSP value_sp(GetSP(locker));
     TypeImplSP type_sp (type.GetSP());
     if (value_sp && type_sp)
-        sb_value.SetSP(value_sp->Cast(type_sp->GetClangASTType(false)),GetPreferDynamicValue(),GetPreferSyntheticValue());
+        sb_value.SetSP(value_sp->Cast(type_sp->GetCompilerType(false)),GetPreferDynamicValue(),GetPreferSyntheticValue());
     return sb_value;
 }
 
@@ -892,7 +903,7 @@ SBValue::CreateValueFromAddress(const char* name, lldb::addr_t address, SBType s
     lldb::TypeImplSP type_impl_sp (sb_type.GetSP());
     if (value_sp && type_impl_sp)
     {
-        ClangASTType ast_type(type_impl_sp->GetClangASTType(true));
+        CompilerType ast_type(type_impl_sp->GetCompilerType(true));
         ExecutionContext exe_ctx (value_sp->GetExecutionContextRef());
         new_value_sp = ValueObject::CreateValueObjectFromAddress(name, address, exe_ctx, ast_type);
     }
@@ -921,7 +932,7 @@ SBValue::CreateValueFromData (const char* name, SBData data, SBType type)
     if (value_sp)
     {
         ExecutionContext exe_ctx (value_sp->GetExecutionContextRef());
-        new_value_sp = ValueObject::CreateValueObjectFromData(name, **data, exe_ctx, type.GetSP()->GetClangASTType(true));
+        new_value_sp = ValueObject::CreateValueObjectFromData(name, **data, exe_ctx, type.GetSP()->GetCompilerType(true));
         new_value_sp->SetAddressTypeOfChildren(eAddressTypeLoad);
     }
     sb_value.SetSP(new_value_sp);
@@ -968,14 +979,7 @@ SBValue::GetChildAtIndex (uint32_t idx, lldb::DynamicValueType use_dynamic, bool
         child_sp = value_sp->GetChildAtIndex (idx, can_create);
         if (can_create_synthetic && !child_sp)
         {
-            if (value_sp->IsPointerType())
-            {
-                child_sp = value_sp->GetSyntheticArrayMemberFromPointer(idx, can_create);
-            }
-            else if (value_sp->IsArrayType())
-            {
-                child_sp = value_sp->GetSyntheticArrayMemberFromArray(idx, can_create);
-            }
+            child_sp = value_sp->GetSyntheticArrayMember(idx, can_create);
         }
     }
 
@@ -1243,8 +1247,30 @@ SBValue::MightHaveChildren ()
     return has_children;
 }
 
+bool
+SBValue::IsRuntimeSupportValue ()
+{
+    Log *log(lldb_private::GetLogIfAllCategoriesSet (LIBLLDB_LOG_API));
+    bool is_support = false;
+    ValueLocker locker;
+    lldb::ValueObjectSP value_sp(GetSP(locker));
+    if (value_sp)
+        is_support = value_sp->IsRuntimeSupportValue();
+    
+    if (log)
+        log->Printf ("SBValue(%p)::IsRuntimeSupportValue() => %i",
+                     static_cast<void*>(value_sp.get()), is_support);
+    return is_support;
+}
+
 uint32_t
 SBValue::GetNumChildren ()
+{
+    return GetNumChildren (UINT32_MAX);
+}
+
+uint32_t
+SBValue::GetNumChildren (uint32_t max)
 {
     uint32_t num_children = 0;
 
@@ -1252,15 +1278,14 @@ SBValue::GetNumChildren ()
     ValueLocker locker;
     lldb::ValueObjectSP value_sp(GetSP(locker));
     if (value_sp)
-        num_children = value_sp->GetNumChildren();
+        num_children = value_sp->GetNumChildren(max);
 
     if (log)
-        log->Printf ("SBValue(%p)::GetNumChildren () => %u",
-                     static_cast<void*>(value_sp.get()), num_children);
+        log->Printf ("SBValue(%p)::GetNumChildren (%u) => %u",
+                     static_cast<void*>(value_sp.get()), max, num_children);
 
     return num_children;
 }
-
 
 SBValue
 SBValue::Dereference ()
@@ -1282,22 +1307,11 @@ SBValue::Dereference ()
     return sb_value;
 }
 
+// Deprecated - please use GetType().IsPointerType() instead.
 bool
 SBValue::TypeIsPointerType ()
 {
-    bool is_ptr_type = false;
-
-    ValueLocker locker;
-    lldb::ValueObjectSP value_sp(GetSP(locker));
-    if (value_sp)
-        is_ptr_type = value_sp->IsPointerType();
-
-    Log *log(lldb_private::GetLogIfAllCategoriesSet (LIBLLDB_LOG_API));
-    if (log)
-        log->Printf ("SBValue(%p)::TypeIsPointerType () => %i",
-                     static_cast<void*>(value_sp.get()), is_ptr_type);
-
-    return is_ptr_type;
+    return GetType().IsPointerType();
 }
 
 void *
@@ -1306,7 +1320,7 @@ SBValue::GetOpaqueType()
     ValueLocker locker;
     lldb::ValueObjectSP value_sp(GetSP(locker));
     if (value_sp)
-        return value_sp->GetClangType().GetOpaqueQualType();
+        return value_sp->GetCompilerType().GetOpaqueQualType();
     return NULL;
 }
 
@@ -1411,7 +1425,10 @@ lldb::ValueObjectSP
 SBValue::GetSP (ValueLocker &locker) const
 {
     if (!m_opaque_sp || !m_opaque_sp->IsValid())
+    {
+        locker.GetError().SetErrorString("No value");
         return ValueObjectSP();
+    }
     return locker.GetLockedSP(*m_opaque_sp.get());
 }
 
@@ -1799,7 +1816,7 @@ SBValue::Watch (bool resolve_location, bool read, bool write, SBError &error)
             watch_type |= LLDB_WATCH_TYPE_WRITE;
 
         Error rc;
-        ClangASTType type (value_sp->GetClangType());
+        CompilerType type (value_sp->GetCompilerType());
         WatchpointSP watchpoint_sp = target_sp->CreateWatchpoint(addr, byte_size, &type, watch_type, rc);
         error.SetError(rc);
 

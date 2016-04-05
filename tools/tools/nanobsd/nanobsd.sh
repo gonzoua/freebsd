@@ -139,6 +139,8 @@ fi
 
 pprint 1 "NanoBSD image ${NANO_NAME} build starting"
 
+run_early_customize
+
 if $do_world ; then
 	if $do_clean ; then
 		clean_build
@@ -178,6 +180,7 @@ run_customize
 setup_nanobsd
 prune_usr
 run_late_customize
+fixup_before_diskimage
 if $do_image ; then
 	create_diskimage
 else

@@ -113,8 +113,6 @@ static const struct arm_devmap_entry econa_devmap[] = {
 		ECONA_SDRAM_BASE, /*virtual*/
 		ECONA_SDRAM_BASE, /*physical*/
 		ECONA_SDRAM_SIZE, /*size*/
-		VM_PROT_READ|VM_PROT_WRITE,
-		PTE_DEVICE,
 	},
 	/*
 	 * Map the on-board devices VA == PA so that we can access them
@@ -128,8 +126,6 @@ static const struct arm_devmap_entry econa_devmap[] = {
 		ECONA_IO_BASE, /*virtual*/
 		ECONA_IO_BASE, /*physical*/
 		ECONA_IO_SIZE, /*size*/
-		VM_PROT_READ|VM_PROT_WRITE,
-		PTE_DEVICE,
 	},
 	{
 		/*
@@ -138,8 +134,6 @@ static const struct arm_devmap_entry econa_devmap[] = {
 		ECONA_OHCI_VBASE, /*virtual*/
 		ECONA_OHCI_PBASE, /*physical*/
 		ECONA_USB_SIZE, /*size*/
-		VM_PROT_READ|VM_PROT_WRITE,
-		PTE_DEVICE,
 	},
 	{
 		/*
@@ -148,12 +142,8 @@ static const struct arm_devmap_entry econa_devmap[] = {
 		ECONA_CFI_VBASE, /*virtual*/
 		ECONA_CFI_PBASE, /*physical*/
 		ECONA_CFI_SIZE,
-		VM_PROT_READ|VM_PROT_WRITE,
-		PTE_DEVICE,
 	},
 	{
-		0,
-		0,
 		0,
 		0,
 		0,
@@ -222,7 +212,7 @@ initarm(struct arm_boot_params *abp)
 	valloc_pages(irqstack, IRQ_STACK_SIZE);
 	valloc_pages(abtstack, ABT_STACK_SIZE);
 	valloc_pages(undstack, UND_STACK_SIZE);
-	valloc_pages(kernelstack, KSTACK_PAGES);
+	valloc_pages(kernelstack, kstack_pages);
 	valloc_pages(msgbufpv, round_page(msgbufsize) / PAGE_SIZE);
 
 	/*
@@ -260,7 +250,7 @@ initarm(struct arm_boot_params *abp)
 	pmap_map_chunk(l1pagetable, undstack.pv_va, undstack.pv_pa,
 	    UND_STACK_SIZE * PAGE_SIZE, VM_PROT_READ|VM_PROT_WRITE, PTE_CACHE);
 	pmap_map_chunk(l1pagetable, kernelstack.pv_va, kernelstack.pv_pa,
-	    KSTACK_PAGES * PAGE_SIZE, VM_PROT_READ|VM_PROT_WRITE, PTE_CACHE);
+	    kstack_pages * PAGE_SIZE, VM_PROT_READ|VM_PROT_WRITE, PTE_CACHE);
 
 	pmap_map_chunk(l1pagetable, kernel_l1pt.pv_va, kernel_l1pt.pv_pa,
 	    L1_TABLE_SIZE, VM_PROT_READ|VM_PROT_WRITE, PTE_PAGETABLE);
@@ -275,7 +265,7 @@ initarm(struct arm_boot_params *abp)
 
 	arm_devmap_bootstrap(l1pagetable, econa_devmap);
 	cpu_domains((DOMAIN_CLIENT << (PMAP_DOMAIN_KERNEL*2)) | DOMAIN_CLIENT);
-	setttb(kernel_l1pt.pv_pa);
+	cpu_setttb(kernel_l1pt.pv_pa);
 	cpu_tlb_flushID();
 	cpu_domains(DOMAIN_CLIENT << (PMAP_DOMAIN_KERNEL*2));
 	cninit();
@@ -297,7 +287,7 @@ initarm(struct arm_boot_params *abp)
 	/*
 	 * We must now clean the cache again....
 	 * Cleaning may be done by reading new data to displace any
-	 * dirty data in the cache. This will have happened in setttb()
+	 * dirty data in the cache. This will have happened in cpu_setttb()
 	 * but since we are boot strapping the addresses used for the read
 	 * may have just been remapped and thus the cache could be out
 	 * of sync. A re-clean after the switch will cure this.

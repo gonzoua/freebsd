@@ -22,7 +22,6 @@ options 	KDTRACE_HOOKS
 #device		dtrace
 
 # DTrace modules
-#device		dtrace_lockstat
 #device		dtrace_profile
 #device		dtrace_sdt
 #device		dtrace_fbt
@@ -990,7 +989,7 @@ options 	NKPT=31
 # ABI Emulation
 
 # Enable iBCS2 runtime support for SCO and ISC binaries
-options 	IBCS2
+#options 	IBCS2
 
 # Emulate spx device for client side of SVR3 local X interface
 options 	SPX_HACK

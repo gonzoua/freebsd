@@ -7,65 +7,69 @@ PROG_CXX=llc
 SRCDIR=	tools/llc
 SRCS=	llc.cpp
 
-LIBDEPS=llvmirreader \
+TGHDRS=	Attributes \
+	Intrinsics
+
+LIBDEPS=llvmmirparser \
+	llvmirreader \
 	llvmasmparser \
 	llvmaarch64disassembler \
 	llvmaarch64codegen \
 	llvmaarch64asmparser \
 	llvmaarch64desc \
 	llvmaarch64info \
-	llvmaarch64instprinter \
+	llvmaarch64asmprinter \
 	llvmaarch64utils \
 	llvmarmdisassembler \
 	llvmarmcodegen \
 	llvmarmasmparser \
 	llvmarmdesc \
 	llvmarminfo \
-	llvmarminstprinter \
+	llvmarmasmprinter \
 	llvmmipsdisassembler \
 	llvmmipscodegen \
 	llvmmipsasmparser \
 	llvmmipsdesc \
 	llvmmipsinfo \
-	llvmmipsinstprinter \
+	llvmmipsasmprinter \
 	llvmpowerpcdisassembler \
 	llvmpowerpccodegen \
 	llvmpowerpcasmparser \
 	llvmpowerpcdesc \
 	llvmpowerpcinfo \
-	llvmpowerpcinstprinter \
+	llvmpowerpcasmprinter \
 	llvmsparcdisassembler \
 	llvmsparccodegen \
 	llvmsparcasmparser \
 	llvmsparcdesc \
 	llvmsparcinfo \
-	llvmsparcinstprinter \
+	llvmsparcasmprinter \
 	llvmx86disassembler \
 	llvmx86asmparser \
 	llvmx86codegen \
 	llvmselectiondag \
 	llvmasmprinter \
 	llvmcodegen \
-	llvmscalaropts \
-	llvmprofiledata \
-	llvminstcombine \
-	llvmtransformutils \
-	llvmipa \
-	llvmanalysis \
 	llvmtarget \
+	llvmscalaropts \
+	llvminstcombine \
+	llvminstrumentation \
+	llvmprofiledata \
+	llvmtransformutils \
+	llvmbitwriter \
+	llvmanalysis \
 	llvmx86desc \
 	llvmobject \
 	llvmmcparser \
 	llvmbitreader \
 	llvmmcdisassembler \
 	llvmx86info \
-	llvmx86instprinter \
+	llvmx86asmprinter \
 	llvmmc \
 	llvmx86utils \
 	llvmcore \
 	llvmsupport
 
-.include "../clang.prog.mk"
+LIBADD+=	z
 
-DPADD+=	${LIBZ}
-LDADD+=	-lz
+.include "../clang.prog.mk"

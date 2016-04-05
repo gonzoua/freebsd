@@ -22,6 +22,7 @@
  * Copyright (c) 2005, 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright 2011 Nexenta Systems, Inc.  All rights reserved.
  * Copyright (c) 2012, 2015 by Delphix. All rights reserved.
+ * Copyright (c) 2014 Integros [integros.com]
  */
 
 #include <sys/dmu.h>
@@ -315,7 +316,8 @@ dmu_tx_count_write(dmu_tx_hold_t *txh, uint64_t off, uint64_t len)
 			dmu_buf_impl_t *db;
 
 			rw_enter(&dn->dn_struct_rwlock, RW_READER);
-			err = dbuf_hold_impl(dn, 0, start, FALSE, FTAG, &db);
+			err = dbuf_hold_impl(dn, 0, start,
+			    FALSE, FALSE, FTAG, &db);
 			rw_exit(&dn->dn_struct_rwlock);
 
 			if (err) {
@@ -516,7 +518,8 @@ dmu_tx_count_free(dmu_tx_hold_t *txh, uint64_t off, uint64_t len)
 		blkoff = P2PHASE(blkid, epb);
 		tochk = MIN(epb - blkoff, nblks);
 
-		err = dbuf_hold_impl(dn, 1, blkid >> epbs, FALSE, FTAG, &dbuf);
+		err = dbuf_hold_impl(dn, 1, blkid >> epbs,
+		    FALSE, FALSE, FTAG, &dbuf);
 		if (err) {
 			txh->txh_tx->tx_err = err;
 			break;

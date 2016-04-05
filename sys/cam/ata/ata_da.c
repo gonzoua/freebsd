@@ -466,14 +466,6 @@ static struct ada_quirk_entry ada_quirk_table[] =
 	},
 	{
 		/*
-		 * Samsung 843T Series SSDs
-		 * 4k optimised
-		 */
-		{ T_DIRECT, SIP_MEDIA_FIXED, "*", "SAMSUNG MZ7WD*", "*" },
-		/*quirks*/ADA_Q_4K
-	},
- 	{
- 		/*
 		 * Samsung 850 SSDs
 		 * 4k optimised
 		 */
@@ -482,10 +474,13 @@ static struct ada_quirk_entry ada_quirk_table[] =
 	},
 	{
 		/*
-		 * Samsung PM853T Series SSDs
+		 * Samsung 843T Series SSDs (MZ7WD*)
+		 * Samsung PM851 Series SSDs (MZ7TE*)
+		 * Samsung PM853T Series SSDs (MZ7GE*)
+		 * Samsung SM863 Series SSDs (MZ7KM*)
 		 * 4k optimised
 		 */
-		{ T_DIRECT, SIP_MEDIA_FIXED, "*", "SAMSUNG MZ7GE*", "*" },
+		{ T_DIRECT, SIP_MEDIA_FIXED, "*", "SAMSUNG MZ7*", "*" },
 		/*quirks*/ADA_Q_4K
 	},
 	{
@@ -582,7 +577,6 @@ static void		adaresume(void *arg);
 #define	ata_disk_firmware_geom_adjust(disk)
 #endif
 
-static int ada_legacy_aliases = ADA_DEFAULT_LEGACY_ALIASES;
 static int ada_retry_count = ADA_DEFAULT_RETRY;
 static int ada_default_timeout = ADA_DEFAULT_TIMEOUT;
 static int ada_send_ordered = ADA_DEFAULT_SEND_ORDERED;
@@ -593,8 +587,6 @@ static int ada_write_cache = ADA_DEFAULT_WRITE_CACHE;
 
 static SYSCTL_NODE(_kern_cam, OID_AUTO, ada, CTLFLAG_RD, 0,
             "CAM Direct Access Disk driver");
-SYSCTL_INT(_kern_cam_ada, OID_AUTO, legacy_aliases, CTLFLAG_RWTUN,
-           &ada_legacy_aliases, 0, "Create legacy-like device aliases");
 SYSCTL_INT(_kern_cam_ada, OID_AUTO, retry_count, CTLFLAG_RWTUN,
            &ada_retry_count, 0, "Normal I/O retry count");
 SYSCTL_INT(_kern_cam_ada, OID_AUTO, default_timeout, CTLFLAG_RWTUN,
@@ -633,8 +625,6 @@ static struct periph_driver adadriver =
 };
 
 PERIPHDRIVER_DECLARE(ada, adadriver);
-
-static MALLOC_DEFINE(M_ATADA, "ata_da", "ata_da buffers");
 
 static int
 adaopen(struct disk *dp)
@@ -767,10 +757,6 @@ adastrategy(struct bio *bp)
 	 * Place it in the queue of disk activities for this disk
 	 */
 	if (bp->bio_cmd == BIO_DELETE) {
-		KASSERT((softc->flags & ADA_FLAG_CAN_TRIM) ||
-			((softc->flags & ADA_FLAG_CAN_CFA) &&
-			 !(softc->flags & ADA_FLAG_CAN_48BIT)),
-			("BIO_DELETE but no supported TRIM method."));
 		bioq_disksort(&softc->trim_queue, bp);
 	} else {
 		if (ADA_SIO)
@@ -1168,11 +1154,11 @@ adaregister(struct cam_periph *periph, void *arg)
 	struct ada_softc *softc;
 	struct ccb_pathinq cpi;
 	struct ccb_getdev *cgd;
-	char   announce_buf[80], buf1[32];
+	char   announce_buf[80];
 	struct disk_params *dp;
 	caddr_t match;
 	u_int maxio;
-	int legacy_id, quirks;
+	int quirks;
 
 	cgd = (struct ccb_getdev *)arg;
 	if (cgd == NULL) {
@@ -1335,22 +1321,6 @@ adaregister(struct cam_periph *periph, void *arg)
 	softc->disk->d_fwheads = softc->params.heads;
 	ata_disk_firmware_geom_adjust(softc->disk);
 
-	if (ada_legacy_aliases) {
-#ifdef ATA_STATIC_ID
-		legacy_id = xpt_path_legacy_ata_id(periph->path);
-#else
-		legacy_id = softc->disk->d_unit;
-#endif
-		if (legacy_id >= 0) {
-			snprintf(announce_buf, sizeof(announce_buf),
-			    "kern.devalias.%s%d",
-			    softc->disk->d_name, softc->disk->d_unit);
-			snprintf(buf1, sizeof(buf1),
-			    "ad%d", legacy_id);
-			kern_setenv(announce_buf, buf1);
-		}
-	} else
-		legacy_id = -1;
 	/*
 	 * Acquire a reference to the periph before we register with GEOM.
 	 * We'll release this reference once GEOM calls us back (via
@@ -1368,17 +1338,11 @@ adaregister(struct cam_periph *periph, void *arg)
 
 	dp = &softc->params;
 	snprintf(announce_buf, sizeof(announce_buf),
-		"%juMB (%ju %u byte sectors: %dH %dS/T %dC)",
-		(uintmax_t)(((uintmax_t)dp->secsize *
-		dp->sectors) / (1024*1024)),
-		(uintmax_t)dp->sectors,
-		dp->secsize, dp->heads,
-		dp->secs_per_track, dp->cylinders);
+	    "%juMB (%ju %u byte sectors)",
+	    ((uintmax_t)dp->secsize * dp->sectors) / (1024 * 1024),
+	    (uintmax_t)dp->sectors, dp->secsize);
 	xpt_announce_periph(periph, announce_buf);
 	xpt_announce_quirks(periph, softc->quirks, ADA_Q_BIT_STRING);
-	if (legacy_id >= 0)
-		printf("%s%d: Previously was known as ad%d\n",
-		       periph->periph_name, periph->unit_number, legacy_id);
 
 	/*
 	 * Create our sysctl variables, now that we know
@@ -1544,7 +1508,12 @@ adastart(struct cam_periph *periph, union ccb *start_ccb)
 			    !(softc->flags & ADA_FLAG_CAN_48BIT)) {
 				ada_cfaerase(softc, bp, ataio);
 			} else {
-				panic("adastart: BIO_DELETE without method, not possible.");
+				/* This can happen if DMA was disabled. */
+				bioq_remove(&softc->trim_queue, bp);
+				biofinish(bp, NULL, EOPNOTSUPP);
+				xpt_release_ccb(start_ccb);
+				adaschedule(periph);
+				return;
 			}
 			softc->trim_running = 1;
 			start_ccb->ccb_h.ccb_state = ADA_CCB_TRIM;
@@ -1569,12 +1538,26 @@ adastart(struct cam_periph *periph, union ccb *start_ccb)
 		}
 		switch (bp->bio_cmd) {
 		case BIO_WRITE:
-			softc->flags |= ADA_FLAG_DIRTY;
-			/* FALLTHROUGH */
 		case BIO_READ:
 		{
 			uint64_t lba = bp->bio_pblkno;
 			uint16_t count = bp->bio_bcount / softc->params.secsize;
+			void *data_ptr;
+			int rw_op;
+
+			if (bp->bio_cmd == BIO_WRITE) {
+				softc->flags |= ADA_FLAG_DIRTY;
+				rw_op = CAM_DIR_OUT;
+			} else {
+				rw_op = CAM_DIR_IN;
+			}
+
+			data_ptr = bp->bio_data;
+			if ((bp->bio_flags & (BIO_UNMAPPED|BIO_VLIST)) != 0) {
+				rw_op |= CAM_DATA_BIO;
+				data_ptr = bp;
+			}
+
 #ifdef ADA_TEST_FAILURE
 			int fail = 0;
 
@@ -1606,9 +1589,7 @@ adastart(struct cam_periph *periph, union ccb *start_ccb)
 				}
 			}
 			if (fail) {
-				bp->bio_error = EIO;
-				bp->bio_flags |= BIO_ERROR;
-				biodone(bp);
+				biofinish(bp, NULL, EIO);
 				xpt_release_ccb(start_ccb);
 				adaschedule(periph);
 				return;
@@ -1621,12 +1602,9 @@ adastart(struct cam_periph *periph, union ccb *start_ccb)
 			cam_fill_ataio(ataio,
 			    ada_retry_count,
 			    adadone,
-			    (bp->bio_cmd == BIO_READ ? CAM_DIR_IN :
-				CAM_DIR_OUT) | ((bp->bio_flags & BIO_UNMAPPED)
-				!= 0 ? CAM_DATA_BIO : 0),
+			    rw_op,
 			    tag_code,
-			    ((bp->bio_flags & BIO_UNMAPPED) != 0) ? (void *)bp :
-				bp->bio_data,
+			    data_ptr,
 			    bp->bio_bcount,
 			    ada_default_timeout*1000);
 

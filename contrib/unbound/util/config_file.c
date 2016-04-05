@@ -56,8 +56,9 @@
 #include "util/fptr_wlist.h"
 #include "util/data/dname.h"
 #include "util/rtt.h"
-#include "ldns/wire2str.h"
-#include "ldns/parseutil.h"
+#include "services/cache/infra.h"
+#include "sldns/wire2str.h"
+#include "sldns/parseutil.h"
 #ifdef HAVE_GLOB_H
 # include <glob.h>
 #endif
@@ -69,6 +70,8 @@
 uid_t cfg_uid = (uid_t)-1;
 /** from cfg username, after daemonise setup performed */
 gid_t cfg_gid = (gid_t)-1;
+/** for debug allow small timeout values for fast rollovers */
+int autr_permit_small_holddown = 0;
 
 /** global config during parsing */
 struct config_parser_state* cfg_parser = 0;
@@ -95,9 +98,11 @@ config_create(void)
 	cfg->do_udp = 1;
 	cfg->do_tcp = 1;
 	cfg->tcp_upstream = 0;
+	cfg->tcp_mss = 0;
+	cfg->outgoing_tcp_mss = 0;
 	cfg->ssl_service_key = NULL;
 	cfg->ssl_service_pem = NULL;
-	cfg->ssl_port = 443;
+	cfg->ssl_port = 853;
 	cfg->ssl_upstream = 0;
 	cfg->use_syslog = 1;
 	cfg->log_time_ascii = 0;
@@ -131,6 +136,7 @@ config_create(void)
 	cfg->bogus_ttl = 60;
 	cfg->min_ttl = 0;
 	cfg->max_ttl = 3600 * 24;
+	cfg->max_negative_ttl = 3600;
 	cfg->prefetch = 0;
 	cfg->prefetch_key = 0;
 	cfg->infra_cache_slabs = 4;
@@ -156,6 +162,7 @@ config_create(void)
 	cfg->so_rcvbuf = 0;
 	cfg->so_sndbuf = 0;
 	cfg->so_reuseport = 0;
+	cfg->ip_transparent = 0;
 	cfg->num_ifs = 0;
 	cfg->ifs = NULL;
 	cfg->num_out_ifs = 0;
@@ -169,7 +176,9 @@ config_create(void)
 	cfg->harden_dnssec_stripped = 1;
 	cfg->harden_below_nxdomain = 0;
 	cfg->harden_referral_path = 0;
+	cfg->harden_algo_downgrade = 0;
 	cfg->use_caps_bits_for_id = 0;
+	cfg->caps_whitelist = NULL;
 	cfg->private_address = NULL;
 	cfg->private_domain = NULL;
 	cfg->unwanted_threshold = 0;
@@ -195,6 +204,7 @@ config_create(void)
 	cfg->add_holddown = 30*24*3600;
 	cfg->del_holddown = 30*24*3600;
 	cfg->keep_missing = 366*24*3600; /* one year plus a little leeway */
+	cfg->permit_small_holddown = 0;
 	cfg->key_cache_size = 4 * 1024 * 1024;
 	cfg->key_cache_slabs = 4;
 	cfg->neg_cache_size = 1 * 1024 * 1024;
@@ -202,6 +212,7 @@ config_create(void)
 	cfg->local_zones_nodefault = NULL;
 	cfg->local_data = NULL;
 	cfg->unblock_lan_zones = 0;
+	cfg->insecure_lan_zones = 0;
 	cfg->python_script = NULL;
 	cfg->remote_control_enable = 0;
 	cfg->control_ifs = NULL;
@@ -226,6 +237,13 @@ config_create(void)
 	if(!(cfg->dnstap_socket_path = strdup(DNSTAP_SOCKET_PATH)))
 		goto error_exit;
 #endif
+	cfg->ratelimit = 0;
+	cfg->ratelimit_slabs = 4;
+	cfg->ratelimit_size = 4*1024*1024;
+	cfg->ratelimit_for_domain = NULL;
+	cfg->ratelimit_below_domain = NULL;
+	cfg->ratelimit_factor = 10;
+	cfg->qname_minimisation = 0;
 	return cfg;
 error_exit:
 	config_delete(cfg); 
@@ -353,6 +371,8 @@ int config_set_option(struct config_file* cfg, const char* opt,
 	else S_YNO("do-udp:", do_udp)
 	else S_YNO("do-tcp:", do_tcp)
 	else S_YNO("tcp-upstream:", tcp_upstream)
+	else S_NUMBER_NONZERO("tcp-mss:", tcp_mss)
+	else S_NUMBER_NONZERO("outgoing-tcp-mss:", outgoing_tcp_mss)
 	else S_YNO("ssl-upstream:", ssl_upstream)
 	else S_STR("ssl-service-key:", ssl_service_key)
 	else S_STR("ssl-service-pem:", ssl_service_pem)
@@ -372,12 +392,15 @@ int config_set_option(struct config_file* cfg, const char* opt,
 	else S_MEMSIZE("so-rcvbuf:", so_rcvbuf)
 	else S_MEMSIZE("so-sndbuf:", so_sndbuf)
 	else S_YNO("so-reuseport:", so_reuseport)
+	else S_YNO("ip-transparent:", ip_transparent)
 	else S_MEMSIZE("rrset-cache-size:", rrset_cache_size)
 	else S_POW2("rrset-cache-slabs:", rrset_cache_slabs)
 	else S_YNO("prefetch:", prefetch)
 	else S_YNO("prefetch-key:", prefetch_key)
 	else if(strcmp(opt, "cache-max-ttl:") == 0)
 	{ IS_NUMBER_OR_ZERO; cfg->max_ttl = atoi(val); MAX_TTL=(time_t)cfg->max_ttl;}
+	else if(strcmp(opt, "cache-max-negative-ttl:") == 0)
+	{ IS_NUMBER_OR_ZERO; cfg->max_negative_ttl = atoi(val); MAX_NEG_TTL=(time_t)cfg->max_negative_ttl;}
 	else if(strcmp(opt, "cache-min-ttl:") == 0)
 	{ IS_NUMBER_OR_ZERO; cfg->min_ttl = atoi(val); MIN_TTL=(time_t)cfg->min_ttl;}
 	else if(strcmp(opt, "infra-cache-min-rtt:") == 0) {
@@ -404,7 +427,9 @@ int config_set_option(struct config_file* cfg, const char* opt,
 	else S_YNO("harden-dnssec-stripped:", harden_dnssec_stripped)
 	else S_YNO("harden-below-nxdomain:", harden_below_nxdomain)
 	else S_YNO("harden-referral-path:", harden_referral_path)
+	else S_YNO("harden-algo-downgrade:", harden_algo_downgrade)
 	else S_YNO("use-caps-for-id", use_caps_bits_for_id)
+	else S_STRLIST("caps-whitelist:", caps_whitelist)
 	else S_SIZET_OR_ZERO("unwanted-reply-threshold:", unwanted_threshold)
 	else S_STRLIST("private-address:", private_address)
 	else S_STRLIST("private-domain:", private_domain)
@@ -428,6 +453,9 @@ int config_set_option(struct config_file* cfg, const char* opt,
 	else S_UNSIGNED_OR_ZERO("add-holddown:", add_holddown)
 	else S_UNSIGNED_OR_ZERO("del-holddown:", del_holddown)
 	else S_UNSIGNED_OR_ZERO("keep-missing:", keep_missing)
+	else if(strcmp(opt, "permit-small-holddown:") == 0)
+	{ IS_YES_OR_NO; cfg->permit_small_holddown = (strcmp(val, "yes") == 0);
+	  autr_permit_small_holddown = cfg->permit_small_holddown; }
 	else S_MEMSIZE("key-cache-size:", key_cache_size)
 	else S_POW2("key-cache-slabs:", key_cache_slabs)
 	else S_MEMSIZE("neg-cache-size:", neg_cache_size)
@@ -435,6 +463,7 @@ int config_set_option(struct config_file* cfg, const char* opt,
 	else S_YNO("rrset-roundrobin:", rrset_roundrobin)
 	else S_STRLIST("local-data:", local_data)
 	else S_YNO("unblock-lan-zones:", unblock_lan_zones)
+	else S_YNO("insecure-lan-zones:", insecure_lan_zones)
 	else S_YNO("control-enable:", remote_control_enable)
 	else S_STRLIST("control-interface:", control_ifs)
 	else S_NUMBER_NONZERO("control-port:", control_port)
@@ -444,6 +473,14 @@ int config_set_option(struct config_file* cfg, const char* opt,
 	else S_STR("control-cert-file:", control_cert_file)
 	else S_STR("module-config:", module_conf)
 	else S_STR("python-script:", python_script)
+	else if(strcmp(opt, "ratelimit:") == 0) {
+	    IS_NUMBER_OR_ZERO; cfg->ratelimit = atoi(val);
+	    infra_dp_ratelimit=cfg->ratelimit;
+	}
+	else S_MEMSIZE("ratelimit-size:", ratelimit_size)
+	else S_POW2("ratelimit-slabs:", ratelimit_slabs)
+	else S_NUMBER_OR_ZERO("ratelimit-factor:", ratelimit_factor)
+	else S_YNO("qname-minimisation:", qname_minimisation)
 	/* val_sig_skew_min and max are copied into val_env during init,
 	 * so this does not update val_env with set_option */
 	else if(strcmp(opt, "val-sig-skew-min:") == 0)
@@ -452,7 +489,8 @@ int config_set_option(struct config_file* cfg, const char* opt,
 	{ IS_NUMBER_OR_ZERO; cfg->val_sig_skew_max = (int32_t)atoi(val); }
 	else if (strcmp(opt, "outgoing-interface:") == 0) {
 		char* d = strdup(val);
-		char** oi = (char**)malloc((cfg->num_out_ifs+1)*sizeof(char*));
+		char** oi = 
+		(char**)reallocarray(NULL, (size_t)cfg->num_out_ifs+1, sizeof(char*));
 		if(!d || !oi) { free(d); free(oi); return -1; }
 		if(cfg->out_ifs && cfg->num_out_ifs) {
 			memmove(oi, cfg->out_ifs, cfg->num_out_ifs*sizeof(char*));
@@ -465,7 +503,8 @@ int config_set_option(struct config_file* cfg, const char* opt,
 		 * interface, outgoing-interface, access-control, 
 		 * stub-zone, name, stub-addr, stub-host, stub-prime
 		 * forward-first, stub-first,
-		 * forward-zone, name, forward-addr, forward-host */
+		 * forward-zone, name, forward-addr, forward-host,
+		 * ratelimit-for-domain, ratelimit-below-domain */
 		return 0;
 	}
 	return 1;
@@ -577,8 +616,8 @@ config_collate_cat(struct config_strlist* list)
 #define O_MEM(opt, str, var) if(strcmp(opt, str)==0) { \
 	if(cfg->var > 1024*1024*1024) {	\
 	  size_t f=cfg->var/(size_t)1000000, b=cfg->var%(size_t)1000000; \
-	  snprintf(buf, len, "%u%6.6u\n", (unsigned)f, (unsigned)b); \
-	} else snprintf(buf, len, "%u\n", (unsigned)cfg->var); \
+	  snprintf(buf, len, "%u%6.6u", (unsigned)f, (unsigned)b); \
+	} else snprintf(buf, len, "%u", (unsigned)cfg->var); \
 	func(buf, arg);}
 /** compare and print list option */
 #define O_LST(opt, name, lst) if(strcmp(opt, name)==0) { \
@@ -624,11 +663,13 @@ config_get_option(struct config_file* cfg, const char* opt,
 	else O_MEM(opt, "so-rcvbuf", so_rcvbuf)
 	else O_MEM(opt, "so-sndbuf", so_sndbuf)
 	else O_YNO(opt, "so-reuseport", so_reuseport)
+	else O_YNO(opt, "ip-transparent", ip_transparent)
 	else O_MEM(opt, "rrset-cache-size", rrset_cache_size)
 	else O_DEC(opt, "rrset-cache-slabs", rrset_cache_slabs)
 	else O_YNO(opt, "prefetch-key", prefetch_key)
 	else O_YNO(opt, "prefetch", prefetch)
 	else O_DEC(opt, "cache-max-ttl", max_ttl)
+	else O_DEC(opt, "cache-max-negative-ttl", max_negative_ttl)
 	else O_DEC(opt, "cache-min-ttl", min_ttl)
 	else O_DEC(opt, "infra-host-ttl", host_ttl)
 	else O_DEC(opt, "infra-cache-slabs", infra_cache_slabs)
@@ -640,6 +681,8 @@ config_get_option(struct config_file* cfg, const char* opt,
 	else O_YNO(opt, "do-udp", do_udp)
 	else O_YNO(opt, "do-tcp", do_tcp)
 	else O_YNO(opt, "tcp-upstream", tcp_upstream)
+	else O_DEC(opt, "tcp-mss", tcp_mss)
+	else O_DEC(opt, "outgoing-tcp-mss", outgoing_tcp_mss)
 	else O_YNO(opt, "ssl-upstream", ssl_upstream)
 	else O_STR(opt, "ssl-service-key", ssl_service_key)
 	else O_STR(opt, "ssl-service-pem", ssl_service_pem)
@@ -662,7 +705,9 @@ config_get_option(struct config_file* cfg, const char* opt,
 	else O_YNO(opt, "harden-dnssec-stripped", harden_dnssec_stripped)
 	else O_YNO(opt, "harden-below-nxdomain", harden_below_nxdomain)
 	else O_YNO(opt, "harden-referral-path", harden_referral_path)
+	else O_YNO(opt, "harden-algo-downgrade", harden_algo_downgrade)
 	else O_YNO(opt, "use-caps-for-id", use_caps_bits_for_id)
+	else O_LST(opt, "caps-whitelist", caps_whitelist)
 	else O_DEC(opt, "unwanted-reply-threshold", unwanted_threshold)
 	else O_YNO(opt, "do-not-query-localhost", donotquery_localhost)
 	else O_STR(opt, "module-config", module_conf)
@@ -676,6 +721,7 @@ config_get_option(struct config_file* cfg, const char* opt,
 	else O_UNS(opt, "add-holddown", add_holddown)
 	else O_UNS(opt, "del-holddown", del_holddown)
 	else O_UNS(opt, "keep-missing", keep_missing)
+	else O_YNO(opt, "permit-small-holddown", permit_small_holddown)
 	else O_MEM(opt, "key-cache-size", key_cache_size)
 	else O_DEC(opt, "key-cache-slabs", key_cache_slabs)
 	else O_MEM(opt, "neg-cache-size", neg_cache_size)
@@ -701,10 +747,18 @@ config_get_option(struct config_file* cfg, const char* opt,
 	else O_YNO(opt, "minimal-responses", minimal_responses)
 	else O_YNO(opt, "rrset-roundrobin", rrset_roundrobin)
 	else O_YNO(opt, "unblock-lan-zones", unblock_lan_zones)
+	else O_YNO(opt, "insecure-lan-zones", insecure_lan_zones)
 	else O_DEC(opt, "max-udp-size", max_udp_size)
 	else O_STR(opt, "python-script", python_script)
+	else O_DEC(opt, "ratelimit", ratelimit)
+	else O_MEM(opt, "ratelimit-size", ratelimit_size)
+	else O_DEC(opt, "ratelimit-slabs", ratelimit_slabs)
+	else O_LS2(opt, "ratelimit-for-domain", ratelimit_for_domain)
+	else O_LS2(opt, "ratelimit-below-domain", ratelimit_below_domain)
+	else O_DEC(opt, "ratelimit-factor", ratelimit_factor)
 	else O_DEC(opt, "val-sig-skew-min", val_sig_skew_min)
 	else O_DEC(opt, "val-sig-skew-max", val_sig_skew_max)
+	else O_YNO(opt, "qname-minimisation", qname_minimisation)
 	/* not here:
 	 * outgoing-permit, outgoing-avoid - have list of ports
 	 * local-zone - zones and nodefault variables
@@ -819,6 +873,18 @@ config_read(struct config_file* cfg, const char* filename, const char* chroot)
 	return 1;
 }
 
+struct config_stub* cfg_stub_find(struct config_stub*** pp, const char* nm)
+{
+	struct config_stub* p = *(*pp);
+	while(p) {
+		if(strcmp(p->name, nm) == 0)
+			return p;
+		(*pp) = &p->next;
+		p = p->next;
+	}
+	return NULL;
+}
+
 void
 config_delstrlist(struct config_strlist* p)
 {
@@ -845,15 +911,22 @@ config_deldblstrlist(struct config_str2list* p)
 }
 
 void
+config_delstub(struct config_stub* p)
+{
+	if(!p) return;
+	free(p->name);
+	config_delstrlist(p->hosts);
+	config_delstrlist(p->addrs);
+	free(p);
+}
+
+void
 config_delstubs(struct config_stub* p)
 {
 	struct config_stub* np;
 	while(p) {
 		np = p->next;
-		free(p->name);
-		config_delstrlist(p->hosts);
-		config_delstrlist(p->addrs);
-		free(p);
+		config_delstub(p);
 		p = np;
 	}
 }
@@ -890,6 +963,7 @@ config_delete(struct config_file* cfg)
 	free(cfg->version);
 	free(cfg->module_conf);
 	free(cfg->outgoing_avail_ports);
+	config_delstrlist(cfg->caps_whitelist);
 	config_delstrlist(cfg->private_address);
 	config_delstrlist(cfg->private_domain);
 	config_delstrlist(cfg->auto_trust_anchor_file_list);
@@ -909,9 +983,12 @@ config_delete(struct config_file* cfg)
 	free(cfg->server_cert_file);
 	free(cfg->control_key_file);
 	free(cfg->control_cert_file);
+	free(cfg->dns64_prefix);
 	free(cfg->dnstap_socket_path);
 	free(cfg->dnstap_identity);
 	free(cfg->dnstap_version);
+	config_deldblstrlist(cfg->ratelimit_for_domain);
+	config_deldblstrlist(cfg->ratelimit_below_domain);
 	free(cfg);
 }
 
@@ -998,7 +1075,7 @@ int cfg_condense_ports(struct config_file* cfg, int** avail)
 	*avail = NULL;
 	if(num == 0)
 		return 0;
-	*avail = (int*)malloc(sizeof(int)*num);
+	*avail = (int*)reallocarray(NULL, (size_t)num, sizeof(int));
 	if(!*avail)
 		return 0;
 	for(i=0; i<65536; i++) {
@@ -1198,11 +1275,13 @@ config_apply(struct config_file* config)
 {
 	MAX_TTL = (time_t)config->max_ttl;
 	MIN_TTL = (time_t)config->min_ttl;
+	MAX_NEG_TTL = (time_t)config->max_negative_ttl;
 	RTT_MIN_TIMEOUT = config->infra_cache_min_rtt;
 	EDNS_ADVERTISED_SIZE = (uint16_t)config->edns_buffer_size;
 	MINIMAL_RESPONSES = config->minimal_responses;
 	RRSET_ROUNDROBIN = config->rrset_roundrobin;
 	log_set_time_asc(config->log_time_ascii);
+	autr_permit_small_holddown = config->permit_small_holddown;
 }
 
 void config_lookup_uid(struct config_file* cfg)
@@ -1506,6 +1585,28 @@ w_lookup_reg_str(const char* key, const char* name)
 		if(!result) log_err("out of memory");
 	}
 	return result;
+}
+
+void w_config_adjust_directory(struct config_file* cfg)
+{
+	if(cfg->directory && cfg->directory[0]) {
+		TCHAR dirbuf[2*MAX_PATH+4];
+		if(strcmp(cfg->directory, "%EXECUTABLE%") == 0) {
+			/* get executable path, and if that contains
+			 * directories, snip off the filename part */
+			dirbuf[0] = 0;
+			if(!GetModuleFileName(NULL, dirbuf, MAX_PATH))
+				log_err("could not GetModuleFileName");
+			if(strrchr(dirbuf, '\\')) {
+				(strrchr(dirbuf, '\\'))[0] = 0;
+			} else log_err("GetModuleFileName had no path");
+			if(dirbuf[0]) {
+				/* adjust directory for later lookups to work*/
+				free(cfg->directory);
+				cfg->directory = memdup(dirbuf, strlen(dirbuf)+1);
+			}
+		}
+	}
 }
 #endif /* UB_ON_WINDOWS */
 

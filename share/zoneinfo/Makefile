@@ -34,7 +34,7 @@ CONTRIBDIR=	${.CURDIR}/../../contrib/tzdata/
 .PATH:		${CONTRIBDIR}
 
 .if defined(LEAPSECONDS)
-LEAPFILE=	-L leapseconds
+LEAPFILE=	-L ${CONTRIBDIR}leapseconds
 .else
 LEAPFILE=
 .endif
@@ -67,19 +67,22 @@ TZBUILDSUBDIRS=	\
 		Pacific \
 		SystemV
 
+.if !defined(_SKIP_BUILD)
 all: zoneinfo
+.endif
+META_TARGETS+=	zoneinfo install-zoneinfo
 
-.PHONY: zoneinfo
-zoneinfo: yearistype ${TDATA}
+zoneinfo: yearistype ${TDATA} ${META_DEPS}
 	mkdir -p ${TZBUILDDIR}
 	cd ${TZBUILDDIR}; mkdir -p ${TZBUILDSUBDIRS}
 	umask 022; cd ${.CURDIR}; \
 	zic -D -d ${TZBUILDDIR} -p ${POSIXRULES} -m ${NOBINMODE} \
 	    ${LEAPFILE} -y ${.OBJDIR}/yearistype ${TZFILES}
 
-beforeinstall:
+beforeinstall: install-zoneinfo
+install-zoneinfo: ${META_DEPS}
 	cd ${TZBUILDDIR} && \
-	    find * -type f -print -exec ${INSTALL} \
+	    find -s * -type f -print -exec ${INSTALL} \
 	    -o ${BINOWN} -g ${BINGRP} -m ${NOBINMODE} \
 	    \{} ${DESTDIR}/usr/share/zoneinfo/\{} \;
 	${INSTALL} -o ${BINOWN} -g ${BINGRP} -m ${NOBINMODE} \

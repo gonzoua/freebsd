@@ -314,7 +314,7 @@ xlp_pcib_attach(device_t dev)
 		for (link = 0; link < 4; link++)
 			xlp_pcib_hardware_swap_enable(node, link);
 
-	device_add_child(dev, "pci", 0);
+	device_add_child(dev, "pci", -1);
 	bus_generic_attach(dev);
 	return (0);
 }
@@ -433,7 +433,7 @@ mips_platform_pcib_setup_intr(device_t dev, device_t child,
 	if (error)
 		return error;
 	if (rman_get_start(irq) != rman_get_end(irq)) {
-		device_printf(dev, "Interrupt allocation %lu != %lu\n",
+		device_printf(dev, "Interrupt allocation %ju != %ju\n",
 		    rman_get_start(irq), rman_get_end(irq));
 		return (EINVAL);
 	}

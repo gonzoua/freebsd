@@ -31,21 +31,14 @@ __FBSDID("$FreeBSD$");
 #include <sys/param.h>
 #include <sys/queue.h>
 #include <sys/sbuf.h>
-#include <sys/types.h>
 #include <sys/utsname.h>
 #include <sys/sysctl.h>
 
-#include <assert.h>
 #include <dirent.h>
 #include <ucl.h>
-#include <ctype.h>
 #include <err.h>
 #include <errno.h>
-#include <fcntl.h>
-#include <inttypes.h>
-#include <paths.h>
 #include <stdbool.h>
-#include <string.h>
 #include <unistd.h>
 
 #include "config.h"
@@ -131,6 +124,15 @@ static struct config_entry c[] = {
 		false,
 		true,
 	},
+	[PUBKEY] = {
+		PKG_CONFIG_STRING,
+		"PUBKEY",
+		NULL,
+		NULL,
+		NULL,
+		false,
+		false
+	}
 };
 
 static int
@@ -231,6 +233,8 @@ config_parse(const ucl_object_t *obj, pkg_conf_file_t conftype)
 				sbuf_cpy(buf, "SIGNATURE_TYPE");
 			else if (strcasecmp(key, "fingerprints") == 0)
 				sbuf_cpy(buf, "FINGERPRINTS");
+			else if (strcasecmp(key, "pubkey") == 0)
+				sbuf_cpy(buf, "PUBKEY");
 			else if (strcasecmp(key, "enabled") == 0) {
 				if ((cur->type != UCL_BOOLEAN) ||
 				    !ucl_object_toboolean(cur))

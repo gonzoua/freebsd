@@ -1,13 +1,27 @@
+//===-- UnwindPlan.h --------------------------------------------*- C++ -*-===//
+//
+//                     The LLVM Compiler Infrastructure
+//
+// This file is distributed under the University of Illinois Open Source
+// License. See LICENSE.TXT for details.
+//
+//===----------------------------------------------------------------------===//
+
 #ifndef liblldb_UnwindPlan_h
 #define liblldb_UnwindPlan_h
 
+// C Includes
+// C++ Includes
+#include <map>
+#include <memory>
+#include <vector>
+
+// Other libraries and framework includes
+// Project includes
 #include "lldb/lldb-private.h"
 #include "lldb/Core/AddressRange.h"
 #include "lldb/Core/Stream.h"
 #include "lldb/Core/ConstString.h"
-
-#include <map>
-#include <vector>
 
 namespace lldb_private {
 
@@ -38,13 +52,11 @@ namespace lldb_private {
 
 class UnwindPlan {
 public:
-
     class Row {
     public:
         class RegisterLocation
         {
         public:
-    
             enum RestoreType
                 {
                     unspecified,        // not specified, we may be able to assume this 
@@ -187,7 +199,7 @@ public:
                 }
                 else
                 {
-                    *opcodes = NULL;
+                    *opcodes = nullptr;
                     len = 0;
                 }
             }
@@ -203,7 +215,7 @@ public:
             {
                 if (m_type == atDWARFExpression || m_type == isDWARFExpression)
                     return m_location.expr.opcodes; 
-                return NULL;
+                return nullptr;
             }
 
             int
@@ -237,17 +249,177 @@ public:
             } m_location;
         };
     
+        class CFAValue
+        {
+        public:
+            enum ValueType
+            {
+                unspecified,                  // not specified
+                isRegisterPlusOffset,         // CFA = register + offset
+                isRegisterDereferenced,       // CFA = [reg]
+                isDWARFExpression             // CFA = eval(dwarf_expr)
+            };
+
+            CFAValue() :
+                m_type(unspecified),
+                m_value()
+            {
+            }
+
+            bool
+            operator == (const CFAValue& rhs) const;
+
+            bool
+            operator != (const CFAValue &rhs) const
+            {
+                return !(*this == rhs);
+            }
+
+            void
+            SetUnspecified()
+            {
+                m_type = unspecified;
+            }
+
+            bool
+            IsUnspecified () const
+            {
+                return m_type == unspecified;
+            }
+
+            bool
+            IsRegisterPlusOffset () const
+            {
+                return m_type == isRegisterPlusOffset;
+            }
+
+            void
+            SetIsRegisterPlusOffset (uint32_t reg_num, int32_t offset)
+            {
+                m_type = isRegisterPlusOffset;
+                m_value.reg.reg_num = reg_num;
+                m_value.reg.offset = offset;
+            }
+
+            bool
+            IsRegisterDereferenced () const
+            {
+                return m_type == isRegisterDereferenced;
+            }
+
+            void
+            SetIsRegisterDereferenced (uint32_t reg_num)
+            {
+                m_type = isRegisterDereferenced;
+                m_value.reg.reg_num = reg_num;
+            }
+
+            bool
+            IsDWARFExpression () const
+            {
+                return m_type == isDWARFExpression;
+            }
+
+            void
+            SetIsDWARFExpression (const uint8_t *opcodes, uint32_t len)
+            {
+                m_type = isDWARFExpression;
+                m_value.expr.opcodes = opcodes;
+                m_value.expr.length = len;
+            }
+
+            uint32_t
+            GetRegisterNumber () const
+            {
+                if (m_type == isRegisterDereferenced || m_type == isRegisterPlusOffset)
+                    return m_value.reg.reg_num;
+                return LLDB_INVALID_REGNUM;
+            }
+
+            ValueType
+            GetValueType () const
+            {
+                return m_type;
+            }
+
+            int32_t
+            GetOffset () const
+            {
+                if (m_type == isRegisterPlusOffset)
+                    return m_value.reg.offset;
+                return 0;
+            }
+
+            void IncOffset (int32_t delta)
+            {
+                if (m_type == isRegisterPlusOffset)
+                    m_value.reg.offset += delta;
+            }
+
+            void SetOffset (int32_t offset)
+            {
+                if (m_type == isRegisterPlusOffset)
+                    m_value.reg.offset = offset;
+            }
+
+            void
+            GetDWARFExpr (const uint8_t **opcodes, uint16_t& len) const
+            {
+                if (m_type == isDWARFExpression)
+                {
+                    *opcodes = m_value.expr.opcodes;
+                    len = m_value.expr.length;
+                }
+                else
+                {
+                    *opcodes = nullptr;
+                    len = 0;
+                }
+            }
+
+            const uint8_t *
+            GetDWARFExpressionBytes ()
+            {
+                if (m_type == isDWARFExpression)
+                    return m_value.expr.opcodes;
+                return nullptr;
+            }
+
+            int
+            GetDWARFExpressionLength ()
+            {
+                if (m_type == isDWARFExpression)
+                    return m_value.expr.length;
+                return 0;
+            }
+
+            void
+            Dump (Stream &s,
+                  const UnwindPlan* unwind_plan,
+                  Thread* thread) const;
+
+        private:
+            ValueType m_type;            // How do we compute CFA value?
+            union
+            {
+                struct {
+                    // For m_type == isRegisterPlusOffset or m_type == isRegisterDereferenced
+                    uint32_t reg_num; // The register number
+                    // For m_type == isRegisterPlusOffset
+                    int32_t offset;
+                } reg;
+                // For m_type == isDWARFExpression
+                struct {
+                    const uint8_t *opcodes;
+                    uint16_t length;
+                } expr;
+            } m_value;
+        }; // class CFAValue
+
     public:
         Row ();
-    
-        Row (const UnwindPlan::Row& rhs) : 
-            m_offset             (rhs.m_offset),
-            m_cfa_type           (rhs.m_cfa_type),
-            m_cfa_reg_num        (rhs.m_cfa_reg_num),
-            m_cfa_offset         (rhs.m_cfa_offset),
-            m_register_locations (rhs.m_register_locations)
-        {
-        }
+
+        Row (const UnwindPlan::Row& rhs) = default;
 
         bool
         operator == (const Row &rhs) const;
@@ -279,47 +451,9 @@ public:
             m_offset += offset;
         }
 
-        // How we can reconstruct the CFA address for this stack frame, at this location
-        enum CFAType
+        CFAValue& GetCFAValue()
         {
-            CFAIsRegisterPlusOffset,   // the CFA value in a register plus (or minus) an offset
-            CFAIsRegisterDereferenced  // the address in a register is dereferenced to get CFA value
-        };
-
-        CFAType
-        GetCFAType () const
-        {
-            return m_cfa_type;
-        }
-
-        void
-        SetCFAType (CFAType cfa_type)
-        {
-            m_cfa_type = cfa_type;
-        }
-
-        // If GetCFAType() is CFAIsRegisterPlusOffset, add GetCFAOffset to the reg value to get CFA value
-        // If GetCFAType() is CFAIsRegisterDereferenced, dereference the addr in the reg to get CFA value
-        uint32_t
-        GetCFARegister () const
-        {
-            return m_cfa_reg_num;
-        }
-        
-        void
-        SetCFARegister (uint32_t reg_num);
-
-        // This should not be used when GetCFAType() is CFAIsRegisterDereferenced; will return 0 in that case.
-        int32_t
-        GetCFAOffset () const
-        {
-            return m_cfa_offset;
-        }
-
-        void
-        SetCFAOffset (int32_t offset)
-        {
-            m_cfa_offset = offset;
+            return m_cfa_value;
         }
 
         bool
@@ -360,19 +494,11 @@ public:
         typedef std::map<uint32_t, RegisterLocation> collection;
         lldb::addr_t m_offset;      // Offset into the function for this row
 
-        CFAType m_cfa_type;
-
-        // If m_cfa_type == CFAIsRegisterPlusOffset, the CFA address is computed as m_cfa_reg_num + m_cfa_offset
-        // If m_cfa_type == CFAIsRegisterDereferenced, the CFA address is computed as *(m_cfa_reg_num) - i.e. the
-        // address in m_cfa_reg_num is dereferenced and the pointer value read is the CFA addr.
-        uint32_t m_cfa_reg_num;     // The Call Frame Address register number
-        int32_t  m_cfa_offset;      // The offset from the CFA for this row
-
+        CFAValue m_cfa_value;
         collection m_register_locations;
     }; // class Row
 
 public:
-
     typedef std::shared_ptr<Row> RowSP;
 
     UnwindPlan (lldb::RegisterKind reg_kind) : 
@@ -388,9 +514,23 @@ public:
     {
     }
 
-    ~UnwindPlan ()
-	{
-	}
+    // Performs a deep copy of the plan, including all the rows (expensive).
+    UnwindPlan (const UnwindPlan &rhs) :
+        m_plan_valid_address_range (rhs.m_plan_valid_address_range),
+        m_register_kind (rhs.m_register_kind),
+        m_return_addr_register (rhs.m_return_addr_register),
+        m_source_name (rhs.m_source_name),
+        m_plan_is_sourced_from_compiler (rhs.m_plan_is_sourced_from_compiler),
+        m_plan_is_valid_at_all_instruction_locations (rhs.m_plan_is_valid_at_all_instruction_locations),
+        m_lsda_address (rhs.m_lsda_address),
+        m_personality_func_addr (rhs.m_personality_func_addr)
+    {
+        m_row_list.reserve (rhs.m_row_list.size());
+        for (const RowSP &row_sp: rhs.m_row_list)
+            m_row_list.emplace_back (new Row (*row_sp));
+    }
+
+    ~UnwindPlan() = default;
 
     void 
     Dump (Stream& s, Thread* thread, lldb::addr_t base_addr) const;
@@ -437,7 +577,7 @@ public:
     {
         if (m_row_list.empty())
             return LLDB_INVALID_REGNUM;
-        return m_row_list.front()->GetCFARegister();
+        return m_row_list.front()->GetCFAValue().GetRegisterNumber();
     }
 
     // This UnwindPlan may not be valid at every address of the function span.  
@@ -544,8 +684,6 @@ public:
     }
 
 private:
-
-    
     typedef std::vector<RowSP> collection;
     collection m_row_list;
     AddressRange m_plan_valid_address_range;
@@ -565,4 +703,4 @@ private:
 
 } // namespace lldb_private
 
-#endif //liblldb_UnwindPlan_h
+#endif // liblldb_UnwindPlan_h

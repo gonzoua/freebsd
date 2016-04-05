@@ -61,14 +61,8 @@ __FBSDID("$FreeBSD$");
  * This routine works on machines with IEEE754 FP and Vaxen.
  */
 
-#if defined(__m68k__) || defined(__sparc__) || defined(__i386__) || \
-    defined(__mips__) || defined(__ns32k__) || defined(__alpha__) || \
-    defined(__arm__) || defined(__ppc__) || \
-    defined(__arm26__) || defined(__sparc64__) || defined(__amd64__) || \
-    defined(__aarch64__)
 #include <machine/endian.h>
 #define IEEEFP
-#endif
 
 #if defined(__vax__)
 
@@ -102,9 +96,7 @@ static struct sgl_limits {
 #endif /* vax */
 
 bool_t
-xdr_float(xdrs, fp)
-	XDR *xdrs;
-	float *fp;
+xdr_float(XDR *xdrs, float *fp)
 {
 #ifndef IEEEFP
 	struct ieee_single is;

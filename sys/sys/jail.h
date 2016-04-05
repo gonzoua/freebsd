@@ -230,7 +230,9 @@ struct prison_racct {
 #define	PR_ALLOW_MOUNT_PROCFS		0x0400
 #define	PR_ALLOW_MOUNT_TMPFS		0x0800
 #define	PR_ALLOW_MOUNT_FDESCFS		0x1000
-#define	PR_ALLOW_ALL			0x1fff
+#define	PR_ALLOW_MOUNT_LINPROCFS	0x2000
+#define	PR_ALLOW_MOUNT_LINSYSFS		0x4000
+#define	PR_ALLOW_ALL			0x7fff
 
 /*
  * OSD methods
@@ -403,7 +405,8 @@ char *prison_name(struct prison *, struct prison *);
 int prison_priv_check(struct ucred *cred, int priv);
 int sysctl_jail_param(SYSCTL_HANDLER_ARGS);
 void prison_racct_foreach(void (*callback)(struct racct *racct,
-    void *arg2, void *arg3), void *arg2, void *arg3);
+    void *arg2, void *arg3), void (*pre)(void), void (*post)(void),
+    void *arg2, void *arg3);
 struct prison_racct *prison_racct_find(const char *name);
 void prison_racct_hold(struct prison_racct *prr);
 void prison_racct_free(struct prison_racct *prr);

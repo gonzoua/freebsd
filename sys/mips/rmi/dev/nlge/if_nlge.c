@@ -94,7 +94,6 @@ __FBSDID("$FreeBSD$");
 #include <machine/mips_opcode.h>
 #include <machine/asm.h>
 #include <machine/cpuregs.h>
-#include <machine/param.h>
 #include <machine/intr_machdep.h>
 #include <machine/clock.h>	/* for DELAY */
 #include <machine/bus.h>
@@ -1154,7 +1153,7 @@ nlna_config_pde(struct nlna_softc *sc)
 	cpumask = 0x1;
 #ifdef SMP
 	/*
-         * rge may be called before SMP start in a BOOTP/NFSROOT
+         * nlna may be called before SMP start in a BOOTP/NFSROOT
          * setup. we will distribute packets to other cpus only when
          * the SMP is started.
 	 */

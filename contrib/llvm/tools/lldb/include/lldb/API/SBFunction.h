@@ -16,7 +16,7 @@
 
 namespace lldb {
 
-class SBFunction
+class LLDB_API SBFunction
 {
 public:
 
@@ -36,6 +36,9 @@ public:
     GetName() const;
 
     const char *
+    GetDisplayName() const;
+    
+    const char *
     GetMangledName () const;
 
     lldb::SBInstructionList
@@ -50,6 +53,9 @@ public:
     lldb::SBAddress
     GetEndAddress ();
 
+    const char *
+    GetArgumentName (uint32_t arg_idx);
+
     uint32_t
     GetPrologueByteSize ();
 
@@ -61,6 +67,9 @@ public:
     
     lldb::LanguageType
     GetLanguage ();
+
+    bool
+    GetIsOptimized ();
 
     bool
     operator == (const lldb::SBFunction &rhs) const;

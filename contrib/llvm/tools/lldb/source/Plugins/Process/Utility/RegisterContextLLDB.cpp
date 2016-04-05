@@ -17,6 +17,7 @@
 #include "lldb/Core/RegisterValue.h"
 #include "lldb/Core/Value.h"
 #include "lldb/Expression/DWARFExpression.h"
+#include "lldb/Symbol/ArmUnwindInfo.h"
 #include "lldb/Symbol/DWARFCallFrameInfo.h"
 #include "lldb/Symbol/FuncUnwinders.h"
 #include "lldb/Symbol/Function.h"
@@ -37,6 +38,15 @@
 
 using namespace lldb;
 using namespace lldb_private;
+
+static ConstString GetSymbolOrFunctionName(const SymbolContext &sym_ctx)
+{
+    if (sym_ctx.symbol)
+        return sym_ctx.symbol->GetName();
+    else if (sym_ctx.function)
+        return sym_ctx.function->GetName();
+    return ConstString();
+}
 
 RegisterContextLLDB::RegisterContextLLDB
 (
@@ -175,12 +185,12 @@ RegisterContextLLDB::InitializeZerothFrame()
     if (m_sym_ctx.symbol)
     {
         UnwindLogMsg ("with pc value of 0x%" PRIx64 ", symbol name is '%s'",
-                      current_pc, m_sym_ctx.symbol == NULL ? "" : m_sym_ctx.symbol->GetName().AsCString());
+                      current_pc, GetSymbolOrFunctionName(m_sym_ctx).AsCString(""));
     }
     else if (m_sym_ctx.function)
     {
         UnwindLogMsg ("with pc value of 0x%" PRIx64 ", function name is '%s'",
-                      current_pc, m_sym_ctx.symbol == NULL ? "" : m_sym_ctx.function->GetName().AsCString());
+                      current_pc, GetSymbolOrFunctionName(m_sym_ctx).AsCString(""));
     }
     else
     {
@@ -255,9 +265,32 @@ RegisterContextLLDB::InitializeZerothFrame()
 
     if (!ReadCFAValueForRow (row_register_kind, active_row, m_cfa))
     {
-        UnwindLogMsg ("could not read CFA register for this frame.");
-        m_frame_type = eNotAValidFrame;
-        return;
+        // Try the fall back unwind plan since the
+        // full unwind plan failed.
+        FuncUnwindersSP func_unwinders_sp;
+        UnwindPlanSP call_site_unwind_plan;
+        bool cfa_status = false;
+
+        if (m_sym_ctx_valid)
+        {
+            func_unwinders_sp = pc_module_sp->GetObjectFile()->GetUnwindTable().GetFuncUnwindersContainingAddress (m_current_pc, m_sym_ctx);
+        }
+
+        if(func_unwinders_sp.get() != nullptr)
+            call_site_unwind_plan = func_unwinders_sp->GetUnwindPlanAtCallSite(process->GetTarget(), m_current_offset_backed_up_one);
+
+        if (call_site_unwind_plan.get() != nullptr)
+        {
+            m_fallback_unwind_plan_sp = call_site_unwind_plan;
+            if(TryFallbackUnwindPlan())
+                cfa_status = true;
+        }
+        if (!cfa_status)
+        {
+            UnwindLogMsg ("could not read CFA value for first frame.");
+            m_frame_type = eNotAValidFrame;
+            return;
+        }
     }
 
     UnwindLogMsg ("initialized frame current pc is 0x%" PRIx64 " cfa is 0x%" PRIx64 " using %s UnwindPlan",
@@ -457,12 +490,12 @@ RegisterContextLLDB::InitializeNonZerothFrame()
     if (m_sym_ctx.symbol)
     {
         UnwindLogMsg ("with pc value of 0x%" PRIx64 ", symbol name is '%s'",
-                      pc, m_sym_ctx.symbol == NULL ? "" : m_sym_ctx.symbol->GetName().AsCString());
+                      pc, GetSymbolOrFunctionName(m_sym_ctx).AsCString(""));
     }
     else if (m_sym_ctx.function)
     {
         UnwindLogMsg ("with pc value of 0x%" PRIx64 ", function name is '%s'",
-                      pc, m_sym_ctx.symbol == NULL ? "" : m_sym_ctx.function->GetName().AsCString());
+                      pc, GetSymbolOrFunctionName(m_sym_ctx).AsCString(""));
     }
     else
     {
@@ -500,7 +533,7 @@ RegisterContextLLDB::InitializeNonZerothFrame()
     if (decr_pc_and_recompute_addr_range)
     {
         UnwindLogMsg ("Backing up the pc value of 0x%" PRIx64 " by 1 and re-doing symbol lookup; old symbol was %s",
-                      pc, m_sym_ctx.symbol == NULL ? "" : m_sym_ctx.symbol->GetName().AsCString());
+                      pc, GetSymbolOrFunctionName(m_sym_ctx).AsCString(""));
         Address temporary_pc;
         temporary_pc.SetLoadAddress (pc - 1, &process->GetTarget());
         m_sym_ctx.Clear (false);
@@ -514,7 +547,7 @@ RegisterContextLLDB::InitializeNonZerothFrame()
             if (m_sym_ctx.GetAddressRange (resolve_scope, 0, false,  addr_range))
                 m_sym_ctx_valid = true;
         }
-        UnwindLogMsg ("Symbol is now %s", m_sym_ctx.symbol == NULL ? "" : m_sym_ctx.symbol->GetName().AsCString());
+        UnwindLogMsg ("Symbol is now %s", GetSymbolOrFunctionName(m_sym_ctx).AsCString(""));
     }
 
     // If we were able to find a symbol/function, set addr_range_ptr to the bounds of that symbol/function.
@@ -599,7 +632,7 @@ RegisterContextLLDB::InitializeNonZerothFrame()
 
     if (!ReadCFAValueForRow (row_register_kind, active_row, m_cfa))
     {
-        UnwindLogMsg ("failed to get cfa reg %d/%d", row_register_kind, active_row->GetCFARegister());
+        UnwindLogMsg ("failed to get cfa");
         m_frame_type = eNotAValidFrame;
         return;
     }
@@ -625,27 +658,29 @@ bool
 RegisterContextLLDB::CheckIfLoopingStack ()
 {
     // If we have a bad stack setup, we can get the same CFA value multiple times -- or even
-    // more devious, we can actually oscillate between two CFA values.  Detect that here and
+    // more devious, we can actually oscillate between two CFA values. Detect that here and
     // break out to avoid a possible infinite loop in lldb trying to unwind the stack.
-    addr_t next_frame_cfa;
-    addr_t next_next_frame_cfa = LLDB_INVALID_ADDRESS;
-    if (GetNextFrame().get() && GetNextFrame()->GetCFA(next_frame_cfa))
+    // To detect when we have the same CFA value multiple times, we compare the CFA of the current
+    // frame with the 2nd next frame because in some specail case (e.g. signal hanlders, hand
+    // written assembly without ABI compiance) we can have 2 frames with the same CFA (in theory we
+    // can have arbitrary number of frames with the same CFA, but more then 2 is very very unlikely)
+
+    RegisterContextLLDB::SharedPtr next_frame = GetNextFrame();
+    if (next_frame)
     {
-        if (next_frame_cfa == m_cfa)
+        RegisterContextLLDB::SharedPtr next_next_frame = next_frame->GetNextFrame();
+        addr_t next_next_frame_cfa = LLDB_INVALID_ADDRESS;
+        if (next_next_frame && next_next_frame->GetCFA(next_next_frame_cfa))
         {
-            // We have a loop in the stack unwind
-            return true;
-        }
-        if (GetNextFrame()->GetNextFrame().get() && GetNextFrame()->GetNextFrame()->GetCFA(next_next_frame_cfa)
-            && next_next_frame_cfa == m_cfa)
-        {
-            // We have a loop in the stack unwind
-            return true; 
+            if (next_next_frame_cfa == m_cfa)
+            {
+                // We have a loop in the stack unwind
+                return true; 
+            }
         }
     }
     return false;
 }
-
 
 bool
 RegisterContextLLDB::IsFrameZero () const
@@ -683,7 +718,7 @@ RegisterContextLLDB::GetFastUnwindPlanForFrame ()
     if (m_frame_type == eTrapHandlerFrame || m_frame_type == eDebuggerFrame)
         return unwind_plan_sp;
 
-    unwind_plan_sp = func_unwinders_sp->GetUnwindPlanFastUnwind (m_thread);
+    unwind_plan_sp = func_unwinders_sp->GetUnwindPlanFastUnwind (*m_thread.CalculateTarget(), m_thread);
     if (unwind_plan_sp)
     {
         if (unwind_plan_sp->PlanValidAtAddress (m_current_pc))
@@ -783,24 +818,38 @@ RegisterContextLLDB::GetFullUnwindPlanForFrame ()
         func_unwinders_sp = pc_module_sp->GetObjectFile()->GetUnwindTable().GetFuncUnwindersContainingAddress (m_current_pc, m_sym_ctx);
     }
 
-    // No FuncUnwinders available for this pc (i.e. a stripped function symbol and -fomit-frame-pointer).
-    // Try using the eh_frame information relative to the current PC,
-    // and finally fall back on the architectural default unwind.
+    // No FuncUnwinders available for this pc (stripped function symbols, lldb could not augment its
+    // function table with another source, like LC_FUNCTION_STARTS or eh_frame in ObjectFileMachO).
+    // See if eh_frame or the .ARM.exidx tables have unwind information for this address, else fall
+    // back to the architectural default unwind.
     if (!func_unwinders_sp)
     {
-        DWARFCallFrameInfo *eh_frame = pc_module_sp && pc_module_sp->GetObjectFile() ? 
-            pc_module_sp->GetObjectFile()->GetUnwindTable().GetEHFrameInfo() : nullptr;
-
         m_frame_type = eNormalFrame;
-        if (eh_frame && m_current_pc.IsValid())
+
+        if (!pc_module_sp || !pc_module_sp->GetObjectFile() || !m_current_pc.IsValid())
+            return arch_default_unwind_plan_sp;
+
+        // Even with -fomit-frame-pointer, we can try eh_frame to get back on track.
+        DWARFCallFrameInfo *eh_frame = pc_module_sp->GetObjectFile()->GetUnwindTable().GetEHFrameInfo();
+        if (eh_frame)
         {
             unwind_plan_sp.reset (new UnwindPlan (lldb::eRegisterKindGeneric));
-            // Even with -fomit-frame-pointer, we can try eh_frame to get back on track.
             if (eh_frame->GetUnwindPlan (m_current_pc, *unwind_plan_sp))
                 return unwind_plan_sp;
             else
                 unwind_plan_sp.reset();
         }
+
+        ArmUnwindInfo *arm_exidx = pc_module_sp->GetObjectFile()->GetUnwindTable().GetArmUnwindInfo();
+        if (arm_exidx)
+        {
+            unwind_plan_sp.reset (new UnwindPlan (lldb::eRegisterKindGeneric));
+            if (arm_exidx->GetUnwindPlan (exe_ctx.GetTargetRef(), m_current_pc, *unwind_plan_sp))
+                return unwind_plan_sp;
+            else
+                unwind_plan_sp.reset();
+        }
+
         return arch_default_unwind_plan_sp;
     }
 
@@ -811,7 +860,7 @@ RegisterContextLLDB::GetFullUnwindPlanForFrame ()
     if (m_frame_type == eTrapHandlerFrame && process)
     {
         m_fast_unwind_plan_sp.reset();
-        unwind_plan_sp = func_unwinders_sp->GetUnwindPlanAtCallSite (process->GetTarget(), m_current_offset_backed_up_one);
+        unwind_plan_sp = func_unwinders_sp->GetEHFrameUnwindPlan (process->GetTarget(), m_current_offset_backed_up_one);
         if (unwind_plan_sp && unwind_plan_sp->PlanValidAtAddress (m_current_pc) && unwind_plan_sp->GetSourcedFromCompiler() == eLazyBoolYes)
         {
             return unwind_plan_sp;
@@ -826,7 +875,10 @@ RegisterContextLLDB::GetFullUnwindPlanForFrame ()
     // But there is not.
     if (process && process->GetDynamicLoader() && process->GetDynamicLoader()->AlwaysRelyOnEHUnwindInfo (m_sym_ctx))
     {
-        unwind_plan_sp = func_unwinders_sp->GetUnwindPlanAtCallSite (process->GetTarget(), m_current_offset_backed_up_one);
+        // We must specifically call the GetEHFrameUnwindPlan() method here -- normally we would
+        // call GetUnwindPlanAtCallSite() -- because CallSite may return an unwind plan sourced from
+        // either eh_frame (that's what we intend) or compact unwind (this won't work)
+        unwind_plan_sp = func_unwinders_sp->GetEHFrameUnwindPlan (process->GetTarget(), m_current_offset_backed_up_one);
         if (unwind_plan_sp && unwind_plan_sp->PlanValidAtAddress (m_current_pc))
         {
             UnwindLogMsgVerbose ("frame uses %s for full UnwindPlan because the DynamicLoader suggested we prefer it",
@@ -843,12 +895,26 @@ RegisterContextLLDB::GetFullUnwindPlanForFrame ()
         {
             if (unwind_plan_sp->GetSourcedFromCompiler() == eLazyBoolNo)
             {
-                // We probably have an UnwindPlan created by inspecting assembly instructions, and we probably
-                // don't have any eh_frame instructions available.
-                // The assembly profilers work really well with compiler-generated functions but hand-written
-                // assembly can be problematic.  We'll set the architecture default UnwindPlan as our fallback
-                // UnwindPlan in case this doesn't work out when we try to unwind.
-                m_fallback_unwind_plan_sp = arch_default_unwind_plan_sp;
+                // We probably have an UnwindPlan created by inspecting assembly instructions. The
+                // assembly profilers work really well with compiler-generated functions but hand-
+                // written assembly can be problematic. We set the eh_frame based unwind plan as our
+                // fallback unwind plan if instruction emulation doesn't work out even for non call
+                // sites if it is available and use the architecture default unwind plan if it is
+                // not available. The eh_frame unwind plan is more reliable even on non call sites
+                // then the architecture default plan and for hand written assembly code it is often
+                // written in a way that it valid at all location what helps in the most common
+                // cases when the instruction emulation fails.
+                UnwindPlanSP call_site_unwind_plan = func_unwinders_sp->GetUnwindPlanAtCallSite(process->GetTarget(), m_current_offset_backed_up_one);
+                if (call_site_unwind_plan &&
+                    call_site_unwind_plan.get() != unwind_plan_sp.get() &&
+                    call_site_unwind_plan->GetSourceName() != unwind_plan_sp->GetSourceName())
+                {
+                    m_fallback_unwind_plan_sp = call_site_unwind_plan;
+                }
+                else
+                {
+                    m_fallback_unwind_plan_sp = arch_default_unwind_plan_sp;
+                }
             }
             UnwindLogMsgVerbose ("frame uses %s for full UnwindPlan", unwind_plan_sp->GetSourceName().GetCString());
             return unwind_plan_sp;
@@ -875,12 +941,25 @@ RegisterContextLLDB::GetFullUnwindPlanForFrame ()
     }
     if (unwind_plan_sp && unwind_plan_sp->GetSourcedFromCompiler() == eLazyBoolNo)
     {
-        // We probably have an UnwindPlan created by inspecting assembly instructions, and we probably
-        // don't have any eh_frame instructions available.
-        // The assembly profilers work really well with compiler-generated functions but hand-written
-        // assembly can be problematic.  We'll set the architecture default UnwindPlan as our fallback
-        // UnwindPlan in case this doesn't work out when we try to unwind.
-        m_fallback_unwind_plan_sp = arch_default_unwind_plan_sp;
+        // We probably have an UnwindPlan created by inspecting assembly instructions. The assembly
+        // profilers work really well with compiler-generated functions but hand- written assembly
+        // can be problematic. We set the eh_frame based unwind plan as our fallback unwind plan if
+        // instruction emulation doesn't work out even for non call sites if it is available and use
+        // the architecture default unwind plan if it is not available. The eh_frame unwind plan is
+        // more reliable even on non call sites then the architecture default plan and for hand
+        // written assembly code it is often written in a way that it valid at all location what
+        // helps in the most common cases when the instruction emulation fails.
+        UnwindPlanSP call_site_unwind_plan = func_unwinders_sp->GetUnwindPlanAtCallSite(process->GetTarget(), m_current_offset_backed_up_one);
+        if (call_site_unwind_plan &&
+            call_site_unwind_plan.get() != unwind_plan_sp.get() &&
+            call_site_unwind_plan->GetSourceName() != unwind_plan_sp->GetSourceName())
+        {
+            m_fallback_unwind_plan_sp = call_site_unwind_plan;
+        }
+        else
+        {
+            m_fallback_unwind_plan_sp = arch_default_unwind_plan_sp;
+        }
     }
 
     if (IsUnwindPlanValidForCurrentPC(unwind_plan_sp, valid_offset))
@@ -1391,16 +1470,13 @@ RegisterContextLLDB::SavedLocationForRegister (uint32_t lldb_regnum, lldb_privat
 
     if (unwindplan_regloc.IsSame())
     {
-        if (IsFrameZero ())
-        {
-            UnwindLogMsg ("could not supply caller's %s (%d) location, IsSame", 
-                          regnum.GetName(), regnum.GetAsKind (eRegisterKindLLDB));
-            return UnwindLLDB::RegisterSearchResult::eRegisterNotFound;
-        }
-        else
-        {
-            return UnwindLLDB::RegisterSearchResult::eRegisterNotFound;
-        }
+        regloc.type = UnwindLLDB::RegisterLocation::eRegisterInRegister;
+        regloc.location.register_number = regnum.GetAsKind (eRegisterKindLLDB);
+        m_registers[regnum.GetAsKind (eRegisterKindLLDB)] = regloc;
+        UnwindLogMsg ("supplying caller's register %s (%d), saved in register %s (%d)", 
+                      regnum.GetName(), regnum.GetAsKind (eRegisterKindLLDB), 
+                      regnum.GetName(), regnum.GetAsKind (eRegisterKindLLDB));
+        return UnwindLLDB::RegisterSearchResult::eRegisterFound;
     }
 
     if (unwindplan_regloc.IsCFAPlusOffset())
@@ -1452,7 +1528,11 @@ RegisterContextLLDB::SavedLocationForRegister (uint32_t lldb_regnum, lldb_privat
                                  unwindplan_regloc.GetDWARFExpressionLength(),
                                  process->GetByteOrder(), process->GetAddressByteSize());
         ModuleSP opcode_ctx;
-        DWARFExpression dwarfexpr (opcode_ctx, dwarfdata, 0, unwindplan_regloc.GetDWARFExpressionLength());
+        DWARFExpression dwarfexpr (opcode_ctx,
+                                   dwarfdata,
+                                   nullptr,
+                                   0,
+                                   unwindplan_regloc.GetDWARFExpressionLength());
         dwarfexpr.SetRegisterKind (unwindplan_registerkind);
         Value result;
         Error error;
@@ -1574,7 +1654,7 @@ RegisterContextLLDB::TryFallbackUnwindPlan ()
 
     UnwindPlan::RowSP active_row = m_fallback_unwind_plan_sp->GetRowForFunctionOffset (m_current_offset);
     
-    if (active_row && active_row->GetCFARegister() != LLDB_INVALID_REGNUM)
+    if (active_row && active_row->GetCFAValue().GetValueType() != UnwindPlan::Row::CFAValue::unspecified)
     {
         addr_t new_cfa;
         if (!ReadCFAValueForRow (m_fallback_unwind_plan_sp->GetRegisterKind(), active_row, new_cfa)
@@ -1651,7 +1731,7 @@ RegisterContextLLDB::ForceSwitchToFallbackUnwindPlan ()
 
     UnwindPlan::RowSP active_row = m_fallback_unwind_plan_sp->GetRowForFunctionOffset (m_current_offset);
     
-    if (active_row && active_row->GetCFARegister() != LLDB_INVALID_REGNUM)
+    if (active_row && active_row->GetCFAValue().GetValueType() != UnwindPlan::Row::CFAValue::unspecified)
     {
         addr_t new_cfa;
         if (!ReadCFAValueForRow (m_fallback_unwind_plan_sp->GetRegisterKind(), active_row, new_cfa)
@@ -1680,57 +1760,94 @@ RegisterContextLLDB::ReadCFAValueForRow (lldb::RegisterKind row_register_kind,
                                          const UnwindPlan::RowSP &row,
                                          addr_t &cfa_value)
 {
-    RegisterNumber cfa_reg (m_thread, row_register_kind, row->GetCFARegister());
     RegisterValue reg_value;
 
     cfa_value = LLDB_INVALID_ADDRESS;
     addr_t cfa_reg_contents;
 
-    if (ReadGPRValue (cfa_reg, cfa_reg_contents))
+    switch (row->GetCFAValue().GetValueType())
     {
-        if (row->GetCFAType() == UnwindPlan::Row::CFAIsRegisterDereferenced)
+    case UnwindPlan::Row::CFAValue::isRegisterDereferenced:
         {
-            const RegisterInfo *reg_info = GetRegisterInfoAtIndex (cfa_reg.GetAsKind (eRegisterKindLLDB));
-            RegisterValue reg_value;
-            if (reg_info)
+            RegisterNumber cfa_reg (m_thread, row_register_kind, row->GetCFAValue().GetRegisterNumber());
+            if (ReadGPRValue (cfa_reg, cfa_reg_contents))
             {
-                Error error = ReadRegisterValueFromMemory(reg_info,
-                                                          cfa_reg_contents,
-                                                          reg_info->byte_size,
-                                                          reg_value);
-                if (error.Success ())
+                const RegisterInfo *reg_info = GetRegisterInfoAtIndex (cfa_reg.GetAsKind (eRegisterKindLLDB));
+                RegisterValue reg_value;
+                if (reg_info)
                 {
-                    cfa_value = reg_value.GetAsUInt64();
-                    UnwindLogMsg ("CFA value via dereferencing reg %s (%d): reg has val 0x%" PRIx64 ", CFA value is 0x%" PRIx64,
-                                  cfa_reg.GetName(), cfa_reg.GetAsKind (eRegisterKindLLDB),
-                                  cfa_reg_contents, cfa_value);
-                    return true;
+                    Error error = ReadRegisterValueFromMemory(reg_info,
+                                                              cfa_reg_contents,
+                                                              reg_info->byte_size,
+                                                              reg_value);
+                    if (error.Success ())
+                    {
+                        cfa_value = reg_value.GetAsUInt64();
+                        UnwindLogMsg ("CFA value via dereferencing reg %s (%d): reg has val 0x%" PRIx64 ", CFA value is 0x%" PRIx64,
+                                      cfa_reg.GetName(), cfa_reg.GetAsKind (eRegisterKindLLDB),
+                                      cfa_reg_contents, cfa_value);
+                        return true;
+                    }
+                    else
+                    {
+                        UnwindLogMsg ("Tried to deref reg %s (%d) [0x%" PRIx64 "] but memory read failed.",
+                                      cfa_reg.GetName(), cfa_reg.GetAsKind (eRegisterKindLLDB),
+                                      cfa_reg_contents);
+                    }
                 }
-                else
+            }
+            break;
+        }
+    case UnwindPlan::Row::CFAValue::isRegisterPlusOffset:
+        {
+            RegisterNumber cfa_reg (m_thread, row_register_kind, row->GetCFAValue().GetRegisterNumber());
+            if (ReadGPRValue (cfa_reg, cfa_reg_contents))
+            {
+                if (cfa_reg_contents == LLDB_INVALID_ADDRESS || cfa_reg_contents == 0 || cfa_reg_contents == 1)
                 {
-                    UnwindLogMsg ("Tried to deref reg %s (%d) [0x%" PRIx64 "] but memory read failed.",
+                    UnwindLogMsg ("Got an invalid CFA register value - reg %s (%d), value 0x%" PRIx64,
                                   cfa_reg.GetName(), cfa_reg.GetAsKind (eRegisterKindLLDB),
                                   cfa_reg_contents);
+                    cfa_reg_contents = LLDB_INVALID_ADDRESS;
+                    return false;
                 }
-            }
-        }
-        else
-        {
-            if (cfa_reg_contents == LLDB_INVALID_ADDRESS || cfa_reg_contents == 0 || cfa_reg_contents == 1)
-            {
-                UnwindLogMsg ("Got an invalid CFA register value - reg %s (%d), value 0x%" PRIx64,
+                cfa_value = cfa_reg_contents + row->GetCFAValue().GetOffset();
+                UnwindLogMsg ("CFA is 0x%" PRIx64 ": Register %s (%d) contents are 0x%" PRIx64 ", offset is %d",
+                              cfa_value,
                               cfa_reg.GetName(), cfa_reg.GetAsKind (eRegisterKindLLDB),
-                              cfa_reg_contents);
-                cfa_reg_contents = LLDB_INVALID_ADDRESS;
-                return false;
+                              cfa_reg_contents, row->GetCFAValue().GetOffset());
+                return true;
             }
-            cfa_value = cfa_reg_contents + row->GetCFAOffset ();
-            UnwindLogMsg ("CFA is 0x%" PRIx64 ": Register %s (%d) contents are 0x%" PRIx64 ", offset is %d",
-                          cfa_value, 
-                          cfa_reg.GetName(), cfa_reg.GetAsKind (eRegisterKindLLDB), 
-                          cfa_reg_contents, row->GetCFAOffset ());
-            return true;
+            break;
         }
+    case UnwindPlan::Row::CFAValue::isDWARFExpression:
+        {
+            ExecutionContext exe_ctx(m_thread.shared_from_this());
+            Process *process = exe_ctx.GetProcessPtr();
+            DataExtractor dwarfdata (row->GetCFAValue().GetDWARFExpressionBytes(),
+                                     row->GetCFAValue().GetDWARFExpressionLength(),
+                                     process->GetByteOrder(), process->GetAddressByteSize());
+            ModuleSP opcode_ctx;
+            DWARFExpression dwarfexpr (opcode_ctx,
+                                       dwarfdata,
+                                       nullptr,
+                                       0,
+                                       row->GetCFAValue().GetDWARFExpressionLength());
+            dwarfexpr.SetRegisterKind (row_register_kind);
+            Value result;
+            Error error;
+            if (dwarfexpr.Evaluate (&exe_ctx, NULL, NULL, this, 0, NULL, result, &error))
+            {
+                cfa_value = result.GetScalar().ULongLong();
+
+                UnwindLogMsg ("CFA value set by DWARF expression is 0x%" PRIx64, cfa_value);
+                return true;
+            }
+            UnwindLogMsg ("Failed to set CFA value via DWARF expression: %s", error.AsCString());
+            break;
+        }
+    default:
+        return false;
     }
     return false;
 }

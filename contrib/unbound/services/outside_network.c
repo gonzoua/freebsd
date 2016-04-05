@@ -57,7 +57,7 @@
 #include "util/net_help.h"
 #include "util/random.h"
 #include "util/fptr_wlist.h"
-#include "ldns/sbuffer.h"
+#include "sldns/sbuffer.h"
 #include "dnstap/dnstap.h"
 #ifdef HAVE_OPENSSL_SSL_H
 #include <openssl/ssl.h>
@@ -222,6 +222,21 @@ outnet_tcp_take_into_use(struct waiting_tcp* w, uint8_t* pkt, size_t pkt_len)
 #endif
 		return 0;
 	}
+
+	if (w->outnet->tcp_mss > 0) {
+#if defined(IPPROTO_TCP) && defined(TCP_MAXSEG)
+		if(setsockopt(s, IPPROTO_TCP, TCP_MAXSEG,
+			(void*)&w->outnet->tcp_mss,
+			(socklen_t)sizeof(w->outnet->tcp_mss)) < 0) {
+			verbose(VERB_ALGO, "outgoing tcp:"
+				" setsockopt(.. SO_REUSEADDR ..) failed");
+		}
+#else
+		verbose(VERB_ALGO, "outgoing tcp:"
+			" setsockopt(TCP_MAXSEG) unsupported");
+#endif /* defined(IPPROTO_TCP) && defined(TCP_MAXSEG) */
+	}
+
 	if(!pick_outgoing_tcp(w, s))
 		return 0;
 
@@ -590,7 +605,7 @@ outside_network_create(struct comm_base *base, size_t bufsize,
 	size_t num_ports, char** ifs, int num_ifs, int do_ip4, 
 	int do_ip6, size_t num_tcp, struct infra_cache* infra,
 	struct ub_randstate* rnd, int use_caps_for_id, int* availports, 
-	int numavailports, size_t unwanted_threshold,
+	int numavailports, size_t unwanted_threshold, int tcp_mss,
 	void (*unwanted_action)(void*), void* unwanted_param, int do_udp,
 	void* sslctx, int delayclose, struct dt_env* dtenv)
 {
@@ -620,6 +635,7 @@ outside_network_create(struct comm_base *base, size_t bufsize,
 	outnet->unwanted_param = unwanted_param;
 	outnet->use_caps_for_id = use_caps_for_id;
 	outnet->do_udp = do_udp;
+	outnet->tcp_mss = tcp_mss;
 #ifndef S_SPLINT_S
 	if(delayclose) {
 		outnet->delayclose = 1;
@@ -893,13 +909,13 @@ udp_sockport(struct sockaddr_storage* addr, socklen_t addrlen, int port,
 		sa->sin6_port = (in_port_t)htons((uint16_t)port);
 		fd = create_udp_sock(AF_INET6, SOCK_DGRAM, 
 			(struct sockaddr*)addr, addrlen, 1, inuse, &noproto,
-			0, 0, 0, NULL);
+			0, 0, 0, NULL, 0);
 	} else {
 		struct sockaddr_in* sa = (struct sockaddr_in*)addr;
 		sa->sin_port = (in_port_t)htons((uint16_t)port);
 		fd = create_udp_sock(AF_INET, SOCK_DGRAM, 
 			(struct sockaddr*)addr, addrlen, 1, inuse, &noproto,
-			0, 0, 0, NULL);
+			0, 0, 0, NULL, 0);
 	}
 	return fd;
 }
@@ -1510,7 +1526,8 @@ serviced_callbacks(struct serviced_query* sq, int error, struct comm_point* c,
 	log_assert(rem); /* should have been present */
 	sq->to_be_deleted = 1; 
 	verbose(VERB_ALGO, "svcd callbacks start");
-	if(sq->outnet->use_caps_for_id && error == NETEVENT_NOERROR && c) {
+	if(sq->outnet->use_caps_for_id && error == NETEVENT_NOERROR && c &&
+		!sq->nocaps) {
 		/* noerror and nxdomain must have a qname in reply */
 		if(sldns_buffer_read_u16_at(c->buffer, 4) == 0 &&
 			(LDNS_RCODE_WIRE(sldns_buffer_begin(c->buffer))
@@ -1590,7 +1607,7 @@ serviced_tcp_callback(struct comm_point* c, void* arg, int error,
 		infra_update_tcp_works(sq->outnet->infra, &sq->addr,
 			sq->addrlen, sq->zone, sq->zonelen);
 #ifdef USE_DNSTAP
-	if(sq->outnet->dtenv &&
+	if(error==NETEVENT_NOERROR && sq->outnet->dtenv &&
 	   (sq->outnet->dtenv->log_resolver_response_messages ||
 	    sq->outnet->dtenv->log_forwarder_response_messages))
 		dt_msg_send_outside_response(sq->outnet->dtenv, &sq->addr,

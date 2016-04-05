@@ -59,10 +59,10 @@ static const char sccsid[] = "@(#)netstat.c	8.1 (Berkeley) 6/6/93";
 #include <netinet/tcp.h>
 #include <netinet/tcpip.h>
 #include <netinet/tcp_seq.h>
-#include <netinet/tcp_var.h>
 #define TCPSTATES
 #include <netinet/tcp_fsm.h>
 #include <netinet/tcp_timer.h>
+#include <netinet/tcp_var.h>
 #include <netinet/tcp_debug.h>
 #include <netinet/udp.h>
 #include <netinet/udp_var.h>
@@ -85,7 +85,7 @@ static char *inetname(struct sockaddr *);
 static void inetprint(struct sockaddr *, const char *);
 
 #define	streq(a,b)	(strcmp(a,b)==0)
-#define	YMAX(w)		((w)->_maxy-1)
+#define	YMAX(w)		(getmaxy(w)-2)
 
 WINDOW *
 opennetstat(void)

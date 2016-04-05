@@ -29,11 +29,9 @@ __FBSDID("$FreeBSD$");
 
 #include <sys/disk.h>
 #include <sys/types.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 #include <geom/eli/g_eli.h>
 
@@ -61,7 +59,7 @@ fstyp_geli(FILE *fp, char *label __unused, size_t labelsize __unused)
 	if (error)
 		goto gelierr;
 
-	if (strncmp(md.md_magic, "GEOM::ELI", 9) == 0) {
+	if (strcmp(md.md_magic, G_ELI_MAGIC) == 0) {
 		free(buf);
 		return (0);
 	}

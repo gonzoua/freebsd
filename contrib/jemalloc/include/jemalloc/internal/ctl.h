@@ -34,8 +34,13 @@ struct ctl_arena_stats_s {
 	bool			initialized;
 	unsigned		nthreads;
 	const char		*dss;
+	ssize_t			lg_dirty_mult;
+	ssize_t			decay_time;
 	size_t			pactive;
 	size_t			pdirty;
+
+	/* The remainder are only populated if config_stats is true. */
+
 	arena_stats_t		astats;
 
 	/* Aggregate stats for small size classes, based on bin stats. */
@@ -46,22 +51,15 @@ struct ctl_arena_stats_s {
 
 	malloc_bin_stats_t	bstats[NBINS];
 	malloc_large_stats_t	*lstats;	/* nlclasses elements. */
+	malloc_huge_stats_t	*hstats;	/* nhclasses elements. */
 };
 
 struct ctl_stats_s {
 	size_t			allocated;
 	size_t			active;
+	size_t			metadata;
+	size_t			resident;
 	size_t			mapped;
-	struct {
-		size_t		current;	/* stats_chunks.curchunks */
-		uint64_t	total;		/* stats_chunks.nchunks */
-		size_t		high;		/* stats_chunks.highchunks */
-	} chunks;
-	struct {
-		size_t		allocated;	/* huge_allocated */
-		uint64_t	nmalloc;	/* huge_nmalloc */
-		uint64_t	ndalloc;	/* huge_ndalloc */
-	} huge;
 	unsigned		narenas;
 	ctl_arena_stats_t	*arenas;	/* (narenas + 1) elements. */
 };

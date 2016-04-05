@@ -19,10 +19,8 @@ class ValueLocker;
 
 namespace lldb {
 
-class SBValue
+class LLDB_API SBValue
 {
-friend class ValueLocker;
-
 public:
     SBValue ();
 
@@ -84,6 +82,7 @@ public:
     ValueType
     GetValueType ();
 
+    // If you call this on a newly created ValueObject, it will always return false.
     bool
     GetValueDidChange ();
 
@@ -140,10 +139,8 @@ public:
     lldb::SBTypeFormat
     GetTypeFormat ();
     
-#ifndef LLDB_DISABLE_PYTHON
     lldb::SBTypeSummary
     GetTypeSummary ();
-#endif
 
     lldb::SBTypeFilter
     GetTypeFilter ();
@@ -207,7 +204,11 @@ public:
     /// pointer to a 'Point' type, then the child at index zero will be
     /// the 'x' member, and the child at index 1 will be the 'y' member
     /// (the child at index zero won't be a 'Point' instance).
-    /// 
+    ///
+    /// If you actually need an SBValue that represents the type pointed
+    /// to by a SBValue for which GetType().IsPointeeType() returns true,
+    /// regardless of the pointee type, you can do that with SBValue::Dereference.
+    ///
     /// Arrays have a preset number of children that can be accessed by
     /// index and will returns invalid child values for indexes that are
     /// out of bounds unless the \a synthetic_allowed is \b true. In this
@@ -223,7 +224,7 @@ public:
     ///     and also if the target can be run to figure out the dynamic
     ///     type of the child value.
     ///
-    /// @param[in] synthetic_allowed
+    /// @param[in] can_create_synthetic
     ///     If \b true, then allow child values to be created by index
     ///     for pointers and arrays for indexes that normally wouldn't
     ///     be allowed.
@@ -326,9 +327,15 @@ public:
     //------------------------------------------------------------------
     bool
     MightHaveChildren ();
+    
+    bool
+    IsRuntimeSupportValue ();
 
     uint32_t
     GetNumChildren ();
+
+    uint32_t
+    GetNumChildren (uint32_t max);
 
     void *
     GetOpaqueType();
@@ -348,6 +355,7 @@ public:
     lldb::SBValue
     Dereference ();
 
+    // Deprecated - please use GetType().IsPointerType() instead.
     bool
     TypeIsPointerType ();
     
@@ -386,7 +394,7 @@ public:
     /// @param[in] write
     ///     Stop when this value is modified
     ///
-    /// @param[out]
+    /// @param[out] error
     ///     An error object. Contains the reason if there is some failure.
     ///
     /// @return
@@ -419,7 +427,7 @@ public:
     /// @param[in] write
     ///     Stop when this value is modified
     ///
-    /// @param[out]
+    /// @param[out] error
     ///     An error object. Contains the reason if there is some failure.
     ///
     /// @return

@@ -13,6 +13,7 @@
 // C Includes
 
 // C++ Includes
+#include <functional>
 #include <string>
 #include <unordered_map>
 
@@ -115,6 +116,22 @@ namespace lldb_private {
                 return *this;
             }
             
+            bool
+            GetNonCacheable () const
+            {
+                return (m_flags & lldb::eTypeOptionNonCacheable) == lldb::eTypeOptionNonCacheable;
+            }
+            
+            Flags&
+            SetNonCacheable (bool value = true)
+            {
+                if (value)
+                    m_flags |= lldb::eTypeOptionNonCacheable;
+                else
+                    m_flags &= ~lldb::eTypeOptionNonCacheable;
+                return *this;
+            }
+            
             uint32_t
             GetValue ()
             {
@@ -134,7 +151,6 @@ namespace lldb_private {
         TypeFormatImpl (const Flags& flags = Flags());
         
         typedef std::shared_ptr<TypeFormatImpl> SharedPointer;
-        typedef bool(*ValueCallback)(void*, ConstString, const lldb::TypeFormatImplSP&);
         
         virtual ~TypeFormatImpl ();
         
@@ -143,15 +159,23 @@ namespace lldb_private {
         {
             return m_flags.GetCascades();
         }
+
         bool
         SkipsPointers () const
         {
             return m_flags.GetSkipPointers();
         }
+
         bool
         SkipsReferences () const
         {
             return m_flags.GetSkipReferences();
+        }
+
+        bool
+        NonCacheable () const
+        {
+            return m_flags.GetNonCacheable();
         }
         
         void
@@ -170,6 +194,12 @@ namespace lldb_private {
         SetSkipsReferences (bool value)
         {
             m_flags.SetSkipReferences(value);
+        }
+        
+        void
+        SetNonCacheable (bool value)
+        {
+            m_flags.SetNonCacheable(value);
         }
 
         uint32_t
@@ -228,9 +258,8 @@ namespace lldb_private {
                                const TypeFormatImpl::Flags& flags = Flags());
         
         typedef std::shared_ptr<TypeFormatImpl_Format> SharedPointer;
-        typedef bool(*ValueCallback)(void*, ConstString, const TypeFormatImpl_Format::SharedPointer&);
         
-        virtual ~TypeFormatImpl_Format ();
+        ~TypeFormatImpl_Format() override;
         
         lldb::Format
         GetFormat () const
@@ -244,18 +273,18 @@ namespace lldb_private {
             m_format = fmt;
         }
         
-        virtual TypeFormatImpl::Type
-        GetType ()
+        TypeFormatImpl::Type
+        GetType() override
         {
             return TypeFormatImpl::Type::eTypeFormat;
         }
         
-        virtual bool
-        FormatObject (ValueObject *valobj,
-                      std::string& dest) const;
+        bool
+        FormatObject(ValueObject *valobj,
+		     std::string& dest) const override;
         
-        virtual std::string
-        GetDescription();
+        std::string
+        GetDescription() override;
         
     protected:
         lldb::Format m_format;
@@ -271,9 +300,8 @@ namespace lldb_private {
                                  const TypeFormatImpl::Flags& flags = Flags());
         
         typedef std::shared_ptr<TypeFormatImpl_EnumType> SharedPointer;
-        typedef bool(*ValueCallback)(void*, ConstString, const TypeFormatImpl_EnumType::SharedPointer&);
         
-        ~TypeFormatImpl_EnumType ();
+        ~TypeFormatImpl_EnumType() override;
         
         ConstString
         GetTypeName ()
@@ -287,26 +315,26 @@ namespace lldb_private {
             m_enum_type = enum_type;
         }
         
-        virtual TypeFormatImpl::Type
-        GetType ()
+        TypeFormatImpl::Type
+        GetType() override
         {
             return TypeFormatImpl::Type::eTypeEnum;
         }
         
-        virtual bool
-        FormatObject (ValueObject *valobj,
-                      std::string& dest) const;
+        bool
+        FormatObject(ValueObject *valobj,
+		     std::string& dest) const override;
         
-        virtual std::string
-        GetDescription();
+        std::string
+        GetDescription() override;
         
     protected:
         ConstString m_enum_type;
-        mutable std::unordered_map<void*,ClangASTType> m_types;
+        mutable std::unordered_map<void*,CompilerType> m_types;
         
     private:
         DISALLOW_COPY_AND_ASSIGN(TypeFormatImpl_EnumType);
     };
 } // namespace lldb_private
 
-#endif	// lldb_TypeFormat_h_
+#endif // lldb_TypeFormat_h_

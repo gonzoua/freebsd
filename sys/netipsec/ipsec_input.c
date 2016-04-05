@@ -43,7 +43,6 @@
 #include "opt_inet.h"
 #include "opt_inet6.h"
 #include "opt_ipsec.h"
-#include "opt_enc.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -53,11 +52,12 @@
 #include <sys/protosw.h>
 #include <sys/socket.h>
 #include <sys/errno.h>
+#include <sys/hhook.h>
 #include <sys/syslog.h>
 
 #include <net/if.h>
 #include <net/if_var.h>
-#include <net/pfil.h>
+#include <net/if_enc.h>
 #include <net/netisr.h>
 #include <net/vnet.h>
 
@@ -94,10 +94,6 @@
 #include <machine/in_cksum.h>
 #include <machine/stdarg.h>
 
-#ifdef DEV_ENC
-#include <net/if_enc.h>
-#endif
-
 
 #define	IPSEC_ISTAT(proto, name)	do {	\
 	if ((proto) == IPPROTO_ESP)		\
@@ -118,7 +114,7 @@ static void ipsec4_common_ctlinput(int, struct sockaddr *, void *, int);
  * and call the appropriate transform.  The transform callback
  * takes care of further processing (like ingress filtering).
  */
-static int
+int
 ipsec_common_input(struct mbuf *m, int skip, int protoff, int af, int sproto)
 {
 	char buf[INET6_ADDRSTRLEN];
@@ -243,24 +239,6 @@ ipsec_common_input(struct mbuf *m, int skip, int protoff, int af, int sproto)
 }
 
 #ifdef INET
-/*
- * Common input handler for IPv4 AH, ESP, and IPCOMP.
- */
-int
-ipsec4_common_input(struct mbuf *m, ...)
-{
-	va_list ap;
-	int off, nxt;
-
-	va_start(ap, m);
-	off = va_arg(ap, int);
-	nxt = va_arg(ap, int);
-	va_end(ap);
-
-	return ipsec_common_input(m, off, offsetof(struct ip, ip_p),
-				  AF_INET, nxt);
-}
-
 int
 ah4_input(struct mbuf **mp, int *offp, int proto)
 {
@@ -271,7 +249,8 @@ ah4_input(struct mbuf **mp, int *offp, int proto)
 	off = *offp;
 	*mp = NULL;
 
-	ipsec4_common_input(m, off, IPPROTO_AH);
+	ipsec_common_input(m, off, offsetof(struct ip, ip_p),
+				AF_INET, IPPROTO_AH);
 	return (IPPROTO_DONE);
 }
 void
@@ -292,7 +271,8 @@ esp4_input(struct mbuf **mp, int *offp, int proto)
 	off = *offp;
 	mp = NULL;
 
-	ipsec4_common_input(m, off, IPPROTO_ESP);
+	ipsec_common_input(m, off, offsetof(struct ip, ip_p),
+				AF_INET, IPPROTO_ESP);
 	return (IPPROTO_DONE);
 }
 
@@ -314,7 +294,8 @@ ipcomp4_input(struct mbuf **mp, int *offp, int proto)
 	off = *offp;
 	mp = NULL;
 
-	ipsec4_common_input(m, off, IPPROTO_IPCOMP);
+	ipsec_common_input(m, off, offsetof(struct ip, ip_p),
+				AF_INET, IPPROTO_IPCOMP);
 	return (IPPROTO_DONE);
 }
 
@@ -329,6 +310,7 @@ ipsec4_common_input_cb(struct mbuf *m, struct secasvar *sav, int skip,
     int protoff)
 {
 	char buf[INET6_ADDRSTRLEN];
+	struct ipsec_ctx_data ctx;
 	int prot, af, sproto, isr_prot;
 	struct ip *ip;
 	struct m_tag *mtag;
@@ -383,16 +365,10 @@ ipsec4_common_input_cb(struct mbuf *m, struct secasvar *sav, int skip,
 	}
 	prot = ip->ip_p;
 
-#ifdef DEV_ENC
-	if_inc_counter(encif, IFCOUNTER_IPACKETS, 1);
-	if_inc_counter(encif, IFCOUNTER_IBYTES, m->m_pkthdr.len);
-
-	/* Pass the mbuf to enc0 for bpf and pfil. */
-	ipsec_bpf(m, sav, AF_INET, ENC_IN|ENC_BEFORE);
-	if ((error = ipsec_filter(&m, PFIL_IN, ENC_IN|ENC_BEFORE)) != 0)
-		return (error);
+	IPSEC_INIT_CTX(&ctx, &m, sav, AF_INET, IPSEC_ENC_BEFORE);
+	if ((error = ipsec_run_hhooks(&ctx, HHOOK_TYPE_IPSEC_IN)) != 0)
+		goto bad;
 	ip = mtod(m, struct ip *);
-#endif /* DEV_ENC */
 
 	/* IP-in-IP encapsulation */
 	if (prot == IPPROTO_IPIP &&
@@ -516,32 +492,18 @@ ipsec4_common_input_cb(struct mbuf *m, struct secasvar *sav, int skip,
 	 */
 	if (saidx->mode == IPSEC_MODE_TRANSPORT)
 		prot = IPPROTO_IPIP;
-#ifdef DEV_ENC
-	/*
-	 * Pass the mbuf to enc0 for bpf and pfil.
-	 */
-	if (prot == IPPROTO_IPIP)
-		ipsec_bpf(m, sav, AF_INET, ENC_IN|ENC_AFTER);
-#ifdef INET6
-	if (prot == IPPROTO_IPV6)
-		ipsec_bpf(m, sav, AF_INET6, ENC_IN|ENC_AFTER);
-#endif
-
-	if ((error = ipsec_filter(&m, PFIL_IN, ENC_IN|ENC_AFTER)) != 0)
-		return (error);
-#endif /* DEV_ENC */
-
 	/*
 	 * Re-dispatch via software interrupt.
 	 */
-
 	switch (prot) {
 	case IPPROTO_IPIP:
 		isr_prot = NETISR_IP;
+		af = AF_INET;
 		break;
 #ifdef INET6
 	case IPPROTO_IPV6:
 		isr_prot = NETISR_IPV6;
+		af = AF_INET6;
 		break;
 #endif
 	default:
@@ -552,6 +514,9 @@ ipsec4_common_input_cb(struct mbuf *m, struct secasvar *sav, int skip,
 		goto bad;
 	}
 
+	IPSEC_INIT_CTX(&ctx, &m, sav, af, IPSEC_ENC_AFTER);
+	if ((error = ipsec_run_hhooks(&ctx, HHOOK_TYPE_IPSEC_IN)) != 0)
+		goto bad;
 	error = netisr_queue_src(isr_prot, (uintptr_t)sav->spi, m);
 	if (error) {
 		IPSEC_ISTAT(sproto, qfull);
@@ -626,6 +591,7 @@ ipsec6_common_input_cb(struct mbuf *m, struct secasvar *sav, int skip,
     int protoff)
 {
 	char buf[INET6_ADDRSTRLEN];
+	struct ipsec_ctx_data ctx;
 	int prot, af, sproto;
 	struct ip6_hdr *ip6;
 	struct m_tag *mtag;
@@ -673,19 +639,12 @@ ipsec6_common_input_cb(struct mbuf *m, struct secasvar *sav, int skip,
 	ip6 = mtod(m, struct ip6_hdr *);
 	ip6->ip6_plen = htons(m->m_pkthdr.len - sizeof(struct ip6_hdr));
 
+	IPSEC_INIT_CTX(&ctx, &m, sav, af, IPSEC_ENC_BEFORE);
+	if ((error = ipsec_run_hhooks(&ctx, HHOOK_TYPE_IPSEC_IN)) != 0)
+		goto bad;
 	/* Save protocol */
 	m_copydata(m, protoff, 1, &nxt8);
 	prot = nxt8;
-
-#ifdef DEV_ENC
-	if_inc_counter(encif, IFCOUNTER_IPACKETS, 1);
-	if_inc_counter(encif, IFCOUNTER_IBYTES, m->m_pkthdr.len);
-
-	/* Pass the mbuf to enc0 for bpf and pfil. */
-	ipsec_bpf(m, sav, AF_INET6, ENC_IN|ENC_BEFORE);
-	if ((error = ipsec_filter(&m, PFIL_IN, ENC_IN|ENC_BEFORE)) != 0)
-		return (error);
-#endif /* DEV_ENC */
 
 	/* IPv6-in-IP encapsulation */
 	if (prot == IPPROTO_IPV6 &&
@@ -793,20 +752,16 @@ ipsec6_common_input_cb(struct mbuf *m, struct secasvar *sav, int skip,
 
 	key_sa_recordxfer(sav, m);
 
-#ifdef DEV_ENC
-	/*
-	 * Pass the mbuf to enc0 for bpf and pfil.
-	 */
+
 #ifdef INET
 	if (prot == IPPROTO_IPIP)
-		ipsec_bpf(m, sav, AF_INET, ENC_IN|ENC_AFTER);
+		af = AF_INET;
+	else
 #endif
-	if (prot == IPPROTO_IPV6)
-		ipsec_bpf(m, sav, AF_INET6, ENC_IN|ENC_AFTER);
-
-	if ((error = ipsec_filter(&m, PFIL_IN, ENC_IN|ENC_AFTER)) != 0)
-		return (error);
-#endif /* DEV_ENC */
+		af = AF_INET6;
+	IPSEC_INIT_CTX(&ctx, &m, sav, af, IPSEC_ENC_AFTER);
+	if ((error = ipsec_run_hhooks(&ctx, HHOOK_TYPE_IPSEC_IN)) != 0)
+		goto bad;
 	if (skip == 0) {
 		/*
 		 * We stripped outer IPv6 header.

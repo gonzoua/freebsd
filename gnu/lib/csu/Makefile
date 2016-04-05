@@ -1,7 +1,5 @@
 # $FreeBSD$
 
-.MAIN: all
-
 .include <src.opts.mk>
 MK_SSP=		no
 
@@ -24,7 +22,6 @@ CFLAGS+=	-fno-inline-functions -fno-exceptions \
 CFLAGS+=	-I${GCCLIB}/include -I${GCCDIR}/config -I${GCCDIR} -I. \
 		-I${CCDIR}/cc_tools
 CRTS_CFLAGS=	-DCRTSTUFFS_O -DSHARED ${PICFLAG}
-MKDEP=		-DCRT_BEGIN
 
 .if ${TARGET_CPUARCH} == "arm"
 CFLAGS+=	-DTARGET_ARM_EABI
@@ -41,7 +38,14 @@ SRCS+=		crtfastmath.c
 BEGINSRC?=	crtstuff.c
 ENDSRC?=	crtstuff.c
 
-all: ${OBJS} ${SOBJS} ${TGTOBJS}
+FILES=		${OBJS} ${SOBJS} ${TGTOBJS}
+FILESMODE=	${LIBMODE}
+FILESOWN=	${LIBOWN}
+FILESGRP=	${LIBGRP}
+FILESDIR=	${LIBDIR}
+# These FILES qualify as libraries for the purpose of LIBRARIES_ONLY.
+.undef LIBRARIES_ONLY
+
 ${OBJS} ${SOBJS}: ${SRCS:M*.h}
 
 CLEANFILES=	${OBJS} ${SOBJS} ${TGTOBJS}
@@ -69,18 +73,5 @@ crtendS.o:	${ENDSRC}
 CLEANFILES+=	tm.h tconfig.h options.h optionlist cs-tconfig.h cs-tm.h
 tm.h tconfig.h options.h: ${CCDIR}/cc_tools/Makefile
 	(cd ${.CURDIR}; ${MAKE} -f ${.ALLSRC} MFILE=${.ALLSRC} GCCDIR=${GCCDIR} ${.TARGET})
-
-realinstall:
-.for file in ${OBJS} ${SOBJS} ${TGTOBJS}
-	${INSTALL} -o ${LIBOWN} -g ${LIBGRP} -m ${LIBMODE} \
-	    ${file} ${DESTDIR}${LIBDIR}/${file}
-.endfor
-
-.if ${MK_STAGING} == "yes"
-STAGE_DIR= ${STAGE_LIBDIR}
-STAGE_FILES= ${OBJS} ${SOBJS} ${TGTOBJS}
-staging: stage_files
-.endif
-.NOPATH: ${CLEANFILES}
 
 .include <bsd.lib.mk>

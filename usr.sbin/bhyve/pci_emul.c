@@ -295,7 +295,7 @@ pci_emul_msix_tread(struct pci_devinst *pi, uint64_t offset, int size)
 
 	/*
 	 * The PCI standard only allows 4 and 8 byte accesses to the MSI-X
-	 * table but we also allow 1 byte access to accomodate reads from
+	 * table but we also allow 1 byte access to accommodate reads from
 	 * ddb.
 	 */
 	if (size != 1 && size != 4 && size != 8)
@@ -863,10 +863,9 @@ msixcap_cfgwrite(struct pci_devinst *pi, int capoff, int offset,
 		 int bytes, uint32_t val)
 {
 	uint16_t msgctrl, rwmask;
-	int off, table_bar;
+	int off;
 	
 	off = offset - capoff;
-	table_bar = pi->pi_msix.table_bar;
 	/* Message Control Register */
 	if (off == 2 && bytes == 2) {
 		rwmask = PCIM_MSIXCTRL_MSIX_ENABLE | PCIM_MSIXCTRL_FUNCTION_MASK;
@@ -2055,6 +2054,7 @@ pci_emul_dior(struct vmctx *ctx, int vcpu, struct pci_devinst *pi, int baridx,
 			return (0);
 		}
 	
+		value = 0;
 		if (size == 1) {
 			value = sc->ioregs[offset];
 		} else if (size == 2) {

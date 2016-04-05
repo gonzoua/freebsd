@@ -67,6 +67,10 @@ __FBSDID("$FreeBSD$");
 #include <x86/vmware.h>
 
 #ifdef __i386__
+#if !defined(CPU_DISABLE_SSE) && defined(I686_CPU)
+#define CPU_ENABLE_SSE
+#endif
+
 #define	IDENTBLUE_CYRIX486	0
 #define	IDENTBLUE_IBMCPU	1
 #define	IDENTBLUE_CYRIXM2	2
@@ -83,8 +87,42 @@ static void print_svm_info(void);
 static void print_via_padlock_info(void);
 static void print_vmx_info(void);
 
+int	cpu;			/* Are we 386, 386sx, 486, etc? */
 int	cpu_class;
+u_int	cpu_feature;		/* Feature flags */
+u_int	cpu_feature2;		/* Feature flags */
+u_int	amd_feature;		/* AMD feature flags */
+u_int	amd_feature2;		/* AMD feature flags */
+u_int	amd_pminfo;		/* AMD advanced power management info */
+u_int	via_feature_rng;	/* VIA RNG features */
+u_int	via_feature_xcrypt;	/* VIA ACE features */
+u_int	cpu_high;		/* Highest arg to CPUID */
+u_int	cpu_exthigh;		/* Highest arg to extended CPUID */
+u_int	cpu_id;			/* Stepping ID */
+u_int	cpu_procinfo;		/* HyperThreading Info / Brand Index / CLFUSH */
+u_int	cpu_procinfo2;		/* Multicore info */
+char	cpu_vendor[20];		/* CPU Origin code */
+u_int	cpu_vendor_id;		/* CPU vendor ID */
+#if defined(__amd64__) || defined(CPU_ENABLE_SSE)
+u_int	cpu_fxsr;		/* SSE enabled */
+u_int	cpu_mxcsr_mask;		/* Valid bits in mxcsr */
+#endif
+u_int	cpu_clflush_line_size = 32;
+u_int	cpu_stdext_feature;
+u_int	cpu_stdext_feature2;
+u_int	cpu_max_ext_state_size;
+u_int	cpu_mon_mwait_flags;	/* MONITOR/MWAIT flags (CPUID.05H.ECX) */
+u_int	cpu_mon_min_size;	/* MONITOR minimum range size, bytes */
+u_int	cpu_mon_max_size;	/* MONITOR minimum range size, bytes */
+u_int	cpu_maxphyaddr;		/* Max phys addr width in bits */
 char machine[] = MACHINE;
+
+SYSCTL_UINT(_hw, OID_AUTO, via_feature_rng, CTLFLAG_RD,
+    &via_feature_rng, 0,
+    "VIA RNG feature available in CPU");
+SYSCTL_UINT(_hw, OID_AUTO, via_feature_xcrypt, CTLFLAG_RD,
+    &via_feature_xcrypt, 0,
+    "VIA xcrypt feature available in CPU");
 
 #ifdef __amd64__
 #ifdef SCTL_MASK32
@@ -894,6 +932,8 @@ printcpuinfo(void)
 				       "\005HLE"
 				       /* Advanced Vector Instructions 2 */
 				       "\006AVX2"
+				       /* FDP_EXCPTN_ONLY */
+				       "\007FDPEXC"
 				       /* Supervisor Mode Execution Prot. */
 				       "\010SMEP"
 				       /* Bit Manipulation Instructions */
@@ -910,18 +950,23 @@ printcpuinfo(void)
 				       "\017MPX"
 				       /* AVX512 Foundation */
 				       "\021AVX512F"
+				       "\022AVX512DQ"
 				       /* Enhanced NRBG */
 				       "\023RDSEED"
 				       /* ADCX + ADOX */
 				       "\024ADX"
 				       /* Supervisor Mode Access Prevention */
 				       "\025SMAP"
+				       "\026AVX512IFMA"
+				       "\027PCOMMIT"
 				       "\030CLFLUSHOPT"
+				       "\031CLWB"
 				       "\032PROCTRACE"
 				       "\033AVX512PF"
 				       "\034AVX512ER"
 				       "\035AVX512CD"
 				       "\036SHA"
+				       "\037AVX512BW"
 				       );
 			}
 
@@ -930,6 +975,7 @@ printcpuinfo(void)
 				    cpu_stdext_feature2,
 				       "\020"
 				       "\001PREFETCHWT1"
+				       "\002AVX512VBMI"
 				       "\004PKU"
 				       "\005OSPKE"
 				       );
@@ -1248,6 +1294,8 @@ identify_hypervisor(void)
 			hv_vendor[12] = '\0';
 			if (strcmp(hv_vendor, "VMwareVMware") == 0)
 				vm_guest = VM_GUEST_VMWARE;
+			else if (strcmp(hv_vendor, "Microsoft Hv") == 0)
+				vm_guest = VM_GUEST_HV;
 		}
 		return;
 	}
@@ -1295,6 +1343,33 @@ identify_hypervisor(void)
 }
 
 /*
+ * Clear "Limit CPUID Maxval" bit and return true if the caller should
+ * get the largest standard CPUID function number again if it is set
+ * from BIOS.  It is necessary for probing correct CPU topology later
+ * and for the correct operation of the AVX-aware userspace.
+ */
+bool
+intel_fix_cpuid(void)
+{
+	uint64_t msr;
+
+	if (cpu_vendor_id != CPU_VENDOR_INTEL)
+		return (false);
+	if ((CPUID_TO_FAMILY(cpu_id) == 0xf &&
+	    CPUID_TO_MODEL(cpu_id) >= 0x3) ||
+	    (CPUID_TO_FAMILY(cpu_id) == 0x6 &&
+	    CPUID_TO_MODEL(cpu_id) >= 0xe)) {
+		msr = rdmsr(MSR_IA32_MISC_ENABLE);
+		if ((msr & IA32_MISC_EN_LIMCPUID) != 0) {
+			msr &= ~IA32_MISC_EN_LIMCPUID;
+			wrmsr(MSR_IA32_MISC_ENABLE, msr);
+			return (true);
+		}
+	}
+	return (false);
+}
+
+/*
  * Final stage of CPU identification.
  */
 #ifdef __i386__
@@ -1328,22 +1403,9 @@ identify_cpu(void)
 	identify_hypervisor();
 	cpu_vendor_id = find_cpu_vendor_id();
 
-	/*
-	 * Clear "Limit CPUID Maxval" bit and get the largest standard CPUID
-	 * function number again if it is set from BIOS.  It is necessary
-	 * for probing correct CPU topology later.
-	 * XXX This is only done on the BSP package.
-	 */
-	if (cpu_vendor_id == CPU_VENDOR_INTEL && cpu_high > 0 && cpu_high < 4 &&
-	    ((CPUID_TO_FAMILY(cpu_id) == 0xf && CPUID_TO_MODEL(cpu_id) >= 0x3) ||
-	    (CPUID_TO_FAMILY(cpu_id) == 0x6 && CPUID_TO_MODEL(cpu_id) >= 0xe))) {
-		uint64_t msr;
-		msr = rdmsr(MSR_IA32_MISC_ENABLE);
-		if ((msr & 0x400000ULL) != 0) {
-			wrmsr(MSR_IA32_MISC_ENABLE, msr & ~0x400000ULL);
-			do_cpuid(0, regs);
-			cpu_high = regs[0];
-		}
+	if (intel_fix_cpuid()) {
+		do_cpuid(0, regs);
+		cpu_high = regs[0];
 	}
 
 	if (cpu_high >= 5 && (cpu_feature2 & CPUID2_MON) != 0) {
@@ -1868,6 +1930,18 @@ print_INTEL_TLB(u_int data)
 		break;
 	case 0x68:
 		printf("1st-level data cache: 32 KB, 4 way set associative, sectored cache, 64 byte line size\n");
+		break;
+	case 0x6a:
+		printf("uTLB: 4KByte pages, 8-way set associative, 64 entries\n");
+		break;
+	case 0x6b:
+		printf("DTLB: 4KByte pages, 8-way set associative, 256 entries\n");
+		break;
+	case 0x6c:
+		printf("DTLB: 2M/4M pages, 8-way set associative, 128 entries\n");
+		break;
+	case 0x6d:
+		printf("DTLB: 1 GByte pages, fully associative, 16 entries\n");
 		break;
 	case 0x70:
 		printf("Trace cache: 12K-uops, 8-way set associative\n");

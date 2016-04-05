@@ -43,7 +43,9 @@ __FBSDID("$FreeBSD$");
 #include <sys/pcpu.h>
 #include <sys/lock.h>
 #include <sys/mutex.h>
+#include <sys/smp.h>
 
+#include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
 
 #include <vm/vm.h>
@@ -56,6 +58,8 @@ __FBSDID("$FreeBSD$");
 
 #include "gic_v3_reg.h"
 #include "gic_v3_var.h"
+
+#define	GIC_V3_ITS_QUIRK_THUNDERX_PEM_BUS_OFFSET	88
 
 #include "pic_if.h"
 
@@ -70,16 +74,15 @@ static device_method_t gic_v3_its_methods[] = {
 	 */
 	/* MSI-X */
 	DEVMETHOD(pic_alloc_msix,	gic_v3_its_alloc_msix),
-	DEVMETHOD(pic_map_msix,		gic_v3_its_map_msix),
 	/* MSI */
 	DEVMETHOD(pic_alloc_msi,	gic_v3_its_alloc_msi),
-	DEVMETHOD(pic_map_msi,		gic_v3_its_map_msix),
+	DEVMETHOD(pic_map_msi,		gic_v3_its_map_msi),
 
 	/* End */
 	DEVMETHOD_END
 };
 
-DEFINE_CLASS_0(gic_v3_its, gic_v3_its_driver, gic_v3_its_methods,
+DEFINE_CLASS_0(its, gic_v3_its_driver, gic_v3_its_methods,
     sizeof(struct gic_v3_its_softc));
 
 MALLOC_DEFINE(M_GIC_V3_ITS, "GICv3 ITS", GIC_V3_ITS_DEVSTR);
@@ -87,11 +90,15 @@ MALLOC_DEFINE(M_GIC_V3_ITS, "GICv3 ITS", GIC_V3_ITS_DEVSTR);
 static int its_alloc_tables(struct gic_v3_its_softc *);
 static void its_free_tables(struct gic_v3_its_softc *);
 static void its_init_commandq(struct gic_v3_its_softc *);
-static int its_init_cpu(struct gic_v3_its_softc *);
 static void its_init_cpu_collection(struct gic_v3_its_softc *);
+static uint32_t its_get_devid(device_t);
+static struct its_dev * its_device_find_locked(struct gic_v3_its_softc *,
+    device_t, uint32_t);
 
 static int its_cmd_send(struct gic_v3_its_softc *, struct its_cmd_desc *);
 
+static void its_cmd_movi(struct gic_v3_its_softc *, struct its_dev *,
+    struct its_col *, uint32_t);
 static void its_cmd_mapc(struct gic_v3_its_softc *, struct its_col *, uint8_t);
 static void its_cmd_mapvi(struct gic_v3_its_softc *, struct its_dev *, uint32_t,
     uint32_t);
@@ -99,10 +106,12 @@ static void its_cmd_mapi(struct gic_v3_its_softc *, struct its_dev *, uint32_t);
 static void its_cmd_inv(struct gic_v3_its_softc *, struct its_dev *, uint32_t);
 static void its_cmd_invall(struct gic_v3_its_softc *, struct its_col *);
 
+static uint32_t its_get_devbits(device_t);
+
 static void lpi_init_conftable(struct gic_v3_its_softc *);
 static void lpi_bitmap_init(struct gic_v3_its_softc *);
-static void lpi_init_cpu(struct gic_v3_its_softc *);
 static int lpi_config_cpu(struct gic_v3_its_softc *);
+static void lpi_alloc_cpu_pendtables(struct gic_v3_its_softc *);
 
 const char *its_ptab_cache[] = {
 	[GITS_BASER_CACHE_NCNB] = "(NC,NB)",
@@ -133,6 +142,29 @@ const char *its_ptab_type[] = {
 	[GITS_BASER_TYPE_RES7] = "Reserved (7)",
 };
 
+/*
+ * Vendor specific quirks.
+ * One needs to add appropriate entry to its_quirks[]
+ * table if the imlementation varies from the generic ARM ITS.
+ */
+
+/* Cavium ThunderX PCI devid acquire function */
+static uint32_t its_get_devbits_thunder(device_t);
+static uint32_t its_get_devid_thunder(device_t);
+
+static const struct its_quirks its_quirks[] = {
+	{
+		/*
+		 * Hardware:		Cavium ThunderX
+		 * Chip revision:	Pass 1.0, Pass 1.1
+		 */
+		.cpuid =	CPU_ID_RAW(CPU_IMPL_CAVIUM, CPU_PART_THUNDER, 0, 0),
+		.cpuid_mask =	CPU_IMPL_MASK | CPU_PART_MASK,
+		.devid_func =	its_get_devid_thunder,
+		.devbits_func =	its_get_devbits_thunder,
+	},
+};
+
 static struct gic_v3_its_softc *its_sc;
 
 #define	gic_its_read(sc, len, reg)		\
@@ -153,12 +185,25 @@ gic_v3_its_attach(device_t dev)
 	sc = device_get_softc(dev);
 
 	/*
+	 * XXX ARM64TODO: Avoid configuration of more than one ITS
+	 * device. To be removed when multi-PIC support is added
+	 * to FreeBSD (or at least multi-ITS is implemented). Limit
+	 * supported ITS sockets to '0' only.
+	 */
+	if (device_get_unit(dev) != 0) {
+		device_printf(dev,
+		    "Only single instance of ITS is supported, exiting...\n");
+		return (ENXIO);
+	}
+	sc->its_socket = 0;
+
+	/*
 	 * Initialize sleep & spin mutex for ITS
 	 */
 	/* Protects ITS device list and assigned LPIs bitmaps. */
-	mtx_init(&sc->its_mtx, "ITS sleep lock", NULL, MTX_DEF);
+	mtx_init(&sc->its_dev_lock, "ITS dev lock", NULL, MTX_SPIN);
 	/* Protects access to ITS command circular buffer. */
-	mtx_init(&sc->its_spin_mtx, "ITS spin lock", NULL, MTX_SPIN);
+	mtx_init(&sc->its_cmd_lock, "ITS cmd lock", NULL, MTX_SPIN);
 
 	rid = 0;
 	sc->its_res = bus_alloc_resource_any(dev, SYS_RES_MEMORY, &rid,
@@ -196,8 +241,12 @@ gic_v3_its_attach(device_t dev)
 	}
 
 	/* 3. Allocate collections. One per-CPU */
-	sc->its_cols = malloc(sizeof(*sc->its_cols) * MAXCPU,
-	    M_GIC_V3_ITS, (M_WAITOK | M_ZERO));
+	for (int cpu = 0; cpu < mp_ncpus; cpu++)
+		if (CPU_ISSET(cpu, &all_cpus) != 0)
+			sc->its_cols[cpu] = malloc(sizeof(*sc->its_cols[0]),
+				M_GIC_V3_ITS, (M_WAITOK | M_ZERO));
+		else
+			sc->its_cols[cpu] = NULL;
 
 	/* 4. Enable ITS in GITS_CTLR */
 	gits_tmp = gic_its_read(sc, 4, GITS_CTLR);
@@ -209,10 +258,13 @@ gic_v3_its_attach(device_t dev)
 	/* 6. LPIs bitmap init */
 	lpi_bitmap_init(sc);
 
-	/* 7. CPU init */
+	/* 7. Allocate pending tables for all CPUs */
+	lpi_alloc_cpu_pendtables(sc);
+
+	/* 8. CPU init */
 	(void)its_init_cpu(sc);
 
-	/* 8. Init ITS devices list */
+	/* 9. Init ITS devices list */
 	TAILQ_INIT(&sc->its_dev_list);
 
 	arm_register_msi_pic(dev);
@@ -253,7 +305,8 @@ gic_v3_its_detach(device_t dev)
 	/* ITTs */
 	its_free_tables(sc);
 	/* Collections */
-	free(sc->its_cols, M_GIC_V3_ITS);
+	for (cpuid = 0; cpuid < mp_ncpus; cpuid++)
+		free(sc->its_cols[cpuid], M_GIC_V3_ITS);
 	/* LPI config table */
 	parent = device_get_parent(sc->dev);
 	gic_sc = device_get_softc(parent);
@@ -261,10 +314,13 @@ gic_v3_its_detach(device_t dev)
 		contigfree((void *)gic_sc->gic_redists.lpis.conf_base,
 		    LPI_CONFTAB_SIZE, M_GIC_V3_ITS);
 	}
-	if ((void *)gic_sc->gic_redists.lpis.pend_base[cpuid] != NULL) {
-		contigfree((void *)gic_sc->gic_redists.lpis.pend_base[cpuid],
-		    roundup2(LPI_PENDTAB_SIZE, PAGE_SIZE_64K), M_GIC_V3_ITS);
-	}
+	for (cpuid = 0; cpuid < mp_ncpus; cpuid++)
+		if ((void *)gic_sc->gic_redists.lpis.pend_base[cpuid] != NULL) {
+			contigfree(
+			    (void *)gic_sc->gic_redists.lpis.pend_base[cpuid],
+			    roundup2(LPI_PENDTAB_SIZE, PAGE_SIZE_64K),
+			    M_GIC_V3_ITS);
+		}
 
 	/* Resource... */
 	bus_release_resource(dev, SYS_RES_MEMORY, rid, sc->its_res);
@@ -280,7 +336,6 @@ its_alloc_tables(struct gic_v3_its_softc *sc)
 {
 	uint64_t gits_baser, gits_tmp;
 	uint64_t type, esize, cache, share, psz;
-	uint64_t gits_typer;
 	size_t page_size, npages, nitspages, nidents, tn;
 	size_t its_tbl_size;
 	vm_offset_t ptab_vaddr;
@@ -288,9 +343,6 @@ its_alloc_tables(struct gic_v3_its_softc *sc)
 	boolean_t first = TRUE;
 
 	page_size = PAGE_SIZE_64K;
-
-	/* Read features first */
-	gits_typer = gic_its_read(sc, 8, GITS_TYPER);
 
 	for (tn = 0; tn < GITS_BASER_NUM; tn++) {
 		gits_baser = gic_its_read(sc, 8, GITS_BASER(tn));
@@ -305,7 +357,7 @@ its_alloc_tables(struct gic_v3_its_softc *sc)
 		case GITS_BASER_TYPE_RES7:
 			continue;
 		case GITS_BASER_TYPE_DEV:
-			nidents = (1 << GITS_TYPER_DEVB(gits_typer));
+			nidents = (1 << its_get_devbits(sc->dev));
 			its_tbl_size = esize * nidents;
 			its_tbl_size = roundup2(its_tbl_size, page_size);
 			npages = howmany(its_tbl_size, PAGE_SIZE);
@@ -502,11 +554,33 @@ its_init_commandq(struct gic_v3_its_softc *sc)
 	gic_its_write(sc, 8, GITS_CWRITER, 0x0);
 }
 
-static int
+int
 its_init_cpu(struct gic_v3_its_softc *sc)
 {
 	device_t parent;
 	struct gic_v3_softc *gic_sc;
+
+	/*
+	 * NULL in place of the softc pointer means that
+	 * this function was called during GICv3 secondary initialization.
+	 */
+	if (sc == NULL) {
+		if (device_is_attached(its_sc->dev)) {
+			/*
+			 * XXX ARM64TODO: This is part of the workaround that
+			 * saves ITS software context for further use in
+			 * mask/unmask and here. This should be removed as soon
+			 * as the upper layer is capable of passing the ITS
+			 * context to this function.
+			 */
+			sc = its_sc;
+		} else
+			return (ENXIO);
+
+		/* Skip if running secondary init on a wrong socket */
+		if (sc->its_socket != CPU_CURRENT_SOCKET)
+			return (ENXIO);
+	}
 
 	/*
 	 * Check for LPIs support on this Re-Distributor.
@@ -521,8 +595,8 @@ its_init_cpu(struct gic_v3_its_softc *sc)
 		return (ENXIO);
 	}
 
-	/* Initialize LPIs for this CPU */
-	lpi_init_cpu(sc);
+	/* Configure LPIs for this CPU */
+	lpi_config_cpu(sc);
 
 	/* Initialize collections */
 	its_init_cpu_collection(sc);
@@ -559,11 +633,12 @@ its_init_cpu_collection(struct gic_v3_its_softc *sc)
 		target = GICR_TYPER_CPUNUM(typer);
 	}
 
-	sc->its_cols[cpuid].col_target = target;
-	sc->its_cols[cpuid].col_id = cpuid;
+	sc->its_cols[cpuid]->col_target = target;
+	sc->its_cols[cpuid]->col_id = cpuid;
 
-	its_cmd_mapc(sc, &sc->its_cols[cpuid], 1);
-	its_cmd_invall(sc, &sc->its_cols[cpuid]);
+	its_cmd_mapc(sc, sc->its_cols[cpuid], 1);
+	its_cmd_invall(sc, sc->its_cols[cpuid]);
+
 }
 
 static void
@@ -610,7 +685,7 @@ lpi_init_conftable(struct gic_v3_its_softc *sc)
 }
 
 static void
-lpi_init_cpu(struct gic_v3_its_softc *sc)
+lpi_alloc_cpu_pendtables(struct gic_v3_its_softc *sc)
 {
 	device_t parent;
 	struct gic_v3_softc *gic_sc;
@@ -624,25 +699,31 @@ lpi_init_cpu(struct gic_v3_its_softc *sc)
 	 * LPI Pending Table settings.
 	 * This has to be done for each Re-Distributor, hence for each CPU.
 	 */
-	cpuid = PCPU_GET(cpuid);
+	for (cpuid = 0; cpuid < mp_ncpus; cpuid++) {
 
-	pend_base = (vm_offset_t)contigmalloc(
-	    roundup2(LPI_PENDTAB_SIZE, PAGE_SIZE_64K), M_GIC_V3_ITS,
-	    (M_WAITOK | M_ZERO), 0, ~0UL, PAGE_SIZE_64K, 0);
+		/* Limit allocation to active CPUs only */
+		if (CPU_ISSET(cpuid, &all_cpus) == 0)
+			continue;
 
-	/* Clean D-cache so that ITS can see zeroed pages */
-	cpu_dcache_wb_range((vm_offset_t)pend_base,
-	    roundup2(LPI_PENDTAB_SIZE, PAGE_SIZE_64K));
+		pend_base = (vm_offset_t)contigmalloc(
+		    roundup2(LPI_PENDTAB_SIZE, PAGE_SIZE_64K), M_GIC_V3_ITS,
+		    (M_WAITOK | M_ZERO), 0, ~0UL, PAGE_SIZE_64K, 0);
 
-	if (bootverbose) {
-		device_printf(sc->dev,
-		    "LPI Pending Table for CPU%u at PA: 0x%lx\n",
-		    cpuid, vtophys(pend_base));
+		/* Clean D-cache so that ITS can see zeroed pages */
+		cpu_dcache_wb_range((vm_offset_t)pend_base,
+		    roundup2(LPI_PENDTAB_SIZE, PAGE_SIZE_64K));
+
+		if (bootverbose) {
+			device_printf(sc->dev,
+			    "LPI Pending Table for CPU%u at PA: 0x%lx\n",
+			    cpuid, vtophys(pend_base));
+		}
+
+		gic_sc->gic_redists.lpis.pend_base[cpuid] = pend_base;
 	}
 
-	gic_sc->gic_redists.lpis.pend_base[cpuid] = pend_base;
-
-	lpi_config_cpu(sc);
+	/* Ensure visibility of pend_base addresses on other CPUs */
+	wmb();
 }
 
 static int
@@ -659,6 +740,9 @@ lpi_config_cpu(struct gic_v3_its_softc *sc)
 	parent = device_get_parent(sc->dev);
 	gic_sc = device_get_softc(parent);
 	cpuid = PCPU_GET(cpuid);
+
+	/* Ensure data observability on a current CPU */
+	rmb();
 
 	conf_base = gic_sc->gic_redists.lpis.conf_base;
 	pend_base = gic_sc->gic_redists.lpis.pend_base[cpuid];
@@ -766,18 +850,28 @@ static int
 lpi_alloc_chunk(struct gic_v3_its_softc *sc, struct lpi_chunk *lpic,
     u_int nvecs)
 {
+	u_int *col_ids;
 	int fclr; /* First cleared bit */
 	uint8_t *bitmap;
 	size_t nb, i;
 
+	col_ids = malloc(sizeof(*col_ids) * nvecs, M_GIC_V3_ITS,
+	    (M_NOWAIT | M_ZERO));
+	if (col_ids == NULL)
+		return (ENOMEM);
+
+	mtx_lock_spin(&sc->its_dev_lock);
 	bitmap = (uint8_t *)sc->its_lpi_bitmap;
 
 	fclr = 0;
 retry:
 	/* Check other bits - sloooow */
 	for (i = 0, nb = fclr; i < nvecs; i++, nb++) {
-		if (nb > sc->its_lpi_maxid)
+		if (nb > sc->its_lpi_maxid) {
+			mtx_unlock_spin(&sc->its_dev_lock);
+			free(col_ids, M_GIC_V3_ITS);
 			return (EINVAL);
+		}
 
 		if (isset(bitmap, nb)) {
 			/* To little free bits in this area. Move on. */
@@ -790,8 +884,42 @@ retry:
 	lpic->lpi_base = fclr + GIC_FIRST_LPI;
 	lpic->lpi_num = nvecs;
 	lpic->lpi_free = lpic->lpi_num;
+	lpic->lpi_col_ids = col_ids;
+	for (i = 0; i < lpic->lpi_num; i++) {
+		/*
+		 * Initially all interrupts go to CPU0 but can be moved
+		 * to another CPU by bus_bind_intr() or interrupts shuffling.
+		 */
+		lpic->lpi_col_ids[i] = 0;
+	}
+	mtx_unlock_spin(&sc->its_dev_lock);
 
 	return (0);
+}
+
+static void
+lpi_free_chunk(struct gic_v3_its_softc *sc, struct lpi_chunk *lpic)
+{
+	int start, end;
+	uint8_t *bitmap;
+
+	bitmap = (uint8_t *)sc->its_lpi_bitmap;
+
+	KASSERT((lpic->lpi_free == lpic->lpi_num),
+	    ("Trying to free LPI chunk that is still in use.\n"));
+
+	mtx_lock_spin(&sc->its_dev_lock);
+	/* First bit of this chunk in a global bitmap */
+	start = lpic->lpi_base - GIC_FIRST_LPI;
+	/* and last bit of this chunk... */
+	end = start + lpic->lpi_num - 1;
+
+	/* Finally free this chunk */
+	bit_nclear(bitmap, start, end);
+	mtx_unlock_spin(&sc->its_dev_lock);
+
+	free(lpic->lpi_col_ids, M_GIC_V3_ITS);
+	lpic->lpi_col_ids = NULL;
 }
 
 static void
@@ -851,6 +979,32 @@ lpi_xmask_irq(device_t parent, uint32_t irq, boolean_t unmask)
 
 	panic("Trying to %s not existing LPI: %u\n",
 	    (unmask == TRUE) ? "unmask" : "mask", irq);
+}
+
+int
+lpi_migrate(device_t parent, uint32_t irq, u_int cpuid)
+{
+	struct gic_v3_its_softc *sc;
+	struct its_dev *its_dev;
+	struct its_col *col;
+
+	sc = its_sc;
+	mtx_lock_spin(&sc->its_dev_lock);
+	its_dev = its_device_find_locked(sc, NULL, irq);
+	mtx_unlock_spin(&sc->its_dev_lock);
+	if (its_dev == NULL) {
+		/* Cannot migrate not configured LPI */
+		return (ENXIO);
+	}
+
+	/* Find local device's interrupt identifier */
+	irq = irq - its_dev->lpis.lpi_base;
+	/* Move interrupt to another collection */
+	col = sc->its_cols[cpuid];
+	its_cmd_movi(sc, its_dev, col, irq);
+	its_dev->lpis.lpi_col_ids[irq] = cpuid;
+
+	return (0);
 }
 
 void
@@ -953,6 +1107,20 @@ cmd_fix_endian(struct its_cmd *cmd)
 }
 
 static void
+its_cmd_movi(struct gic_v3_its_softc *sc, struct its_dev *its_dev,
+    struct its_col *col, uint32_t id)
+{
+	struct its_cmd_desc desc;
+
+	desc.cmd_type = ITS_CMD_MOVI;
+	desc.cmd_desc_movi.its_dev = its_dev;
+	desc.cmd_desc_movi.col = col;
+	desc.cmd_desc_movi.id = id;
+
+	its_cmd_send(sc, &desc);
+}
+
+static void
 its_cmd_mapc(struct gic_v3_its_softc *sc, struct its_col *col, uint8_t valid)
 {
 	struct its_cmd_desc desc;
@@ -973,9 +1141,15 @@ its_cmd_mapvi(struct gic_v3_its_softc *sc, struct its_dev *its_dev,
     uint32_t id, uint32_t pid)
 {
 	struct its_cmd_desc desc;
+	struct its_col *col;
+	u_int col_id;
+
+	col_id = its_dev->lpis.lpi_col_ids[id];
+	col = sc->its_cols[col_id];
 
 	desc.cmd_type = ITS_CMD_MAPVI;
 	desc.cmd_desc_mapvi.its_dev = its_dev;
+	desc.cmd_desc_mapvi.col = col;
 	desc.cmd_desc_mapvi.id = id;
 	desc.cmd_desc_mapvi.pid = pid;
 
@@ -983,14 +1157,23 @@ its_cmd_mapvi(struct gic_v3_its_softc *sc, struct its_dev *its_dev,
 }
 
 static void __unused
-its_cmd_mapi(struct gic_v3_its_softc *sc, struct its_dev *its_dev,
-    uint32_t lpinum)
+its_cmd_mapi(struct gic_v3_its_softc *sc, struct its_dev *its_dev, uint32_t pid)
 {
 	struct its_cmd_desc desc;
+	struct its_col *col;
+	u_int col_id;
+	uint32_t id;
+
+	KASSERT(pid >= its_dev->lpis.lpi_base,
+	    ("%s: invalid pid: %d for the ITS device", __func__, pid));
+	id = pid - its_dev->lpis.lpi_base;
+	col_id = its_dev->lpis.lpi_col_ids[id];
+	col = sc->its_cols[col_id];
 
 	desc.cmd_type = ITS_CMD_MAPI;
 	desc.cmd_desc_mapi.its_dev = its_dev;
-	desc.cmd_desc_mapi.lpinum = lpinum;
+	desc.cmd_desc_mapi.col = col;
+	desc.cmd_desc_mapi.pid = pid;
 
 	its_cmd_send(sc, &desc);
 }
@@ -1009,14 +1192,23 @@ its_cmd_mapd(struct gic_v3_its_softc *sc, struct its_dev *its_dev,
 }
 
 static void
-its_cmd_inv(struct gic_v3_its_softc *sc, struct its_dev *its_dev,
-    uint32_t lpinum)
+its_cmd_inv(struct gic_v3_its_softc *sc, struct its_dev *its_dev, uint32_t pid)
 {
 	struct its_cmd_desc desc;
+	struct its_col *col;
+	u_int col_id;
+	uint32_t id;
+
+	KASSERT(pid >= its_dev->lpis.lpi_base,
+	    ("%s: invalid pid: %d for the ITS device", __func__, pid));
+	id = pid - its_dev->lpis.lpi_base;
+	col_id = its_dev->lpis.lpi_col_ids[id];
+	col = sc->its_cols[col_id];
 
 	desc.cmd_type = ITS_CMD_INV;
-	desc.cmd_desc_inv.lpinum = lpinum - its_dev->lpis.lpi_base;
+	desc.cmd_desc_inv.pid = pid - its_dev->lpis.lpi_base;
 	desc.cmd_desc_inv.its_dev = its_dev;
+	desc.cmd_desc_inv.col = col;
 
 	its_cmd_send(sc, &desc);
 }
@@ -1081,7 +1273,7 @@ its_cmd_alloc_locked(struct gic_v3_its_softc *sc)
 	 */
 	us_left = 1000000;
 
-	mtx_assert(&sc->its_spin_mtx, MA_OWNED);
+	mtx_assert(&sc->its_cmd_lock, MA_OWNED);
 	while (its_cmd_queue_full(sc)) {
 		if (us_left-- == 0) {
 			/* Timeout while waiting for free command */
@@ -1116,13 +1308,19 @@ its_cmd_prepare(struct its_cmd *cmd, struct its_cmd_desc *desc)
 	target = ITS_TARGET_NONE;
 
 	switch (cmd_type) {
+	case ITS_CMD_MOVI:	/* Move interrupt ID to another collection */
+		target = desc->cmd_desc_movi.col->col_target;
+		cmd_format_command(cmd, ITS_CMD_MOVI);
+		cmd_format_id(cmd, desc->cmd_desc_movi.id);
+		cmd_format_col(cmd, desc->cmd_desc_movi.col->col_id);
+		cmd_format_devid(cmd, desc->cmd_desc_movi.its_dev->devid);
+		break;
 	case ITS_CMD_SYNC:	/* Wait for previous commands completion */
 		target = desc->cmd_desc_sync.col->col_target;
 		cmd_format_command(cmd, ITS_CMD_SYNC);
 		cmd_format_target(cmd, target);
 		break;
 	case ITS_CMD_MAPD:	/* Assign ITT to device */
-		target = desc->cmd_desc_mapd.its_dev->col->col_target;
 		cmd_format_command(cmd, ITS_CMD_MAPD);
 		cmd_format_itt(cmd, vtophys(desc->cmd_desc_mapd.its_dev->itt));
 		/*
@@ -1149,25 +1347,25 @@ its_cmd_prepare(struct its_cmd *cmd, struct its_cmd_desc *desc)
 		cmd_format_target(cmd, target);
 		break;
 	case ITS_CMD_MAPVI:
-		target = desc->cmd_desc_mapvi.its_dev->col->col_target;
+		target = desc->cmd_desc_mapvi.col->col_target;
 		cmd_format_command(cmd, ITS_CMD_MAPVI);
 		cmd_format_devid(cmd, desc->cmd_desc_mapvi.its_dev->devid);
 		cmd_format_id(cmd, desc->cmd_desc_mapvi.id);
 		cmd_format_pid(cmd, desc->cmd_desc_mapvi.pid);
-		cmd_format_col(cmd, desc->cmd_desc_mapvi.its_dev->col->col_id);
+		cmd_format_col(cmd, desc->cmd_desc_mapvi.col->col_id);
 		break;
 	case ITS_CMD_MAPI:
-		target = desc->cmd_desc_mapi.its_dev->col->col_target;
+		target = desc->cmd_desc_mapi.col->col_target;
 		cmd_format_command(cmd, ITS_CMD_MAPI);
 		cmd_format_devid(cmd, desc->cmd_desc_mapi.its_dev->devid);
-		cmd_format_id(cmd, desc->cmd_desc_mapi.lpinum);
-		cmd_format_col(cmd, desc->cmd_desc_mapi.its_dev->col->col_id);
+		cmd_format_id(cmd, desc->cmd_desc_mapi.pid);
+		cmd_format_col(cmd, desc->cmd_desc_mapi.col->col_id);
 		break;
 	case ITS_CMD_INV:
-		target = desc->cmd_desc_inv.its_dev->col->col_target;
+		target = desc->cmd_desc_inv.col->col_target;
 		cmd_format_command(cmd, ITS_CMD_INV);
 		cmd_format_devid(cmd, desc->cmd_desc_inv.its_dev->devid);
-		cmd_format_id(cmd, desc->cmd_desc_inv.lpinum);
+		cmd_format_id(cmd, desc->cmd_desc_inv.pid);
 		break;
 	case ITS_CMD_INVALL:
 		cmd_format_command(cmd, ITS_CMD_INVALL);
@@ -1229,16 +1427,16 @@ its_cmd_wait_completion(struct gic_v3_its_softc *sc, struct its_cmd *cmd_first,
 static int
 its_cmd_send(struct gic_v3_its_softc *sc, struct its_cmd_desc *desc)
 {
-	struct its_cmd *cmd, *cmd_sync;
+	struct its_cmd *cmd, *cmd_sync, *cmd_write;
 	struct its_col col_sync;
 	struct its_cmd_desc desc_sync;
 	uint64_t target, cwriter;
 
-	mtx_lock_spin(&sc->its_spin_mtx);
+	mtx_lock_spin(&sc->its_cmd_lock);
 	cmd = its_cmd_alloc_locked(sc);
-	mtx_unlock_spin(&sc->its_spin_mtx);
 	if (cmd == NULL) {
 		device_printf(sc->dev, "could not allocate ITS command\n");
+		mtx_unlock_spin(&sc->its_cmd_lock);
 		return (EBUSY);
 	}
 
@@ -1246,9 +1444,7 @@ its_cmd_send(struct gic_v3_its_softc *sc, struct its_cmd_desc *desc)
 	its_cmd_sync(sc, cmd);
 
 	if (target != ITS_TARGET_NONE) {
-		mtx_lock_spin(&sc->its_spin_mtx);
 		cmd_sync = its_cmd_alloc_locked(sc);
-		mtx_unlock_spin(&sc->its_spin_mtx);
 		if (cmd_sync == NULL)
 			goto end;
 		desc_sync.cmd_type = ITS_CMD_SYNC;
@@ -1259,55 +1455,72 @@ its_cmd_send(struct gic_v3_its_softc *sc, struct its_cmd_desc *desc)
 	}
 end:
 	/* Update GITS_CWRITER */
-	mtx_lock_spin(&sc->its_spin_mtx);
 	cwriter = its_cmd_cwriter_offset(sc, sc->its_cmdq_write);
 	gic_its_write(sc, 8, GITS_CWRITER, cwriter);
-	mtx_unlock_spin(&sc->its_spin_mtx);
+	cmd_write = sc->its_cmdq_write;
+	mtx_unlock_spin(&sc->its_cmd_lock);
 
-	its_cmd_wait_completion(sc, cmd, sc->its_cmdq_write);
+	its_cmd_wait_completion(sc, cmd, cmd_write);
 
 	return (0);
 }
 
+/* Find ITS device descriptor by pci_dev or irq number */
 static struct its_dev *
-its_device_find_locked(struct gic_v3_its_softc *sc, device_t pci_dev)
+its_device_find_locked(struct gic_v3_its_softc *sc, device_t pci_dev,
+    uint32_t irq)
 {
 	struct its_dev *its_dev;
+	struct lpi_chunk *lpis;
 
-	mtx_assert(&sc->its_mtx, MA_OWNED);
+	mtx_assert(&sc->its_dev_lock, MA_OWNED);
+	KASSERT((pci_dev == NULL || irq == 0),
+	    ("%s: Can't search by both pci_dev and irq number", __func__));
 	/* Find existing device if any */
 	TAILQ_FOREACH(its_dev, &sc->its_dev_list, entry) {
-		if (its_dev->pci_dev == pci_dev)
-			return (its_dev);
+		if (pci_dev != NULL) {
+			if (its_dev->pci_dev == pci_dev)
+				return (its_dev);
+		} else if (irq != 0) {
+			lpis = &its_dev->lpis;
+			if ((irq >= lpis->lpi_base) &&
+			    (irq < (lpis->lpi_base + lpis->lpi_num)))
+				return (its_dev);
+		}
 	}
 
 	return (NULL);
 }
 
 static struct its_dev *
-its_device_alloc_locked(struct gic_v3_its_softc *sc, device_t pci_dev,
+its_device_alloc(struct gic_v3_its_softc *sc, device_t pci_dev,
     u_int nvecs)
 {
 	struct its_dev *newdev;
 	uint64_t typer;
 	uint32_t devid;
-	u_int cpuid;
 	size_t esize;
+	int err;
 
-	mtx_assert(&sc->its_mtx, MA_OWNED);
+	mtx_lock_spin(&sc->its_dev_lock);
 	/* Find existing device if any */
-	newdev = its_device_find_locked(sc, pci_dev);
+	newdev = its_device_find_locked(sc, pci_dev, 0);
+	mtx_unlock_spin(&sc->its_dev_lock);
 	if (newdev != NULL)
 		return (newdev);
 
-	devid = PCI_DEVID(pci_dev);
+	devid = its_get_devid(pci_dev);
 
 	/* There was no previously created device. Create one now */
-	newdev = malloc(sizeof(*newdev), M_GIC_V3_ITS, (M_WAITOK | M_ZERO));
+	newdev = malloc(sizeof(*newdev), M_GIC_V3_ITS, (M_NOWAIT | M_ZERO));
+	if (newdev == NULL)
+		return (NULL);
+
 	newdev->pci_dev = pci_dev;
 	newdev->devid = devid;
 
-	if (lpi_alloc_chunk(sc, &newdev->lpis, nvecs) != 0) {
+	err = lpi_alloc_chunk(sc, &newdev->lpis, nvecs);
+	if (err != 0) {
 		free(newdev, M_GIC_V3_ITS);
 		return (NULL);
 	}
@@ -1321,16 +1534,16 @@ its_device_alloc_locked(struct gic_v3_its_softc *sc, device_t pci_dev,
 	 */
 	newdev->itt = (vm_offset_t)contigmalloc(
 	    roundup2(roundup2(nvecs, 2) * esize, 0x100), M_GIC_V3_ITS,
-	    (M_WAITOK | M_ZERO), 0, ~0UL, 0x100, 0);
+	    (M_NOWAIT | M_ZERO), 0, ~0UL, 0x100, 0);
+	if (newdev->itt == 0) {
+		lpi_free_chunk(sc, &newdev->lpis);
+		free(newdev, M_GIC_V3_ITS);
+		return (NULL);
+	}
 
-	/*
-	 * XXX ARM64TODO: Currently all interrupts are going
-	 * to be bound to the CPU that performs the configuration.
-	 */
-	cpuid = PCPU_GET(cpuid);
-	newdev->col = &sc->its_cols[cpuid];
-
+	mtx_lock_spin(&sc->its_dev_lock);
 	TAILQ_INSERT_TAIL(&sc->its_dev_list, newdev, entry);
+	mtx_unlock_spin(&sc->its_dev_lock);
 
 	/* Map device to its ITT */
 	its_cmd_mapd(sc, newdev, 1);
@@ -1343,7 +1556,7 @@ its_device_asign_lpi_locked(struct gic_v3_its_softc *sc,
     struct its_dev *its_dev, u_int *irq)
 {
 
-	mtx_assert(&sc->its_mtx, MA_OWNED);
+	mtx_assert(&sc->its_dev_lock, MA_OWNED);
 	if (its_dev->lpis.lpi_free == 0) {
 		panic("Requesting more LPIs than allocated for this device. "
 		    "LPI num: %u, free %u", its_dev->lpis.lpi_num,
@@ -1353,6 +1566,139 @@ its_device_asign_lpi_locked(struct gic_v3_its_softc *sc,
 	    its_dev->lpis.lpi_free);
 	its_dev->lpis.lpi_free--;
 }
+
+/*
+ * ITS quirks.
+ * Add vendor specific PCI devid function here.
+ */
+static uint32_t
+its_get_devid_thunder(device_t pci_dev)
+{
+	int bsf;
+	int pem;
+	uint32_t bus;
+
+	bus = pci_get_bus(pci_dev);
+
+	bsf = PCI_RID(pci_get_bus(pci_dev), pci_get_slot(pci_dev),
+	    pci_get_function(pci_dev));
+
+	/* Check if accessing internal PCIe (low bus numbers) */
+	if (bus < GIC_V3_ITS_QUIRK_THUNDERX_PEM_BUS_OFFSET) {
+		return ((pci_get_domain(pci_dev) << PCI_RID_DOMAIN_SHIFT) |
+		    bsf);
+	/* PEM otherwise */
+	} else {
+		/* PEM (PCIe MAC/root complex) number is equal to domain */
+		pem = pci_get_domain(pci_dev);
+
+		/*
+		 * Set appropriate device ID (passed by the HW along with
+		 * the transaction to memory) for different root complex
+		 * numbers using hard-coded domain portion for each group.
+		 */
+		if (pem < 3)
+			return ((0x1 << PCI_RID_DOMAIN_SHIFT) | bsf);
+
+		if (pem < 6)
+			return ((0x3 << PCI_RID_DOMAIN_SHIFT) | bsf);
+
+		if (pem < 9)
+			return ((0x9 << PCI_RID_DOMAIN_SHIFT) | bsf);
+
+		if (pem < 12)
+			return ((0xB << PCI_RID_DOMAIN_SHIFT) | bsf);
+	}
+
+	return (0);
+}
+
+static uint32_t
+its_get_devbits_thunder(device_t dev)
+{
+	uint32_t devid_bits;
+
+	/*
+	 * GITS_TYPER[17:13] of ThunderX reports that device IDs
+	 * are to be 21 bits in length.
+	 * The entry size of the ITS table can be read from GITS_BASERn[52:48]
+	 * and on ThunderX is supposed to be 8 bytes in length (for device
+	 * table). Finally the page size that is to be used by ITS to access
+	 * this table will be set to 64KB.
+	 *
+	 * This gives 0x200000 entries of size 0x8 bytes covered by 256 pages
+	 * each of which 64KB in size. The number of pages (minus 1) should
+	 * then be written to GITS_BASERn[7:0]. In that case this value would
+	 * be 0xFF but on ThunderX the maximum value that HW accepts is 0xFD.
+	 *
+	 * Set arbitrary number of device ID bits to 20 in order to limit
+	 * the number of entries in ITS device table to 0x100000 and hence
+	 * the table size to 8MB.
+	 */
+	devid_bits = 20;
+	if (bootverbose) {
+		device_printf(dev,
+		    "Limiting number of Device ID bits implemented to %d\n",
+		    devid_bits);
+	}
+
+	return (devid_bits);
+}
+
+static __inline uint32_t
+its_get_devbits_default(device_t dev)
+{
+	uint64_t gits_typer;
+	struct gic_v3_its_softc *sc;
+
+	sc = device_get_softc(dev);
+
+	gits_typer = gic_its_read(sc, 8, GITS_TYPER);
+
+	return (GITS_TYPER_DEVB(gits_typer));
+}
+
+static uint32_t
+its_get_devbits(device_t dev)
+{
+	const struct its_quirks *quirk;
+	size_t i;
+
+	for (i = 0; i < nitems(its_quirks); i++) {
+		quirk = &its_quirks[i];
+		if (CPU_MATCH_RAW(quirk->cpuid_mask, quirk->cpuid)) {
+			if (quirk->devbits_func != NULL)
+				return ((*quirk->devbits_func)(dev));
+		}
+	}
+
+	return (its_get_devbits_default(dev));
+}
+
+static __inline uint32_t
+its_get_devid_default(device_t pci_dev)
+{
+
+	return (PCI_DEVID_GENERIC(pci_dev));
+}
+
+static uint32_t
+its_get_devid(device_t pci_dev)
+{
+	const struct its_quirks *quirk;
+	size_t i;
+
+	for (i = 0; i < nitems(its_quirks); i++) {
+		quirk = &its_quirks[i];
+		if (CPU_MATCH_RAW(quirk->cpuid_mask, quirk->cpuid)) {
+			if (quirk->devid_func != NULL)
+				return ((*quirk->devid_func)(pci_dev));
+		}
+	}
+
+	return (its_get_devid_default(pci_dev));
+}
+
 /*
  * Message signalled interrupts handling.
  */
@@ -1373,21 +1719,19 @@ gic_v3_its_alloc_msix(device_t dev, device_t pci_dev, int *irq)
 
 	sc = device_get_softc(dev);
 
-	mtx_lock(&sc->its_mtx);
 	nvecs = PCI_MSIX_NUM(pci_dev);
 
 	/*
 	 * Allocate device as seen by ITS if not already available.
 	 * Notice that MSI-X interrupts are allocated on one-by-one basis.
 	 */
-	its_dev = its_device_alloc_locked(sc, pci_dev, nvecs);
-	if (its_dev == NULL) {
-		mtx_unlock(&sc->its_mtx);
+	its_dev = its_device_alloc(sc, pci_dev, nvecs);
+	if (its_dev == NULL)
 		return (ENOMEM);
-	}
 
+	mtx_lock_spin(&sc->its_dev_lock);
 	its_device_asign_lpi_locked(sc, its_dev, irq);
-	mtx_unlock(&sc->its_mtx);
+	mtx_unlock_spin(&sc->its_dev_lock);
 
 	return (0);
 }
@@ -1401,24 +1745,22 @@ gic_v3_its_alloc_msi(device_t dev, device_t pci_dev, int count, int *irqs)
 	sc = device_get_softc(dev);
 
 	/* Allocate device as seen by ITS if not already available. */
-	mtx_lock(&sc->its_mtx);
-	its_dev = its_device_alloc_locked(sc, pci_dev, count);
-	if (its_dev == NULL) {
-		mtx_unlock(&sc->its_mtx);
+	its_dev = its_device_alloc(sc, pci_dev, count);
+	if (its_dev == NULL)
 		return (ENOMEM);
-	}
 
+	mtx_lock_spin(&sc->its_dev_lock);
 	for (; count > 0; count--) {
 		its_device_asign_lpi_locked(sc, its_dev, irqs);
 		irqs++;
 	}
-	mtx_unlock(&sc->its_mtx);
+	mtx_unlock_spin(&sc->its_dev_lock);
 
 	return (0);
 }
 
 int
-gic_v3_its_map_msix(device_t dev, device_t pci_dev, int irq, uint64_t *addr,
+gic_v3_its_map_msi(device_t dev, device_t pci_dev, int irq, uint64_t *addr,
     uint32_t *data)
 {
 	struct gic_v3_its_softc *sc;
@@ -1429,9 +1771,9 @@ gic_v3_its_map_msix(device_t dev, device_t pci_dev, int irq, uint64_t *addr,
 
 	sc = device_get_softc(dev);
 	/* Verify that this device is allocated and owns this LPI */
-	mtx_lock(&sc->its_mtx);
-	its_dev = its_device_find_locked(sc, pci_dev);
-	mtx_unlock(&sc->its_mtx);
+	mtx_lock_spin(&sc->its_dev_lock);
+	its_dev = its_device_find_locked(sc, pci_dev, 0);
+	mtx_unlock_spin(&sc->its_dev_lock);
 	if (its_dev == NULL)
 		return (EINVAL);
 

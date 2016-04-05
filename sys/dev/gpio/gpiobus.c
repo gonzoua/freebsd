@@ -155,12 +155,16 @@ gpiobus_attach_bus(device_t dev)
 int
 gpiobus_detach_bus(device_t dev)
 {
+	int err;
 
 #ifdef FDT
 	ofw_gpiobus_unregister_provider(dev);
 #endif
+	err = bus_generic_detach(dev);
+	if (err != 0)
+		return (err);
 
-	return (bus_generic_detach(dev));
+	return (device_delete_children(dev));
 }
 
 int
@@ -180,7 +184,7 @@ gpiobus_init_softc(device_t dev)
 	if (GPIO_PIN_MAX(sc->sc_dev, &sc->sc_npins) != 0)
 		return (ENXIO);
 
-	KASSERT(sc->sc_npins != 0, ("GPIO device with no pins"));
+	KASSERT(sc->sc_npins >= 0, ("GPIO device with no pins"));
 
 	/* Pins = GPIO_PIN_MAX() + 1 */
 	sc->sc_npins++;
@@ -338,11 +342,14 @@ gpiobus_detach(device_t dev)
 	if ((err = device_get_children(dev, &devlist, &ndevs)) != 0)
 		return (err);
 	for (i = 0; i < ndevs; i++) {
-		device_delete_child(dev, devlist[i]);
 		devi = GPIOBUS_IVAR(devlist[i]);
 		gpiobus_free_ivars(devi);
+		resource_list_free(&devi->rl);
+		free(devi, M_DEVBUF);
+		device_delete_child(dev, devlist[i]);
 	}
 	free(devlist, M_TEMP);
+	rman_fini(&sc->sc_intr_rman);
 	if (sc->sc_pins) {
 		for (i = 0; i < sc->sc_npins; i++) {
 			if (sc->sc_pins[i].name != NULL)
@@ -379,8 +386,11 @@ gpiobus_probe_nomatch(device_t dev, device_t child)
 	devi = GPIOBUS_IVAR(child);
 	memset(pins, 0, sizeof(pins));
 	gpiobus_print_pins(devi, pins, sizeof(pins));
-	device_printf(dev, "<unknown device> at pin(s) %s", pins);
-	resource_list_print_type(&devi->rl, "irq", SYS_RES_IRQ, "%ld");
+	if (devi->npins > 1)
+		device_printf(dev, "<unknown device> at pins %s", pins);
+	else
+		device_printf(dev, "<unknown device> at pin %s", pins);
+	resource_list_print_type(&devi->rl, "irq", SYS_RES_IRQ, "%jd");
 	printf("\n");
 }
 
@@ -394,10 +404,15 @@ gpiobus_print_child(device_t dev, device_t child)
 	devi = GPIOBUS_IVAR(child);
 	memset(pins, 0, sizeof(pins));
 	retval += bus_print_child_header(dev, child);
-	retval += printf(" at pin(s) ");
-	gpiobus_print_pins(devi, pins, sizeof(pins));
-	retval += printf("%s", pins);
-	resource_list_print_type(&devi->rl, "irq", SYS_RES_IRQ, "%ld");
+	if (devi->npins > 0) {
+		if (devi->npins > 1)
+			retval += printf(" at pins ");
+		else
+			retval += printf(" at pin ");
+		gpiobus_print_pins(devi, pins, sizeof(pins));
+		retval += printf("%s", pins);
+	}
+	resource_list_print_type(&devi->rl, "irq", SYS_RES_IRQ, "%jd");
 	retval += bus_print_child_footer(dev, child);
 
 	return (retval);
@@ -410,7 +425,10 @@ gpiobus_child_location_str(device_t bus, device_t child, char *buf,
 	struct gpiobus_ivar *devi;
 
 	devi = GPIOBUS_IVAR(child);
-	strlcpy(buf, "pin(s)=", buflen);
+	if (devi->npins > 1)
+		strlcpy(buf, "pins=", buflen);
+	else
+		strlcpy(buf, "pin=", buflen);
 	gpiobus_print_pins(devi, buf, buflen);
 
 	return (0);
@@ -437,7 +455,7 @@ gpiobus_add_child(device_t dev, u_int order, const char *name, int unit)
 	devi = malloc(sizeof(struct gpiobus_ivar), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (devi == NULL) {
 		device_delete_child(dev, child);
-		return (0);
+		return (NULL);
 	}
 	resource_list_init(&devi->rl);
 	device_set_ivars(child, devi);
@@ -456,8 +474,11 @@ gpiobus_hinted_child(device_t bus, const char *dname, int dunit)
 	child = BUS_ADD_CHILD(bus, 0, dname, dunit);
 	devi = GPIOBUS_IVAR(child);
 	resource_int_value(dname, dunit, "pins", &pins);
-	if (gpiobus_parse_pins(sc, child, pins))
+	if (gpiobus_parse_pins(sc, child, pins)) {
+		resource_list_free(&devi->rl);
+		free(devi, M_DEVBUF);
 		device_delete_child(bus, child);
+	}
 	if (resource_int_value(dname, dunit, "irq", &irq) == 0) {
 		if (bus_set_resource(child, SYS_RES_IRQ, 0, irq, 1) != 0)
 			device_printf(bus,
@@ -467,7 +488,7 @@ gpiobus_hinted_child(device_t bus, const char *dname, int dunit)
 
 static int
 gpiobus_set_resource(device_t dev, device_t child, int type, int rid,
-    u_long start, u_long count)
+    rman_res_t start, rman_res_t count)
 {
 	struct gpiobus_ivar *devi;
 	struct resource_list_entry *rle;
@@ -485,7 +506,7 @@ gpiobus_set_resource(device_t dev, device_t child, int type, int rid,
 
 static struct resource *
 gpiobus_alloc_resource(device_t bus, device_t child, int type, int *rid,
-    u_long start, u_long end, u_long count, u_int flags)
+    rman_res_t start, rman_res_t end, rman_res_t count, u_int flags)
 {
 	struct gpiobus_softc *sc;
 	struct resource *rv;
@@ -495,7 +516,7 @@ gpiobus_alloc_resource(device_t bus, device_t child, int type, int *rid,
 
 	if (type != SYS_RES_IRQ)
 		return (NULL);
-	isdefault = (start == 0UL && end == ~0UL && count == 1);
+	isdefault = (RMAN_IS_DEFAULT_RANGE(start, end) && count == 1);
 	rle = NULL;
 	if (isdefault) {
 		rl = BUS_GET_RESOURCE_LIST(bus, child);
@@ -559,6 +580,10 @@ gpiobus_acquire_bus(device_t busdev, device_t child, int how)
 	GPIOBUS_ASSERT_UNLOCKED(sc);
 	GPIOBUS_LOCK(sc);
 	if (sc->sc_owner != NULL) {
+		if (sc->sc_owner == child)
+			panic("%s: %s still owns the bus.",
+			    device_get_nameunit(busdev),
+			    device_get_nameunit(child));
 		if (how == GPIOBUS_DONTWAIT) {
 			GPIOBUS_UNLOCK(sc);
 			return (EWOULDBLOCK);
@@ -581,9 +606,14 @@ gpiobus_release_bus(device_t busdev, device_t child)
 	GPIOBUS_ASSERT_UNLOCKED(sc);
 	GPIOBUS_LOCK(sc);
 	if (sc->sc_owner == NULL)
-		panic("gpiobus: releasing unowned bus.");
+		panic("%s: %s releasing unowned bus.",
+		    device_get_nameunit(busdev),
+		    device_get_nameunit(child));
 	if (sc->sc_owner != child)
-		panic("gpiobus: you don't own the bus. game over.");
+		panic("%s: %s trying to release bus owned by %s",
+		    device_get_nameunit(busdev),
+		    device_get_nameunit(child),
+		    device_get_nameunit(sc->sc_owner));
 	sc->sc_owner = NULL;
 	wakeup(sc);
 	GPIOBUS_UNLOCK(sc);

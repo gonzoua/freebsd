@@ -43,8 +43,8 @@
 #include "util/log.h"
 #include "util/net_help.h"
 #include "util/fptr_wlist.h"
-#include "ldns/pkthdr.h"
-#include "ldns/sbuffer.h"
+#include "sldns/pkthdr.h"
+#include "sldns/sbuffer.h"
 #include "dnstap/dnstap.h"
 #ifdef HAVE_OPENSSL_SSL_H
 #include <openssl/ssl.h>
@@ -56,7 +56,9 @@
 /* -------- Start of local definitions -------- */
 /** if CMSG_ALIGN is not defined on this platform, a workaround */
 #ifndef CMSG_ALIGN
-#  ifdef _CMSG_DATA_ALIGN
+#  ifdef __CMSG_ALIGN
+#    define CMSG_ALIGN(n) __CMSG_ALIGN(n)
+#  elif defined(CMSG_DATA_ALIGN)
 #    define CMSG_ALIGN _CMSG_DATA_ALIGN
 #  else
 #    define CMSG_ALIGN(len) (((len)+sizeof(long)-1) & ~(sizeof(long)-1))
@@ -356,7 +358,12 @@ udp_send_errno_needs_log(struct sockaddr* addr, socklen_t addrlen)
 #endif
 	/* permission denied is gotten for every send if the
 	 * network is disconnected (on some OS), squelch it */
-	if(errno == EPERM && verbosity < VERB_DETAIL)
+	if( ((errno == EPERM)
+#  ifdef EADDRNOTAVAIL
+		/* 'Cannot assign requested address' also when disconnected */
+		|| (errno == EADDRNOTAVAIL)
+#  endif
+		) && verbosity < VERB_DETAIL)
 		return 0;
 	/* squelch errors where people deploy AAAA ::ffff:bla for
 	 * authority servers, which we try for intranets. */
@@ -393,6 +400,31 @@ comm_point_send_udp_msg(struct comm_point *c, sldns_buffer* packet,
 	sent = sendto(c->fd, (void*)sldns_buffer_begin(packet), 
 		sldns_buffer_remaining(packet), 0,
 		addr, addrlen);
+	if(sent == -1) {
+		/* try again and block, waiting for IO to complete,
+		 * we want to send the answer, and we will wait for
+		 * the ethernet interface buffer to have space. */
+#ifndef USE_WINSOCK
+		if(errno == EAGAIN || 
+#  ifdef EWOULDBLOCK
+			errno == EWOULDBLOCK ||
+#  endif
+			errno == ENOBUFS) {
+#else
+		if(WSAGetLastError() == WSAEINPROGRESS ||
+			WSAGetLastError() == WSAENOBUFS ||
+			WSAGetLastError() == WSAEWOULDBLOCK) {
+#endif
+			int e;
+			fd_set_block(c->fd);
+			sent = sendto(c->fd, (void*)sldns_buffer_begin(packet), 
+				sldns_buffer_remaining(packet), 0,
+				addr, addrlen);
+			e = errno;
+			fd_set_nonblock(c->fd);
+			errno = e;
+		}
+	}
 	if(sent == -1) {
 		if(!udp_send_errno_needs_log(addr, addrlen))
 			return 0;
@@ -498,12 +530,16 @@ comm_point_send_udp_msg_if(struct comm_point *c, sldns_buffer* packet,
 	cmsg = CMSG_FIRSTHDR(&msg);
 	if(r->srctype == 4) {
 #ifdef IP_PKTINFO
+		void* cmsg_data;
 		msg.msg_controllen = CMSG_SPACE(sizeof(struct in_pktinfo));
 		log_assert(msg.msg_controllen <= sizeof(control));
 		cmsg->cmsg_level = IPPROTO_IP;
 		cmsg->cmsg_type = IP_PKTINFO;
 		memmove(CMSG_DATA(cmsg), &r->pktinfo.v4info,
 			sizeof(struct in_pktinfo));
+		/* unset the ifindex to not bypass the routing tables */
+		cmsg_data = CMSG_DATA(cmsg);
+		((struct in_pktinfo *) cmsg_data)->ipi_ifindex = 0;
 		cmsg->cmsg_len = CMSG_LEN(sizeof(struct in_pktinfo));
 #elif defined(IP_SENDSRCADDR)
 		msg.msg_controllen = CMSG_SPACE(sizeof(struct in_addr));
@@ -518,12 +554,16 @@ comm_point_send_udp_msg_if(struct comm_point *c, sldns_buffer* packet,
 		msg.msg_control = NULL;
 #endif /* IP_PKTINFO or IP_SENDSRCADDR */
 	} else if(r->srctype == 6) {
+		void* cmsg_data;
 		msg.msg_controllen = CMSG_SPACE(sizeof(struct in6_pktinfo));
 		log_assert(msg.msg_controllen <= sizeof(control));
 		cmsg->cmsg_level = IPPROTO_IPV6;
 		cmsg->cmsg_type = IPV6_PKTINFO;
 		memmove(CMSG_DATA(cmsg), &r->pktinfo.v6info,
 			sizeof(struct in6_pktinfo));
+		/* unset the ifindex to not bypass the routing tables */
+		cmsg_data = CMSG_DATA(cmsg);
+		((struct in6_pktinfo *) cmsg_data)->ipi6_ifindex = 0;
 		cmsg->cmsg_len = CMSG_LEN(sizeof(struct in6_pktinfo));
 	} else {
 		/* try to pass all 0 to use default route */
@@ -539,11 +579,40 @@ comm_point_send_udp_msg_if(struct comm_point *c, sldns_buffer* packet,
 		p_ancil("send_udp over interface", r);
 	sent = sendmsg(c->fd, &msg, 0);
 	if(sent == -1) {
+		/* try again and block, waiting for IO to complete,
+		 * we want to send the answer, and we will wait for
+		 * the ethernet interface buffer to have space. */
+#ifndef USE_WINSOCK
+		if(errno == EAGAIN || 
+#  ifdef EWOULDBLOCK
+			errno == EWOULDBLOCK ||
+#  endif
+			errno == ENOBUFS) {
+#else
+		if(WSAGetLastError() == WSAEINPROGRESS ||
+			WSAGetLastError() == WSAENOBUFS ||
+			WSAGetLastError() == WSAEWOULDBLOCK) {
+#endif
+			int e;
+			fd_set_block(c->fd);
+			sent = sendmsg(c->fd, &msg, 0);
+			e = errno;
+			fd_set_nonblock(c->fd);
+			errno = e;
+		}
+	}
+	if(sent == -1) {
 		if(!udp_send_errno_needs_log(addr, addrlen))
 			return 0;
 		verbose(VERB_OPS, "sendmsg failed: %s", strerror(errno));
 		log_addr(VERB_OPS, "remote address is", 
 			(struct sockaddr_storage*)addr, addrlen);
+#ifdef __NetBSD__
+		/* netbsd 7 has IP_PKTINFO for recv but not send */
+		if(errno == EINVAL && r->srctype == 4)
+			log_err("sendmsg: No support for sendmsg(IP_PKTINFO). "
+				"Please disable interface-automatic");
+#endif
 		return 0;
 	} else if((size_t)sent != sldns_buffer_remaining(packet)) {
 		log_err("sent %d in place of %d bytes", 
@@ -879,12 +948,12 @@ comm_point_tcp_accept_callback(int fd, short event, void* arg)
 	}
 
 	/* grab the tcp handler buffers */
+	c->cur_tcp_count++;
 	c->tcp_free = c_hdl->tcp_free;
 	if(!c->tcp_free) {
 		/* stop accepting incoming queries for now. */
 		comm_point_stop_listening(c);
 	}
-	/* addr is dropped. Not needed for tcp reply. */
 	setup_tcp_handler(c_hdl, new_fd);
 }
 
@@ -902,6 +971,7 @@ reclaim_tcp_handler(struct comm_point* c)
 	}
 	comm_point_close(c);
 	if(c->tcp_parent) {
+		c->tcp_parent->cur_tcp_count--;
 		c->tcp_free = c->tcp_parent->tcp_free;
 		c->tcp_parent->tcp_free = c;
 		if(!c->tcp_free) {
@@ -1528,6 +1598,7 @@ comm_point_create_udp(struct comm_base *base, int fd, sldns_buffer* buffer,
 	c->tcp_byte_count = 0;
 	c->tcp_parent = NULL;
 	c->max_tcp_count = 0;
+	c->cur_tcp_count = 0;
 	c->tcp_handlers = NULL;
 	c->tcp_free = NULL;
 	c->type = comm_udp;
@@ -1578,6 +1649,7 @@ comm_point_create_udp_ancil(struct comm_base *base, int fd,
 	c->tcp_byte_count = 0;
 	c->tcp_parent = NULL;
 	c->max_tcp_count = 0;
+	c->cur_tcp_count = 0;
 	c->tcp_handlers = NULL;
 	c->tcp_free = NULL;
 	c->type = comm_udp;
@@ -1639,6 +1711,7 @@ comm_point_create_tcp_handler(struct comm_base *base,
 	c->tcp_byte_count = 0;
 	c->tcp_parent = parent;
 	c->max_tcp_count = 0;
+	c->cur_tcp_count = 0;
 	c->tcp_handlers = NULL;
 	c->tcp_free = NULL;
 	c->type = comm_tcp;
@@ -1691,6 +1764,7 @@ comm_point_create_tcp(struct comm_base *base, int fd, int num, size_t bufsize,
 	c->tcp_byte_count = 0;
 	c->tcp_parent = NULL;
 	c->max_tcp_count = num;
+	c->cur_tcp_count = 0;
 	c->tcp_handlers = (struct comm_point**)calloc((size_t)num,
 		sizeof(struct comm_point*));
 	if(!c->tcp_handlers) {
@@ -1758,6 +1832,7 @@ comm_point_create_tcp_out(struct comm_base *base, size_t bufsize,
 	c->tcp_byte_count = 0;
 	c->tcp_parent = NULL;
 	c->max_tcp_count = 0;
+	c->cur_tcp_count = 0;
 	c->tcp_handlers = NULL;
 	c->tcp_free = NULL;
 	c->type = comm_tcp;
@@ -1810,6 +1885,7 @@ comm_point_create_local(struct comm_base *base, int fd, size_t bufsize,
 	c->tcp_byte_count = 0;
 	c->tcp_parent = NULL;
 	c->max_tcp_count = 0;
+	c->cur_tcp_count = 0;
 	c->tcp_handlers = NULL;
 	c->tcp_free = NULL;
 	c->type = comm_local;
@@ -1857,6 +1933,7 @@ comm_point_create_raw(struct comm_base* base, int fd, int writing,
 	c->tcp_byte_count = 0;
 	c->tcp_parent = NULL;
 	c->max_tcp_count = 0;
+	c->cur_tcp_count = 0;
 	c->tcp_handlers = NULL;
 	c->tcp_free = NULL;
 	c->type = comm_raw;

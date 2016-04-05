@@ -20,7 +20,6 @@
 #include "lldb/Core/ValueObjectConstResult.h"
 #include "lldb/Core/ValueObjectRegister.h"
 #include "lldb/Core/ValueObjectMemory.h"
-#include "lldb/Symbol/ClangASTContext.h"
 #include "lldb/Symbol/UnwindPlan.h"
 #include "lldb/Target/Target.h"
 #include "lldb/Target/Process.h"
@@ -30,7 +29,7 @@
 
 #include "llvm/ADT/Triple.h"
 
-#include "llvm/IR/Type.h"
+#include "llvm/IR/DerivedTypes.h"
 
 using namespace lldb;
 using namespace lldb_private;
@@ -227,7 +226,7 @@ ABISysV_hexagon::PrepareTrivialCall ( Thread &thread,
 //  . handle 64bit values and their register / stack requirements
 
 */
-#define HEX_ABI_DEBUG 1
+#define HEX_ABI_DEBUG 0
 bool
 ABISysV_hexagon::PrepareTrivialCall ( Thread &thread, 
                                       lldb::addr_t  sp  , 
@@ -243,6 +242,23 @@ ABISysV_hexagon::PrepareTrivialCall ( Thread &thread,
     // grab the process so we have access to the memory for spilling
     lldb::ProcessSP proc = thread.GetProcess( );
 
+    // get the register context for modifying all of the registers
+    RegisterContext *reg_ctx = thread.GetRegisterContext().get();
+    if (!reg_ctx)
+        return false;
+    
+    uint32_t pc_reg = reg_ctx->ConvertRegisterKindToRegisterNumber(eRegisterKindGeneric, LLDB_REGNUM_GENERIC_PC);
+    if (pc_reg == LLDB_INVALID_REGNUM)
+        return false;
+
+    uint32_t ra_reg = reg_ctx->ConvertRegisterKindToRegisterNumber(eRegisterKindGeneric, LLDB_REGNUM_GENERIC_RA);
+    if (ra_reg == LLDB_INVALID_REGNUM)
+        return false;
+
+    uint32_t sp_reg = reg_ctx->ConvertRegisterKindToRegisterNumber(eRegisterKindGeneric, LLDB_REGNUM_GENERIC_SP);
+    if (sp_reg == LLDB_INVALID_REGNUM)
+        return false;
+
     // push host data onto target
     for ( size_t i = 0; i < args.size( ); i++ )
     {
@@ -257,19 +273,18 @@ ABISysV_hexagon::PrepareTrivialCall ( Thread &thread,
         sp -= argSize;
 
         // write this argument onto the stack of the host process
-        proc.get( )->WriteMemory( sp, arg.data, arg.size, error );
+        proc.get( )->WriteMemory( sp, arg.data_ap.get(), arg.size, error );
         if ( error.Fail( ) )
             return false;
 
         // update the argument with the target pointer
         //XXX: This is a gross hack for getting around the const
-        *((size_t*)(&arg.value)) = sp;
+        *const_cast<lldb::addr_t*>(&arg.value) = sp;
     }
-
 
 #if HEX_ABI_DEBUG
     // print the original stack pointer
-    printf( "sp : %04lx \n", sp );
+    printf( "sp : %04" PRIx64 " \n", sp );
 #endif
 
     // make sure number of parameters matches prototype
@@ -278,11 +293,6 @@ ABISysV_hexagon::PrepareTrivialCall ( Thread &thread,
     // check if this is a variable argument function
     bool isVArg = prototype.isFunctionVarArg();
 
-    // get the register context for modifying all of the registers
-    RegisterContext *reg_ctx = thread.GetRegisterContext().get();
-    if (!reg_ctx)
-        return false;
-    
     // number of arguments passed by register
     int nRegArgs = nVArgRegParams;
     if (! isVArg )
@@ -325,10 +335,9 @@ ABISysV_hexagon::PrepareTrivialCall ( Thread &thread,
     }
 
     // update registers with current function call state
-    reg_ctx->WriteRegisterFromUnsigned ( 41, pc );
-    reg_ctx->WriteRegisterFromUnsigned ( 31, ra );
-    reg_ctx->WriteRegisterFromUnsigned ( 29, sp );
-//  reg_ctx->WriteRegisterFromUnsigned ( FP ??? );
+    reg_ctx->WriteRegisterFromUnsigned(pc_reg, pc);
+    reg_ctx->WriteRegisterFromUnsigned(ra_reg, ra);
+    reg_ctx->WriteRegisterFromUnsigned(sp_reg, sp);
 
 #if HEX_ABI_DEBUG
     // quick and dirty stack dumper for debugging
@@ -337,7 +346,7 @@ ABISysV_hexagon::PrepareTrivialCall ( Thread &thread,
         uint32_t data = 0;
         lldb::addr_t addr = sp + i * 4;
         proc->ReadMemory( addr, (void*)&data, sizeof( data ), error );
-        printf( "\n0x%04lx 0x%08x ", addr, data );
+        printf( "\n0x%04" PRIx64 " 0x%08x ", addr, data );
         if ( i == 0 ) printf( "<<-- sp" );
     }
     printf( "\n" );
@@ -360,14 +369,14 @@ ABISysV_hexagon::SetReturnValueObject ( lldb::StackFrameSP &frame_sp, lldb::Valu
 }
 
 ValueObjectSP
-ABISysV_hexagon::GetReturnValueObjectSimple ( Thread &thread, ClangASTType &return_clang_type ) const
+ABISysV_hexagon::GetReturnValueObjectSimple ( Thread &thread, CompilerType &return_compiler_type ) const
 {
     ValueObjectSP return_valobj_sp;
     return return_valobj_sp;
 }
 
 ValueObjectSP
-ABISysV_hexagon::GetReturnValueObjectImpl ( Thread &thread, ClangASTType &return_clang_type ) const
+ABISysV_hexagon::GetReturnValueObjectImpl ( Thread &thread, CompilerType &return_compiler_type ) const
 {
     ValueObjectSP return_valobj_sp;
     return return_valobj_sp;
@@ -385,8 +394,7 @@ ABISysV_hexagon::CreateFunctionEntryUnwindPlan ( UnwindPlan &unwind_plan )
     UnwindPlan::RowSP row(new UnwindPlan::Row);
 
     // Our Call Frame Address is the stack pointer value
-    row->SetCFARegister(LLDB_REGNUM_GENERIC_SP);
-    row->SetCFAOffset(4);
+    row->GetCFAValue().SetIsRegisterPlusOffset (LLDB_REGNUM_GENERIC_SP, 4);
     row->SetOffset(0);
 
     // The previous PC is in the LR
@@ -410,8 +418,7 @@ ABISysV_hexagon::CreateDefaultUnwindPlan ( UnwindPlan &unwind_plan )
 
     UnwindPlan::RowSP row(new UnwindPlan::Row);
 
-    row->SetCFARegister(LLDB_REGNUM_GENERIC_FP);
-    row->SetCFAOffset(8);
+    row->GetCFAValue().SetIsRegisterPlusOffset (LLDB_REGNUM_GENERIC_FP, 8);
 
     row->SetRegisterLocationToAtCFAPlusOffset(fp_reg_num,-8, true);
     row->SetRegisterLocationToAtCFAPlusOffset(pc_reg_num,-4, true);

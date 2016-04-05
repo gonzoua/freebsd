@@ -21,6 +21,8 @@
 /*
  * Copyright (c) 2010, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2012 by Delphix. All rights reserved.
+ * Copyright (c) 2014 Spectra Logic Corporation, All rights reserved.
+ * Copyright (c) 2014 Integros [integros.com]
  */
 
 #include <sys/dsl_dataset.h>
@@ -118,6 +120,8 @@ dsl_deadlist_close(dsl_deadlist_t *dl)
 {
 	void *cookie = NULL;
 	dsl_deadlist_entry_t *dle;
+
+	dl->dl_os = NULL;
 
 	if (dl->dl_oldfmt) {
 		dl->dl_oldfmt = B_FALSE;

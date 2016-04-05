@@ -7,12 +7,15 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "lldb/lldb-python.h"
-
+// C Includes
+// C++ Includes
+// Other libraries and framework includes
+// Project includes
 #include "lldb/API/SBDebugger.h"
 
 #include "lldb/lldb-private.h"
 
+#include "lldb/API/SystemInitializerFull.h"
 #include "lldb/API/SBListener.h"
 #include "lldb/API/SBBroadcaster.h"
 #include "lldb/API/SBCommandInterpreter.h"
@@ -33,45 +36,23 @@
 #include "lldb/API/SBTypeSummary.h"
 #include "lldb/API/SBTypeSynthetic.h"
 
-
 #include "lldb/Core/Debugger.h"
 #include "lldb/Core/State.h"
 #include "lldb/Core/StreamFile.h"
 #include "lldb/DataFormatters/DataVisualization.h"
+#include "lldb/Initialization/SystemLifetimeManager.h"
 #include "lldb/Interpreter/Args.h"
 #include "lldb/Interpreter/CommandInterpreter.h"
 #include "lldb/Interpreter/OptionGroupPlatform.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Target/TargetList.h"
 
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/DynamicLibrary.h"
 
 using namespace lldb;
 using namespace lldb_private;
-
-
-SBInputReader::SBInputReader()
-{
-}
-SBInputReader::~SBInputReader()
-{
-}
-
-SBError
-SBInputReader::Initialize(lldb::SBDebugger& sb_debugger, unsigned long (*)(void*, lldb::SBInputReader*, lldb::InputReaderAction, char const*, unsigned long), void*, lldb::InputReaderGranularity, char const*, char const*, bool)
-{
-    return SBError();
-}
-
-void
-SBInputReader::SetIsDone(bool)
-{
-}
-bool
-SBInputReader::IsActive() const
-{
-    return false;
-}
 
 static llvm::sys::DynamicLibrary
 LoadPlugin (const lldb::DebuggerSP &debugger_sp, const FileSpec& spec, Error& error)
@@ -107,6 +88,52 @@ LoadPlugin (const lldb::DebuggerSP &debugger_sp, const FileSpec& spec, Error& er
     return llvm::sys::DynamicLibrary();
 }
 
+static llvm::ManagedStatic<SystemLifetimeManager> g_debugger_lifetime;
+
+SBError
+SBInputReader::Initialize(lldb::SBDebugger &sb_debugger,
+                          unsigned long (*)(void *, lldb::SBInputReader *, lldb::InputReaderAction, char const *,
+                                            unsigned long),
+                          void *, lldb::InputReaderGranularity, char const *, char const *, bool)
+{
+    return SBError();
+}
+
+void
+SBInputReader::SetIsDone(bool)
+{
+}
+
+bool
+SBInputReader::IsActive() const
+{
+    return false;
+}
+
+SBDebugger::SBDebugger() = default;
+
+SBDebugger::SBDebugger(const lldb::DebuggerSP &debugger_sp) :
+    m_opaque_sp(debugger_sp)
+{
+}
+
+SBDebugger::SBDebugger(const SBDebugger &rhs) :
+    m_opaque_sp (rhs.m_opaque_sp)
+{
+}
+
+SBDebugger::~SBDebugger() = default;
+
+SBDebugger &
+SBDebugger::operator = (const SBDebugger &rhs)
+{
+    if (this != &rhs)
+    {
+        m_opaque_sp = rhs.m_opaque_sp;
+    }
+    return *this;
+}
+
 void
 SBDebugger::Initialize ()
 {
@@ -115,15 +142,13 @@ SBDebugger::Initialize ()
     if (log)
         log->Printf ("SBDebugger::Initialize ()");
 
-    SBCommandInterpreter::InitializeSWIG ();
-
-    Debugger::Initialize(LoadPlugin);
+    g_debugger_lifetime->Initialize(llvm::make_unique<SystemInitializerFull>(), LoadPlugin);
 }
 
 void
 SBDebugger::Terminate ()
 {
-    Debugger::Terminate();
+    g_debugger_lifetime->Terminate();
 }
 
 void
@@ -144,13 +169,13 @@ SBDebugger::Clear ()
 SBDebugger
 SBDebugger::Create()
 {
-    return SBDebugger::Create(false, NULL, NULL);
+    return SBDebugger::Create(false, nullptr, nullptr);
 }
 
 SBDebugger
 SBDebugger::Create(bool source_init_files)
 {
-    return SBDebugger::Create (source_init_files, NULL, NULL);
+    return SBDebugger::Create (source_init_files, nullptr, nullptr);
 }
 
 SBDebugger
@@ -212,7 +237,7 @@ SBDebugger::Destroy (SBDebugger &debugger)
 
     Debugger::Destroy (debugger.m_opaque_sp);
 
-    if (debugger.m_opaque_sp.get() != NULL)
+    if (debugger.m_opaque_sp.get() != nullptr)
         debugger.m_opaque_sp.reset();
 }
 
@@ -234,41 +259,11 @@ SBDebugger::MemoryPressureDetected ()
     ModuleList::RemoveOrphanSharedModules(mandatory);
 }
 
-SBDebugger::SBDebugger () :
-    m_opaque_sp ()
-{
-}
-
-SBDebugger::SBDebugger(const lldb::DebuggerSP &debugger_sp) :
-    m_opaque_sp(debugger_sp)
-{
-}
-
-SBDebugger::SBDebugger(const SBDebugger &rhs) :
-    m_opaque_sp (rhs.m_opaque_sp)
-{
-}
-
-SBDebugger &
-SBDebugger::operator = (const SBDebugger &rhs)
-{
-    if (this != &rhs)
-    {
-        m_opaque_sp = rhs.m_opaque_sp;
-    }
-    return *this;
-}
-
-SBDebugger::~SBDebugger ()
-{
-}
-
 bool
 SBDebugger::IsValid() const
 {
-    return m_opaque_sp.get() != NULL;
+    return m_opaque_sp.get() != nullptr;
 }
-
 
 void
 SBDebugger::SetAsync (bool b)
@@ -278,12 +273,9 @@ SBDebugger::SetAsync (bool b)
 }
 
 bool
-SBDebugger::GetAsync ()
+SBDebugger::GetAsync()
 {
-    if (m_opaque_sp)
-        return m_opaque_sp->GetAsyncExecution();
-    else
-        return false;
+    return (m_opaque_sp ? m_opaque_sp->GetAsyncExecution() : false);
 }
 
 void
@@ -355,7 +347,7 @@ SBDebugger::GetInputFileHandle ()
         if (stream_file_sp)
             return stream_file_sp->GetFile().GetStream();
     }
-    return NULL;
+    return nullptr;
 }
 
 FILE *
@@ -367,20 +359,19 @@ SBDebugger::GetOutputFileHandle ()
         if (stream_file_sp)
             return stream_file_sp->GetFile().GetStream();
     }
-    return NULL;
+    return nullptr;
 }
 
 FILE *
 SBDebugger::GetErrorFileHandle ()
 {
     if (m_opaque_sp)
-        if (m_opaque_sp)
-        {
-            StreamFileSP stream_file_sp (m_opaque_sp->GetErrorFile());
-            if (stream_file_sp)
-                return stream_file_sp->GetFile().GetStream();
-        }
-    return NULL;
+    {
+        StreamFileSP stream_file_sp(m_opaque_sp->GetErrorFile());
+        if (stream_file_sp)
+            return stream_file_sp->GetFile().GetStream();
+    }
+    return nullptr;
 }
 
 void
@@ -429,12 +420,12 @@ SBDebugger::HandleCommand (const char *command)
 
         sb_interpreter.HandleCommand (command, result, false);
 
-        if (GetErrorFileHandle() != NULL)
+        if (GetErrorFileHandle() != nullptr)
             result.PutError (GetErrorFileHandle());
-        if (GetOutputFileHandle() != NULL)
+        if (GetOutputFileHandle() != nullptr)
             result.PutOutput (GetOutputFileHandle());
 
-        if (m_opaque_sp->GetAsyncExecution() == false)
+        if (!m_opaque_sp->GetAsyncExecution())
         {
             SBProcess process(GetCommandInterpreter().GetProcess ());
             ProcessSP process_sp (process.GetSP());
@@ -489,7 +480,7 @@ SBDebugger::HandleProcessEvent (const SBProcess &process, const SBEvent &event, 
     {
         // Drain stdout when we stop just in case we have any bytes
         while ((len = process.GetSTDOUT (stdio_buffer, sizeof (stdio_buffer))) > 0)
-            if (out != NULL)
+            if (out != nullptr)
                 ::fwrite (stdio_buffer, 1, len, out);
     }
     
@@ -497,7 +488,7 @@ SBDebugger::HandleProcessEvent (const SBProcess &process, const SBEvent &event, 
     {
         // Drain stderr when we stop just in case we have any bytes
         while ((len = process.GetSTDERR (stdio_buffer, sizeof (stdio_buffer))) > 0)
-            if (err != NULL)
+            if (err != nullptr)
                 ::fwrite (stdio_buffer, 1, len, err);
     }
     
@@ -521,7 +512,6 @@ SBDebugger::GetSourceManager ()
     return sb_source_manager;
 }
 
-
 bool
 SBDebugger::GetDefaultArchitecture (char *arch_name, size_t arch_name_len)
 {
@@ -544,7 +534,6 @@ SBDebugger::GetDefaultArchitecture (char *arch_name, size_t arch_name_len)
     return false;
 }
 
-
 bool
 SBDebugger::SetDefaultArchitecture (const char *arch_name)
 {
@@ -561,12 +550,11 @@ SBDebugger::SetDefaultArchitecture (const char *arch_name)
 }
 
 ScriptLanguage
-SBDebugger::GetScriptingLanguage (const char *script_language_name)
+SBDebugger::GetScriptingLanguage(const char *script_language_name)
 {
-
-    return Args::StringToScriptLanguage (script_language_name,
-                                         eScriptLanguageDefault,
-                                         NULL);
+    return Args::StringToScriptLanguage(script_language_name,
+                                        eScriptLanguageDefault,
+                                        nullptr);
 }
 
 const char *
@@ -634,7 +622,7 @@ SBDebugger::CreateTarget (const char *filename,
     }
     else
     {
-        sb_error.SetErrorString("invalid target");
+        sb_error.SetErrorString("invalid debugger");
     }
 
     Log *log(GetLogIfAllCategoriesSet (LIBLLDB_LOG_API));
@@ -656,12 +644,12 @@ SBDebugger::CreateTargetWithFileAndTargetTriple (const char *filename,
     if (m_opaque_sp)
     {
         const bool add_dependent_modules = true;
-        Error error (m_opaque_sp->GetTargetList().CreateTarget (*m_opaque_sp, 
-                                                                filename, 
-                                                                target_triple, 
-                                                                add_dependent_modules, 
-                                                                NULL,
-                                                                target_sp));
+        Error error (m_opaque_sp->GetTargetList().CreateTarget(*m_opaque_sp,
+                                                               filename,
+                                                               target_triple,
+                                                               add_dependent_modules,
+                                                               nullptr,
+                                                               target_sp));
         sb_target.SetSP (target_sp);
     }
 
@@ -686,12 +674,12 @@ SBDebugger::CreateTargetWithFileAndArch (const char *filename, const char *arch_
         Error error;
         const bool add_dependent_modules = true;
 
-        error = m_opaque_sp->GetTargetList().CreateTarget (*m_opaque_sp,
-                                                           filename, 
-                                                           arch_cstr, 
-                                                           add_dependent_modules, 
-                                                           NULL, 
-                                                           target_sp);
+        error = m_opaque_sp->GetTargetList().CreateTarget(*m_opaque_sp,
+                                                          filename,
+                                                          arch_cstr,
+                                                          add_dependent_modules,
+                                                          nullptr,
+                                                          target_sp);
 
         if (error.Success())
         {
@@ -717,12 +705,12 @@ SBDebugger::CreateTarget (const char *filename)
     {
         Error error;
         const bool add_dependent_modules = true;
-        error = m_opaque_sp->GetTargetList().CreateTarget (*m_opaque_sp,
-                                                           filename, 
-                                                           NULL,
-                                                           add_dependent_modules, 
-                                                           NULL,
-                                                           target_sp);
+        error = m_opaque_sp->GetTargetList().CreateTarget(*m_opaque_sp,
+                                                          filename,
+                                                          nullptr,
+                                                          add_dependent_modules,
+                                                          nullptr,
+                                                          target_sp);
 
         if (error.Success())
         {
@@ -764,6 +752,7 @@ SBDebugger::DeleteTarget (lldb::SBTarget &target)
 
     return result;
 }
+
 SBTarget
 SBDebugger::GetTargetAtIndex (uint32_t idx)
 {
@@ -810,7 +799,7 @@ SBDebugger::FindTargetWithFileAndArch (const char *filename, const char *arch_na
     {
         // No need to lock, the target list is thread safe
         ArchSpec arch (arch_name, m_opaque_sp->GetPlatformList().GetSelectedPlatform().get());
-        TargetSP target_sp (m_opaque_sp->GetTargetList().FindTargetWithExecutableAndArchitecture (FileSpec(filename, false), arch_name ? &arch : NULL));
+        TargetSP target_sp (m_opaque_sp->GetTargetList().FindTargetWithExecutableAndArchitecture(FileSpec(filename, false), arch_name ? &arch : nullptr));
         sb_target.SetSP (target_sp);
     }
     return sb_target;
@@ -827,7 +816,6 @@ SBDebugger::FindTargetWithLLDBProcess (const ProcessSP &process_sp)
     }
     return sb_target;
 }
-
 
 uint32_t
 SBDebugger::GetNumTargets ()
@@ -997,6 +985,17 @@ SBDebugger::RunCommandInterpreter (bool auto_handle_events,
     }
 }
 
+SBError
+SBDebugger::RunREPL (lldb::LanguageType language, const char *repl_options)
+{
+    SBError error;
+    if (m_opaque_sp)
+        error.ref() = m_opaque_sp->RunREPL(language, repl_options);
+    else
+        error.SetErrorString ("invalid debugger");
+    return error;
+}
+
 void
 SBDebugger::reset (const DebuggerSP &debugger_sp)
 {
@@ -1036,10 +1035,7 @@ SBDebugger::FindDebuggerWithID (int id)
 const char *
 SBDebugger::GetInstanceName()
 {
-    if (m_opaque_sp)
-        return m_opaque_sp->GetInstanceName().AsCString();
-    else
-        return NULL;
+    return (m_opaque_sp ? m_opaque_sp->GetInstanceName().AsCString() : nullptr);
 }
 
 SBError
@@ -1095,11 +1091,9 @@ SBDebugger::GetInternalVariableValue (const char *var_name, const char *debugger
 }
 
 uint32_t
-SBDebugger::GetTerminalWidth () const
+SBDebugger::GetTerminalWidth() const
 {
-    if (m_opaque_sp)
-        return m_opaque_sp->GetTerminalWidth ();
-    return 0;
+    return (m_opaque_sp ? m_opaque_sp->GetTerminalWidth() : 0);
 }
 
 void
@@ -1119,9 +1113,7 @@ SBDebugger::GetPrompt() const
                      static_cast<void*>(m_opaque_sp.get()),
                      (m_opaque_sp ? m_opaque_sp->GetPrompt() : ""));
 
-    if (m_opaque_sp)
-        return m_opaque_sp->GetPrompt ();
-    return 0;
+    return (m_opaque_sp ? m_opaque_sp->GetPrompt() : nullptr);
 }
 
 void
@@ -1130,14 +1122,11 @@ SBDebugger::SetPrompt (const char *prompt)
     if (m_opaque_sp)
         m_opaque_sp->SetPrompt (prompt);
 }
-
     
 ScriptLanguage 
 SBDebugger::GetScriptLanguage() const
 {
-    if (m_opaque_sp)
-        return m_opaque_sp->GetScriptLanguage ();
-    return eScriptLanguageNone;
+    return (m_opaque_sp ? m_opaque_sp->GetScriptLanguage() : eScriptLanguageNone);
 }
 
 void
@@ -1150,35 +1139,27 @@ SBDebugger::SetScriptLanguage (ScriptLanguage script_lang)
 }
 
 bool
-SBDebugger::SetUseExternalEditor (bool value)
+SBDebugger::SetUseExternalEditor(bool value)
 {
-    if (m_opaque_sp)
-        return m_opaque_sp->SetUseExternalEditor (value);
-    return false;
+    return (m_opaque_sp ? m_opaque_sp->SetUseExternalEditor(value) : false);
 }
 
 bool
-SBDebugger::GetUseExternalEditor ()
+SBDebugger::GetUseExternalEditor()
 {
-    if (m_opaque_sp)
-        return m_opaque_sp->GetUseExternalEditor ();
-    return false;
+    return (m_opaque_sp ? m_opaque_sp->GetUseExternalEditor() : false);
 }
 
 bool
-SBDebugger::SetUseColor (bool value)
+SBDebugger::SetUseColor(bool value)
 {
-    if (m_opaque_sp)
-        return m_opaque_sp->SetUseColor (value);
-    return false;
+    return (m_opaque_sp ? m_opaque_sp->SetUseColor(value) : false);
 }
 
 bool
-SBDebugger::GetUseColor () const
+SBDebugger::GetUseColor() const
 {
-    if (m_opaque_sp)
-        return m_opaque_sp->GetUseColor ();
-    return false;
+    return (m_opaque_sp ? m_opaque_sp->GetUseColor() : false);
 }
 
 bool
@@ -1201,11 +1182,8 @@ SBDebugger::GetDescription (SBStream &description)
 user_id_t
 SBDebugger::GetID()
 {
-    if (m_opaque_sp)
-        return m_opaque_sp->GetID();
-    return LLDB_INVALID_UID;
+    return (m_opaque_sp ? m_opaque_sp->GetID() : LLDB_INVALID_UID);
 }
-
 
 SBError
 SBDebugger::SetCurrentPlatform (const char *platform_name_cstr)
@@ -1264,11 +1242,9 @@ SBDebugger::SetCurrentPlatformSDKRoot (const char *sysroot)
 }
 
 bool
-SBDebugger::GetCloseInputOnEOF () const
+SBDebugger::GetCloseInputOnEOF() const
 {
-    if (m_opaque_sp)
-        return m_opaque_sp->GetCloseInputOnEOF ();
-    return false;
+    return (m_opaque_sp ? m_opaque_sp->GetCloseInputOnEOF() : false);
 }
 
 void
@@ -1287,6 +1263,16 @@ SBDebugger::GetCategory (const char* category_name)
     TypeCategoryImplSP category_sp;
     
     if (DataVisualization::Categories::GetCategory(ConstString(category_name), category_sp, false))
+        return SBTypeCategory(category_sp);
+    else
+        return SBTypeCategory();
+}
+
+SBTypeCategory
+SBDebugger::GetCategory (lldb::LanguageType lang_type)
+{
+    TypeCategoryImplSP category_sp;
+    if (DataVisualization::Categories::GetCategory(lang_type, category_sp))
         return SBTypeCategory(category_sp);
     else
         return SBTypeCategory();
@@ -1346,7 +1332,7 @@ SBDebugger::GetFormatForType (SBTypeNameSpecifier type_name)
 SBTypeSummary
 SBDebugger::GetSummaryForType (SBTypeNameSpecifier type_name)
 {
-    if (type_name.IsValid() == false)
+    if (!type_name.IsValid())
         return SBTypeSummary();
     return SBTypeSummary(DataVisualization::GetSummaryForType(type_name.GetSP()));
 }
@@ -1355,7 +1341,7 @@ SBDebugger::GetSummaryForType (SBTypeNameSpecifier type_name)
 SBTypeFilter
 SBDebugger::GetFilterForType (SBTypeNameSpecifier type_name)
 {
-    if (type_name.IsValid() == false)
+    if (!type_name.IsValid())
         return SBTypeFilter();
     return SBTypeFilter(DataVisualization::GetFilterForType(type_name.GetSP()));
 }
@@ -1364,7 +1350,7 @@ SBDebugger::GetFilterForType (SBTypeNameSpecifier type_name)
 SBTypeSynthetic
 SBDebugger::GetSyntheticForType (SBTypeNameSpecifier type_name)
 {
-    if (type_name.IsValid() == false)
+    if (!type_name.IsValid())
         return SBTypeSynthetic();
     return SBTypeSynthetic(DataVisualization::GetSyntheticForType(type_name.GetSP()));
 }
@@ -1377,8 +1363,7 @@ SBDebugger::EnableLog (const char *channel, const char **categories)
     {
         uint32_t log_options = LLDB_LOG_OPTION_PREPEND_TIMESTAMP | LLDB_LOG_OPTION_PREPEND_THREAD_NAME;
         StreamString errors;
-        return m_opaque_sp->EnableLog (channel, categories, NULL, log_options, errors);
-    
+        return m_opaque_sp->EnableLog(channel, categories, nullptr, log_options, errors);
     }
     else
         return false;
@@ -1392,5 +1377,3 @@ SBDebugger::SetLoggingCallback (lldb::LogOutputCallback log_callback, void *bato
         return m_opaque_sp->SetLoggingCallback (log_callback, baton);
     }
 }
-
-

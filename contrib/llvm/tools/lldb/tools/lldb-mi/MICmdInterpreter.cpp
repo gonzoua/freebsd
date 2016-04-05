@@ -7,18 +7,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-//++
-// File:        MICmdInterpreter.cpp
-//
-// Overview:    CMICmdInterpreter implementation.
-//
-// Environment: Compilers:  Visual C++ 12.
-//                          gcc (Ubuntu/Linaro 4.8.1-10ubuntu9) 4.8.1
-//              Libraries:  See MIReadmetxt.
-//
-// Copyright:   None.
-//--
-
 // In-house headers:
 #include "MICmdInterpreter.h"
 #include "MICmdFactory.h"
@@ -30,7 +18,7 @@
 // Return:  None.
 // Throws:  None.
 //--
-CMICmdInterpreter::CMICmdInterpreter(void)
+CMICmdInterpreter::CMICmdInterpreter()
     : m_rCmdFactory(CMICmdFactory::Instance())
 {
 }
@@ -42,7 +30,7 @@ CMICmdInterpreter::CMICmdInterpreter(void)
 // Return:  None.
 // Throws:  None.
 //--
-CMICmdInterpreter::~CMICmdInterpreter(void)
+CMICmdInterpreter::~CMICmdInterpreter()
 {
     Shutdown();
 }
@@ -56,7 +44,7 @@ CMICmdInterpreter::~CMICmdInterpreter(void)
 // Throws:  None.
 //--
 bool
-CMICmdInterpreter::Initialize(void)
+CMICmdInterpreter::Initialize()
 {
     m_clientUsageRefCnt++;
 
@@ -77,7 +65,7 @@ CMICmdInterpreter::Initialize(void)
 // Throws:  None.
 //--
 bool
-CMICmdInterpreter::Shutdown(void)
+CMICmdInterpreter::Shutdown()
 {
     if (--m_clientUsageRefCnt > 0)
         return MIstatus::success;
@@ -117,8 +105,8 @@ CMICmdInterpreter::ValidateIsMi(const CMIUtilString &vTextLine, bool &vwbYesVali
     m_miCmdData.Clear();
     m_miCmdData.strMiCmd = vTextLine;
 
-    // The following change m_miCmdData as valid parts are indentified
-    vwbYesValid = (MiHasCmdTokenEndingHypthen(vTextLine) || MiHasCmdTokenEndingAlpha(vTextLine));
+    // The following change m_miCmdData as valid parts are identified
+    vwbYesValid = (MiHasCmdTokenEndingHyphen(vTextLine) || MiHasCmdTokenEndingAlpha(vTextLine));
     vwbYesValid = vwbYesValid && MiHasCmd(vTextLine);
     if (vwbYesValid)
     {
@@ -162,20 +150,20 @@ CMICmdInterpreter::HasCmdFactoryGotMiCmd(const SMICmdData &vCmd) const
 // Throws:  None.
 //--
 bool
-CMICmdInterpreter::MiHasCmdTokenEndingHypthen(const CMIUtilString &vTextLine)
+CMICmdInterpreter::MiHasCmdTokenEndingHyphen(const CMIUtilString &vTextLine)
 {
-    // The hythen is mandatory
-    const MIint nPos = vTextLine.find("-", 0);
-    if ((nPos == (MIint)std::string::npos))
+    // The hyphen is mandatory
+    const size_t nPos = vTextLine.find('-', 0);
+    if ((nPos == std::string::npos))
         return false;
 
     if (MiHasCmdTokenPresent(vTextLine))
     {
         const std::string strNum = vTextLine.substr(0, nPos);
-        if (!CMIUtilString(strNum.c_str()).IsNumber())
+        if (!CMIUtilString(strNum).IsNumber())
             return false;
 
-        m_miCmdData.strMiCmdToken = strNum.c_str();
+        m_miCmdData.strMiCmdToken = strNum;
     }
 
     m_miCmdData.bMIOldStyle = false;
@@ -198,7 +186,7 @@ CMICmdInterpreter::MiHasCmdTokenEndingHypthen(const CMIUtilString &vTextLine)
 bool
 CMICmdInterpreter::MiHasCmdTokenEndingAlpha(const CMIUtilString &vTextLine)
 {
-    MIchar cChar = vTextLine[0];
+    char cChar = vTextLine[0];
     MIuint i = 0;
     while (::isdigit(cChar) != 0)
     {
@@ -218,7 +206,7 @@ CMICmdInterpreter::MiHasCmdTokenEndingAlpha(const CMIUtilString &vTextLine)
 
 //++ ------------------------------------------------------------------------------------
 // Details: Does the command entered match the criteria for a MI command format.
-//          Is the command token present before the hypen?
+//          Is the command token present before the hyphen?
 // Type:    Method.
 // Args:    vTextLine - (R) Text data to interpret.
 // Return:  bool  - True = yes command token present, false = token not present.
@@ -227,13 +215,13 @@ CMICmdInterpreter::MiHasCmdTokenEndingAlpha(const CMIUtilString &vTextLine)
 bool
 CMICmdInterpreter::MiHasCmdTokenPresent(const CMIUtilString &vTextLine)
 {
-    const MIint nPos = vTextLine.find("-", 0);
+    const size_t nPos = vTextLine.find('-', 0);
     return (nPos > 0);
 }
 
 //++ ------------------------------------------------------------------------------------
 // Details: Does the command name entered match the criteria for a MI command format.
-//          Is a recogised command present? The command name is entered into the
+//          Is a recognised command present? The command name is entered into the
 //          command meta data structure whether correct or not for reporting or later
 //          command execution purposes. Command options is present are also put into the
 //          command meta data structure.
@@ -245,11 +233,11 @@ CMICmdInterpreter::MiHasCmdTokenPresent(const CMIUtilString &vTextLine)
 bool
 CMICmdInterpreter::MiHasCmd(const CMIUtilString &vTextLine)
 {
-    MIint nPos = 0;
+    size_t nPos = 0;
     if (m_miCmdData.bMIOldStyle)
     {
         char cChar = vTextLine[0];
-        MIuint i = 0;
+        size_t i = 0;
         while (::isdigit(cChar) != 0)
         {
             cChar = vTextLine[++i];
@@ -258,30 +246,30 @@ CMICmdInterpreter::MiHasCmd(const CMIUtilString &vTextLine)
     }
     else
     {
-        nPos = vTextLine.find("-", 0);
+        nPos = vTextLine.find('-', 0);
     }
 
     bool bFoundCmd = false;
-    const MIint nLen = vTextLine.length();
-    const MIint nPos2 = vTextLine.find(" ", nPos);
-    if (nPos2 != (MIint)std::string::npos)
+    const size_t nLen = vTextLine.length();
+    const size_t nPos2 = vTextLine.find(' ', nPos);
+    if (nPos2 != std::string::npos)
     {
         if (nPos2 == nLen)
             return false;
-        const CMIUtilString cmd = CMIUtilString(vTextLine.substr(nPos + 1, nPos2 - nPos - 1).c_str());
+        const CMIUtilString cmd = CMIUtilString(vTextLine.substr(nPos + 1, nPos2 - nPos - 1));
         if (cmd.empty())
             return false;
 
         m_miCmdData.strMiCmd = cmd;
 
         if (nPos2 < nLen)
-            m_miCmdData.strMiCmdOption = CMIUtilString(vTextLine.substr(nPos2 + 1, nLen - nPos2 - 1).c_str());
+            m_miCmdData.strMiCmdOption = CMIUtilString(vTextLine.substr(nPos2 + 1, nLen - nPos2 - 1));
 
         bFoundCmd = true;
     }
     else
     {
-        const CMIUtilString cmd = CMIUtilString(vTextLine.substr(nPos + 1, nLen - nPos - 1).c_str());
+        const CMIUtilString cmd = CMIUtilString(vTextLine.substr(nPos + 1, nLen - nPos - 1));
         if (cmd.empty())
             return false;
         m_miCmdData.strMiCmd = cmd;
@@ -303,7 +291,7 @@ CMICmdInterpreter::MiHasCmd(const CMIUtilString &vTextLine)
 // Throws:  None.
 //--
 const SMICmdData &
-CMICmdInterpreter::MiGetCmdData(void) const
+CMICmdInterpreter::MiGetCmdData() const
 {
     return m_miCmdData;
 }

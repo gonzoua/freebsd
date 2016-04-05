@@ -26,6 +26,7 @@
  */
 
 #include "opt_platform.h"
+#include "opt_ddb.h"
 
 #include <sys/cdefs.h>
 __FBSDID("$FreeBSD$");
@@ -55,6 +56,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/sysent.h>
 #include <sys/sysproto.h>
 #include <sys/ucontext.h>
+#include <sys/vdso.h>
 
 #include <vm/vm.h>
 #include <vm/vm_kern.h>
@@ -71,6 +73,7 @@ __FBSDID("$FreeBSD$");
 #include <machine/devmap.h>
 #include <machine/machdep.h>
 #include <machine/metadata.h>
+#include <machine/md_var.h>
 #include <machine/pcb.h>
 #include <machine/reg.h>
 #include <machine/vmparam.h>
@@ -105,6 +108,14 @@ struct kva_md_info kmi;
 int64_t dcache_line_size;	/* The minimum D cache line size */
 int64_t icache_line_size;	/* The minimum I cache line size */
 int64_t idcache_line_size;	/* The minimum cache line size */
+int64_t dczva_line_size;	/* The size of cache line the dc zva zeroes */
+
+/* pagezero_* implementations are provided in support.S */
+void pagezero_simple(void *);
+void pagezero_cache(void *);
+
+/* pagezero_simple is default pagezero */
+void (*pagezero)(void *p) = pagezero_simple;
 
 static void
 cpu_startup(void *dummy)
@@ -124,16 +135,6 @@ cpu_idle_wakeup(int cpu)
 {
 
 	return (0);
-}
-
-void
-bzero(void *buf, size_t len)
-{
-	uint8_t *p;
-
-	p = buf;
-	while(len-- > 0)
-		*p++ = 0;
 }
 
 int
@@ -180,7 +181,7 @@ fill_fpregs(struct thread *td, struct fpreg *regs)
 		 * If we have just been running VFP instructions we will
 		 * need to save the state to memcpy it below.
 		 */
-		vfp_save_state(td);
+		vfp_save_state(td, pcb);
 
 		memcpy(regs->fp_q, pcb->pcb_vfp, sizeof(regs->fp_q));
 		regs->fp_cr = pcb->pcb_fpcr;
@@ -209,21 +210,21 @@ int
 fill_dbregs(struct thread *td, struct dbreg *regs)
 {
 
-	panic("fill_dbregs");
+	panic("ARM64TODO: fill_dbregs");
 }
 
 int
 set_dbregs(struct thread *td, struct dbreg *regs)
 {
 
-	panic("set_dbregs");
+	panic("ARM64TODO: set_dbregs");
 }
 
 int
 ptrace_set_pc(struct thread *td, u_long addr)
 {
 
-	panic("ptrace_set_pc");
+	panic("ARM64TODO: ptrace_set_pc");
 	return (0);
 }
 
@@ -231,7 +232,8 @@ int
 ptrace_single_step(struct thread *td)
 {
 
-	/* TODO; */
+	td->td_frame->tf_spsr |= PSR_SS;
+	td->td_pcb->pcb_flags |= PCB_SINGLE_STEP;
 	return (0);
 }
 
@@ -239,7 +241,8 @@ int
 ptrace_clear_single_step(struct thread *td)
 {
 
-	/* TODO; */
+	td->td_frame->tf_spsr &= ~PSR_SS;
+	td->td_pcb->pcb_flags &= ~PCB_SINGLE_STEP;
 	return (0);
 }
 
@@ -250,7 +253,13 @@ exec_setregs(struct thread *td, struct image_params *imgp, u_long stack)
 
 	memset(tf, 0, sizeof(struct trapframe));
 
-	tf->tf_sp = stack;
+	/*
+	 * We need to set x0 for init as it doesn't call
+	 * cpu_set_syscall_retval to copy the value. We also
+	 * need to set td_retval for the cases where we do.
+	 */
+	tf->tf_x[0] = td->td_retval[0] = stack;
+	tf->tf_sp = STACKALIGN(stack);
 	tf->tf_lr = imgp->entry_addr;
 	tf->tf_elr = imgp->entry_addr;
 }
@@ -314,7 +323,7 @@ get_fpcontext(struct thread *td, mcontext_t *mcp)
 		 * If we have just been running VFP instructions we will
 		 * need to save the state to memcpy it below.
 		 */
-		vfp_save_state(td);
+		vfp_save_state(td, curpcb);
 
 		memcpy(mcp->mc_fpregs.fp_q, curpcb->pcb_vfp,
 		    sizeof(mcp->mc_fpregs));
@@ -376,7 +385,11 @@ void
 cpu_halt(void)
 {
 
-	panic("cpu_halt");
+	/* We should have shutdown by now, if not enter a low power sleep */
+	intr_disable();
+	while (1) {
+		__asm __volatile("wfi");
+	}
 }
 
 /*
@@ -387,7 +400,7 @@ void
 cpu_flush_dcache(void *ptr, size_t len)
 {
 
-	/* TBD */
+	/* ARM64TODO TBD */
 }
 
 /* Get current clock frequency for the given CPU ID. */
@@ -395,7 +408,7 @@ int
 cpu_est_clockrate(int cpu_id, uint64_t *rate)
 {
 
-	panic("cpu_est_clockrate");
+	panic("ARM64TODO: cpu_est_clockrate");
 }
 
 void
@@ -494,6 +507,7 @@ sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 	struct trapframe *tf;
 	struct sigframe *fp, frame;
 	struct sigacts *psp;
+	struct sysentvec *sysent;
 	int code, onstack, sig;
 
 	td = curthread;
@@ -514,7 +528,7 @@ sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 	/* Allocate and validate space for the signal handler context. */
 	if ((td->td_pflags & TDP_ALTSTACK) != 0 && !onstack &&
 	    SIGISMEMBER(psp->ps_sigonstack, sig)) {
-		fp = (struct sigframe *)(td->td_sigstk.ss_sp +
+		fp = (struct sigframe *)((uintptr_t)td->td_sigstk.ss_sp +
 		    td->td_sigstk.ss_size);
 #if defined(COMPAT_43)
 		td->td_sigstk.ss_flags |= SS_ONSTACK;
@@ -552,7 +566,12 @@ sendsig(sig_t catcher, ksiginfo_t *ksi, sigset_t *mask)
 
 	tf->tf_elr = (register_t)catcher;
 	tf->tf_sp = (register_t)fp;
-	tf->tf_lr = (register_t)(PS_STRINGS - *(p->p_sysent->sv_szsigcode));
+	sysent = p->p_sysent;
+	if (sysent->sv_sigcode_base != 0)
+		tf->tf_lr = (register_t)sysent->sv_sigcode_base;
+	else
+		tf->tf_lr = (register_t)(sysent->sv_psstrings -
+		    *(sysent->sv_szsigcode));
 
 	CTR3(KTR_SIG, "sendsig: return td=%p pc=%#x sp=%#x", td, tf->tf_elr,
 	    tf->tf_sp);
@@ -647,6 +666,20 @@ add_physmap_entry(uint64_t base, uint64_t length, vm_paddr_t *physmap,
 	physmap[insert_idx + 1] = base + length;
 	return (1);
 }
+
+#ifdef FDT
+static void
+add_fdt_mem_regions(struct mem_region *mr, int mrcnt, vm_paddr_t *physmap,
+    u_int *physmap_idxp)
+{
+
+	for (int i = 0; i < mrcnt; i++) {
+		if (!add_physmap_entry(mr[i].mr_start, mr[i].mr_size, physmap,
+		    physmap_idxp))
+			break;
+	}
+}
+#endif
 
 #define efi_next_descriptor(ptr, size) \
 	((struct efi_md *)(((uint8_t *) ptr) + size))
@@ -765,8 +798,9 @@ try_load_dtb(caddr_t kmdp)
 static void
 cache_setup(void)
 {
-	int dcache_line_shift, icache_line_shift;
+	int dcache_line_shift, icache_line_shift, dczva_line_shift;
 	uint32_t ctr_el0;
+	uint32_t dczid_el0;
 
 	ctr_el0 = READ_SPECIALREG(ctr_el0);
 
@@ -780,6 +814,20 @@ cache_setup(void)
 	icache_line_size = sizeof(int) << icache_line_shift;
 
 	idcache_line_size = MIN(dcache_line_size, icache_line_size);
+
+	dczid_el0 = READ_SPECIALREG(dczid_el0);
+
+	/* Check if dc zva is not prohibited */
+	if (dczid_el0 & DCZID_DZP)
+		dczva_line_size = 0;
+	else {
+		/* Same as with above calculations */
+		dczva_line_shift = DCZID_BS_SIZE(dczid_el0);
+		dczva_line_size = sizeof(int) << dczva_line_shift;
+
+		/* Change pagezero function */
+		pagezero = pagezero_cache;
+	}
 }
 
 void
@@ -787,6 +835,10 @@ initarm(struct arm64_bootparams *abp)
 {
 	struct efi_map_header *efihdr;
 	struct pcpu *pcpup;
+#ifdef FDT
+	struct mem_region mem_regions[FDT_MEM_REGIONS];
+	int mem_regions_sz;
+#endif
 	vm_offset_t lastaddr;
 	caddr_t kmdp;
 	vm_paddr_t mem_len;
@@ -801,7 +853,7 @@ initarm(struct arm64_bootparams *abp)
 		kmdp = preload_search_by_type("elf64 kernel");
 
 	boothowto = MD_FETCH(kmdp, MODINFOMD_HOWTO, int);
-	kern_envp = MD_FETCH(kmdp, MODINFOMD_ENVP, char *);
+	init_static_kenv(MD_FETCH(kmdp, MODINFOMD_ENVP, char *), 0);
 
 #ifdef FDT
 	try_load_dtb(kmdp);
@@ -814,12 +866,28 @@ initarm(struct arm64_bootparams *abp)
 	physmap_idx = 0;
 	efihdr = (struct efi_map_header *)preload_search_info(kmdp,
 	    MODINFO_METADATA | MODINFOMD_EFI_MAP);
-	add_efi_map_entries(efihdr, physmap, &physmap_idx);
+	if (efihdr != NULL)
+		add_efi_map_entries(efihdr, physmap, &physmap_idx);
+#ifdef FDT
+	else {
+		/* Grab physical memory regions information from device tree. */
+		if (fdt_get_mem_regions(mem_regions, &mem_regions_sz,
+		    NULL) != 0)
+			panic("Cannot get physical memory regions");
+		add_fdt_mem_regions(mem_regions, mem_regions_sz, physmap,
+		    &physmap_idx);
+	}
+#endif
 
 	/* Print the memory map */
 	mem_len = 0;
-	for (i = 0; i < physmap_idx; i += 2)
+	for (i = 0; i < physmap_idx; i += 2) {
+		dump_avail[i] = physmap[i];
+		dump_avail[i + 1] = physmap[i + 1];
 		mem_len += physmap[i + 1] - physmap[i];
+	}
+	dump_avail[i] = 0;
+	dump_avail[i + 1] = 0;
 
 	/* Set the pcpu data, this is needed by pmap_bootstrap */
 	pcpup = &__pcpu[0];
@@ -841,8 +909,8 @@ initarm(struct arm64_bootparams *abp)
 	cache_setup();
 
 	/* Bootstrap enough of pmap  to enter the kernel proper */
-	pmap_bootstrap(abp->kern_l1pt, KERNBASE - abp->kern_delta,
-	    lastaddr - KERNBASE);
+	pmap_bootstrap(abp->kern_l0pt, abp->kern_l1pt,
+	    KERNBASE - abp->kern_delta, lastaddr - KERNBASE);
 
 	arm_devmap_bootstrap(0, NULL);
 
@@ -859,3 +927,103 @@ initarm(struct arm64_bootparams *abp)
 	early_boot = 0;
 }
 
+uint32_t (*arm_cpu_fill_vdso_timehands)(struct vdso_timehands *,
+    struct timecounter *);
+
+uint32_t
+cpu_fill_vdso_timehands(struct vdso_timehands *vdso_th, struct timecounter *tc)
+{
+
+	return (arm_cpu_fill_vdso_timehands != NULL ?
+	    arm_cpu_fill_vdso_timehands(vdso_th, tc) : 0);
+}
+
+#ifdef DDB
+#include <ddb/ddb.h>
+
+DB_SHOW_COMMAND(specialregs, db_show_spregs)
+{
+#define	PRINT_REG(reg)	\
+    db_printf(__STRING(reg) " = %#016lx\n", READ_SPECIALREG(reg))
+
+	PRINT_REG(actlr_el1);
+	PRINT_REG(afsr0_el1);
+	PRINT_REG(afsr1_el1);
+	PRINT_REG(aidr_el1);
+	PRINT_REG(amair_el1);
+	PRINT_REG(ccsidr_el1);
+	PRINT_REG(clidr_el1);
+	PRINT_REG(contextidr_el1);
+	PRINT_REG(cpacr_el1);
+	PRINT_REG(csselr_el1);
+	PRINT_REG(ctr_el0);
+	PRINT_REG(currentel);
+	PRINT_REG(daif);
+	PRINT_REG(dczid_el0);
+	PRINT_REG(elr_el1);
+	PRINT_REG(esr_el1);
+	PRINT_REG(far_el1);
+#if 0
+	/* ARM64TODO: Enable VFP before reading floating-point registers */
+	PRINT_REG(fpcr);
+	PRINT_REG(fpsr);
+#endif
+	PRINT_REG(id_aa64afr0_el1);
+	PRINT_REG(id_aa64afr1_el1);
+	PRINT_REG(id_aa64dfr0_el1);
+	PRINT_REG(id_aa64dfr1_el1);
+	PRINT_REG(id_aa64isar0_el1);
+	PRINT_REG(id_aa64isar1_el1);
+	PRINT_REG(id_aa64pfr0_el1);
+	PRINT_REG(id_aa64pfr1_el1);
+	PRINT_REG(id_afr0_el1);
+	PRINT_REG(id_dfr0_el1);
+	PRINT_REG(id_isar0_el1);
+	PRINT_REG(id_isar1_el1);
+	PRINT_REG(id_isar2_el1);
+	PRINT_REG(id_isar3_el1);
+	PRINT_REG(id_isar4_el1);
+	PRINT_REG(id_isar5_el1);
+	PRINT_REG(id_mmfr0_el1);
+	PRINT_REG(id_mmfr1_el1);
+	PRINT_REG(id_mmfr2_el1);
+	PRINT_REG(id_mmfr3_el1);
+#if 0
+	/* Missing from llvm */
+	PRINT_REG(id_mmfr4_el1);
+#endif
+	PRINT_REG(id_pfr0_el1);
+	PRINT_REG(id_pfr1_el1);
+	PRINT_REG(isr_el1);
+	PRINT_REG(mair_el1);
+	PRINT_REG(midr_el1);
+	PRINT_REG(mpidr_el1);
+	PRINT_REG(mvfr0_el1);
+	PRINT_REG(mvfr1_el1);
+	PRINT_REG(mvfr2_el1);
+	PRINT_REG(revidr_el1);
+	PRINT_REG(sctlr_el1);
+	PRINT_REG(sp_el0);
+	PRINT_REG(spsel);
+	PRINT_REG(spsr_el1);
+	PRINT_REG(tcr_el1);
+	PRINT_REG(tpidr_el0);
+	PRINT_REG(tpidr_el1);
+	PRINT_REG(tpidrro_el0);
+	PRINT_REG(ttbr0_el1);
+	PRINT_REG(ttbr1_el1);
+	PRINT_REG(vbar_el1);
+#undef PRINT_REG
+}
+
+DB_SHOW_COMMAND(vtop, db_show_vtop)
+{
+	uint64_t phys;
+
+	if (have_addr) {
+		phys = arm64_address_translate_s1e1r(addr);
+		db_printf("Physical address reg: 0x%016lx\n", phys);
+	} else
+		db_printf("show vtop <virt_addr>\n");
+}
+#endif
