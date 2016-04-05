@@ -56,7 +56,7 @@ __FBSDID("$FreeBSD$");
 #include <arm/ti/ti_adcreg.h>
 #include <arm/ti/ti_adcvar.h>
 
-#define	DEBUG_TSC
+#undef	DEBUG_TSC
 
 #define	DEFAULT_CHARGE_DELAY	0x400
 #define	STEPDLY_OPEN		0x98
@@ -450,6 +450,7 @@ ti_adc_tsc_read_data(struct ti_adc_softc *sc)
 #ifdef DEBUG_TSC
 	device_printf(sc->sc_dev, "touchscreen x: %d, y: %d\n", x, y);
 #endif
+	/* TODO: That's where actual event reporting should take place */
 }
 
 static void
@@ -819,11 +820,14 @@ ti_adc_attach(device_t dev)
 	ADC_WRITE4(sc, ADC_CTRL, reg | ADC_CTRL_STEP_WP | ADC_CTRL_STEP_ID);
 
 	/*
-	 * Set the ADC prescaler to 2400 (yes, the actual value written here
-	 * is 2400 - 1).
-	 * This sets the ADC clock to ~10Khz (CLK_M_OSC / 2400).
+	 * Set the ADC prescaler to 2400 if touchscreen is not enabled
+	 * and to 24 if it is.  This sets the ADC clock to ~10Khz and
+	 * ~1Mhz respectively (CLK_M_OSC / prescaler).
 	 */
-	ADC_WRITE4(sc, ADC_CLKDIV, 23);
+	if (sc->sc_tsc_wires)
+		ADC_WRITE4(sc, ADC_CLKDIV, 24 - 1);
+	else
+		ADC_WRITE4(sc, ADC_CLKDIV, 2400 - 1);
 
 	TI_ADC_LOCK_INIT(sc);
 
