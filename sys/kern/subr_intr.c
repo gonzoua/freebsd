@@ -109,8 +109,6 @@ static struct mtx isrc_table_lock;
 static struct intr_irqsrc *irq_sources[NIRQ];
 u_int irq_next_free;
 
-#define IRQ_INVALID	nitems(irq_sources)
-
 /*
  *  XXX - All stuff around struct intr_dev_data is considered as temporary
  *  until better place for storing struct intr_map_data will be find.
@@ -138,7 +136,7 @@ static struct intr_dev_data *intr_ddata_tab[2 * NIRQ];
 static u_int intr_ddata_first_unused;
 
 #define IRQ_DDATA_BASE	10000
-CTASSERT(IRQ_DDATA_BASE > IRQ_INVALID);
+CTASSERT(IRQ_DDATA_BASE > nitems(irq_sources));
 
 #ifdef SMP
 static boolean_t irq_assign_cpu = FALSE;
@@ -399,7 +397,7 @@ isrc_free_irq(struct intr_irqsrc *isrc)
 		return (EINVAL);
 
 	irq_sources[isrc->isrc_irq] = NULL;
-	isrc->isrc_irq = IRQ_INVALID;	/* just to be safe */
+	isrc->isrc_irq = INTR_IRQ_INVALID;	/* just to be safe */
 	return (0);
 }
 
@@ -427,7 +425,7 @@ intr_isrc_register(struct intr_irqsrc *isrc, device_t dev, u_int flags,
 
 	bzero(isrc, sizeof(struct intr_irqsrc));
 	isrc->isrc_dev = dev;
-	isrc->isrc_irq = IRQ_INVALID;	/* just to be safe */
+	isrc->isrc_irq = INTR_IRQ_INVALID;	/* just to be safe */
 	isrc->isrc_flags = flags;
 
 	va_start(ap, fmt);
@@ -466,6 +464,32 @@ intr_isrc_deregister(struct intr_irqsrc *isrc)
 	mtx_unlock(&isrc_table_lock);
 	return (error);
 }
+
+#ifdef SMP
+/*
+ *  A support function for a PIC to decide if provided ISRC should be inited
+ *  on given cpu. The logic of INTR_ISRCF_BOUND flag and isrc_cpu member of
+ *  struct intr_irqsrc is the following:
+ *
+ *     If INTR_ISRCF_BOUND is set, the ISRC should be inited only on cpus
+ *     set in isrc_cpu. If not, the ISRC should be inited on every cpu and
+ *     isrc_cpu is kept consistent with it. Thus isrc_cpu is always correct.
+ */
+bool
+intr_isrc_init_on_cpu(struct intr_irqsrc *isrc, u_int cpu)
+{
+
+	if (isrc->isrc_handlers == 0)
+		return (false);
+	if ((isrc->isrc_flags & (INTR_ISRCF_PPI | INTR_ISRCF_IPI)) == 0)
+		return (false);
+	if (isrc->isrc_flags & INTR_ISRCF_BOUND)
+		return (CPU_ISSET(cpu, &isrc->isrc_cpu));
+
+	CPU_SET(cpu, &isrc->isrc_cpu);
+	return (true);
+}
+#endif
 
 static struct intr_dev_data *
 intr_ddata_alloc(u_int extsize)
@@ -534,7 +558,7 @@ intr_acpi_map_irq(device_t dev, u_int irq, enum intr_polarity pol,
 
 	ddata = intr_ddata_alloc(0);
 	if (ddata == NULL)
-		return (0xFFFFFFFF);	/* no space left */
+		return (INTR_IRQ_INVALID);	/* no space left */
 
 	ddata->idd_dev = dev;
 	ddata->idd_data.type = INTR_MAP_DATA_ACPI;
@@ -559,7 +583,7 @@ intr_fdt_map_irq(phandle_t node, pcell_t *cells, u_int ncells)
 	cellsize = ncells * sizeof(*cells);
 	ddata = intr_ddata_alloc(cellsize);
 	if (ddata == NULL)
-		return (0xFFFFFFFF);	/* no space left */
+		return (INTR_IRQ_INVALID);	/* no space left */
 
 	ddata->idd_xref = (intptr_t)node;
 	ddata->idd_data.type = INTR_MAP_DATA_FDT;
@@ -569,6 +593,27 @@ intr_fdt_map_irq(phandle_t node, pcell_t *cells, u_int ncells)
 	return (ddata->idd_irq);
 }
 #endif
+
+/*
+ *  Store GPIO interrupt decription in framework and return unique interrupt
+ *  number (resource handle) associated with it.
+ */
+u_int
+intr_gpio_map_irq(device_t dev, u_int pin_num, u_int pin_flags, u_int intr_mode)
+{
+	struct intr_dev_data *ddata;
+
+	ddata = intr_ddata_alloc(0);
+	if (ddata == NULL)
+		return (INTR_IRQ_INVALID);	/* no space left */
+
+	ddata->idd_dev = dev;
+	ddata->idd_data.type = INTR_MAP_DATA_GPIO;
+	ddata->idd_data.gpio.gpio_pin_num = pin_num;
+	ddata->idd_data.gpio.gpio_pin_flags = pin_flags;
+	ddata->idd_data.gpio.gpio_intr_mode = intr_mode;
+	return (ddata->idd_irq);
+}
 
 #ifdef INTR_SOLO
 /*
@@ -766,11 +811,19 @@ pic_lookup_locked(device_t dev, intptr_t xref)
 
 	mtx_assert(&pic_list_lock, MA_OWNED);
 
+	if (dev == NULL && xref == 0)
+		return (NULL);
+
+	/* Note that pic->pic_dev is never NULL on registered PIC. */
 	SLIST_FOREACH(pic, &pic_list, pic_next) {
-		if (pic->pic_xref != xref)
-			continue;
-		if (pic->pic_xref != 0 || pic->pic_dev == dev)
-			return (pic);
+		if (dev == NULL) {
+			if (xref == pic->pic_xref)
+				return (pic);
+		} else if (xref == 0 || pic->pic_xref == 0) {
+			if (dev == pic->pic_dev)
+				return (pic);
+		} else if (xref == pic->pic_xref && dev == pic->pic_dev)
+				return (pic);
 	}
 	return (NULL);
 }
@@ -840,14 +893,14 @@ intr_pic_register(device_t dev, intptr_t xref)
 {
 	struct intr_pic *pic;
 
+	if (dev == NULL)
+		return (EINVAL);
 	pic = pic_create(dev, xref);
 	if (pic == NULL)
 		return (ENOMEM);
-	if (pic->pic_dev != dev)
-		return (EINVAL);	/* XXX it could be many things. */
 
-	debugf("PIC %p registered for %s <xref %x>\n", pic,
-	    device_get_nameunit(dev), xref);
+	debugf("PIC %p registered for %s <dev %p, xref %x>\n", pic,
+	    device_get_nameunit(dev), dev, xref);
 	return (0);
 }
 
@@ -1156,7 +1209,7 @@ intr_irq_shuffle(void *arg __unused)
 	for (i = 0; i < NIRQ; i++) {
 		isrc = irq_sources[i];
 		if (isrc == NULL || isrc->isrc_handlers == 0 ||
-		    isrc->isrc_flags & INTR_ISRCF_PPI)
+		    isrc->isrc_flags & (INTR_ISRCF_PPI | INTR_ISRCF_IPI))
 			continue;
 
 		if (isrc->isrc_event != NULL &&
