@@ -970,11 +970,13 @@ sctp_init_asoc(struct sctp_inpcb *inp, struct sctp_tcb *stcb,
 	asoc->sctp_cmt_on_off = inp->sctp_cmt_on_off;
 	asoc->ecn_supported = inp->ecn_supported;
 	asoc->prsctp_supported = inp->prsctp_supported;
+	asoc->idata_supported = inp->idata_supported;
 	asoc->auth_supported = inp->auth_supported;
 	asoc->asconf_supported = inp->asconf_supported;
 	asoc->reconfig_supported = inp->reconfig_supported;
 	asoc->nrsack_supported = inp->nrsack_supported;
 	asoc->pktdrop_supported = inp->pktdrop_supported;
+	asoc->idata_supported = inp->idata_supported;
 	asoc->sctp_cmt_pf = (uint8_t) 0;
 	asoc->sctp_frag_point = inp->sctp_frag_point;
 	asoc->sctp_features = inp->sctp_features;
@@ -1163,7 +1165,6 @@ sctp_init_asoc(struct sctp_inpcb *inp, struct sctp_tcb *stcb,
 	TAILQ_INIT(&asoc->asconf_send_queue);
 	TAILQ_INIT(&asoc->send_queue);
 	TAILQ_INIT(&asoc->sent_queue);
-	TAILQ_INIT(&asoc->reasmqueue);
 	TAILQ_INIT(&asoc->resetHead);
 	asoc->max_inbound_streams = inp->sctp_ep.max_open_streams_intome;
 	TAILQ_INIT(&asoc->asconf_queue);
@@ -2735,6 +2736,9 @@ sctp_notify_assoc_change(uint16_t state, struct sctp_tcb *stcb,
 				}
 				if (stcb->asoc.asconf_supported == 1) {
 					sac->sac_info[i++] = SCTP_ASSOC_SUPPORTS_ASCONF;
+				}
+				if (stcb->asoc.idata_supported == 1) {
+					sac->sac_info[i++] = SCTP_ASSOC_SUPPORTS_INTERLEAVING;
 				}
 				sac->sac_info[i++] = SCTP_ASSOC_SUPPORTS_MULTIBUF;
 				if (stcb->asoc.reconfig_supported == 1) {
@@ -4450,6 +4454,49 @@ sctp_pull_off_control_to_new_inp(struct sctp_inpcb *old_inp,
 }
 
 void
+sctp_wakeup_the_read_socket(struct sctp_inpcb *inp,
+    struct sctp_tcb *stcb,
+    int so_locked
+#if !defined(__APPLE__) && !defined(SCTP_SO_LOCK_TESTING)
+    SCTP_UNUSED
+#endif
+)
+{
+	if ((inp != NULL) && (inp->sctp_socket != NULL)) {
+		if (sctp_is_feature_on(inp, SCTP_PCB_FLAGS_ZERO_COPY_ACTIVE)) {
+			SCTP_ZERO_COPY_EVENT(inp, inp->sctp_socket);
+		} else {
+#if defined(__APPLE__) || defined(SCTP_SO_LOCK_TESTING)
+			struct socket *so;
+
+			so = SCTP_INP_SO(inp);
+			if (!so_locked) {
+				if (stcb) {
+					atomic_add_int(&stcb->asoc.refcnt, 1);
+					SCTP_TCB_UNLOCK(stcb);
+				}
+				SCTP_SOCKET_LOCK(so, 1);
+				if (stcb) {
+					SCTP_TCB_LOCK(stcb);
+					atomic_subtract_int(&stcb->asoc.refcnt, 1);
+				}
+				if (inp->sctp_flags & SCTP_PCB_FLAGS_SOCKET_GONE) {
+					SCTP_SOCKET_UNLOCK(so, 1);
+					return;
+				}
+			}
+#endif
+			sctp_sorwakeup(inp, inp->sctp_socket);
+#if defined(__APPLE__) || defined(SCTP_SO_LOCK_TESTING)
+			if (!so_locked) {
+				SCTP_SOCKET_UNLOCK(so, 1);
+			}
+#endif
+		}
+	}
+}
+
+void
 sctp_add_to_readq(struct sctp_inpcb *inp,
     struct sctp_tcb *stcb,
     struct sctp_queued_to_read *control,
@@ -4484,7 +4531,7 @@ sctp_add_to_readq(struct sctp_inpcb *inp,
 			sctp_m_freem(control->data);
 			control->data = NULL;
 		}
-		SCTP_ZONE_FREE(SCTP_BASE_INFO(ipi_zone_readq), control);
+		sctp_free_a_readq(stcb, control);
 		if (inp_read_lock_held == 0)
 			SCTP_INP_READ_UNLOCK(inp);
 		return;
@@ -4530,7 +4577,7 @@ sctp_add_to_readq(struct sctp_inpcb *inp,
 	} else {
 		/* Everything got collapsed out?? */
 		sctp_free_remote_addr(control->whoFrom);
-		SCTP_ZONE_FREE(SCTP_BASE_INFO(ipi_zone_readq), control);
+		sctp_free_a_readq(stcb, control);
 		if (inp_read_lock_held == 0)
 			SCTP_INP_READ_UNLOCK(inp);
 		return;
@@ -4539,194 +4586,13 @@ sctp_add_to_readq(struct sctp_inpcb *inp,
 		control->end_added = 1;
 	}
 	TAILQ_INSERT_TAIL(&inp->read_queue, control, next);
+	control->on_read_q = 1;
 	if (inp_read_lock_held == 0)
 		SCTP_INP_READ_UNLOCK(inp);
 	if (inp && inp->sctp_socket) {
-		if (sctp_is_feature_on(inp, SCTP_PCB_FLAGS_ZERO_COPY_ACTIVE)) {
-			SCTP_ZERO_COPY_EVENT(inp, inp->sctp_socket);
-		} else {
-#if defined(__APPLE__) || defined(SCTP_SO_LOCK_TESTING)
-			struct socket *so;
-
-			so = SCTP_INP_SO(inp);
-			if (!so_locked) {
-				if (stcb) {
-					atomic_add_int(&stcb->asoc.refcnt, 1);
-					SCTP_TCB_UNLOCK(stcb);
-				}
-				SCTP_SOCKET_LOCK(so, 1);
-				if (stcb) {
-					SCTP_TCB_LOCK(stcb);
-					atomic_subtract_int(&stcb->asoc.refcnt, 1);
-				}
-				if (inp->sctp_flags & SCTP_PCB_FLAGS_SOCKET_GONE) {
-					SCTP_SOCKET_UNLOCK(so, 1);
-					return;
-				}
-			}
-#endif
-			sctp_sorwakeup(inp, inp->sctp_socket);
-#if defined(__APPLE__) || defined(SCTP_SO_LOCK_TESTING)
-			if (!so_locked) {
-				SCTP_SOCKET_UNLOCK(so, 1);
-			}
-#endif
-		}
+		sctp_wakeup_the_read_socket(inp, stcb, so_locked);
 	}
 }
-
-
-int
-sctp_append_to_readq(struct sctp_inpcb *inp,
-    struct sctp_tcb *stcb,
-    struct sctp_queued_to_read *control,
-    struct mbuf *m,
-    int end,
-    int ctls_cumack,
-    struct sockbuf *sb)
-{
-	/*
-	 * A partial delivery API event is underway. OR we are appending on
-	 * the reassembly queue.
-	 * 
-	 * If PDAPI this means we need to add m to the end of the data.
-	 * Increase the length in the control AND increment the sb_cc.
-	 * Otherwise sb is NULL and all we need to do is put it at the end
-	 * of the mbuf chain.
-	 */
-	int len = 0;
-	struct mbuf *mm, *tail = NULL, *prev = NULL;
-
-	if (inp) {
-		SCTP_INP_READ_LOCK(inp);
-	}
-	if (control == NULL) {
-get_out:
-		if (inp) {
-			SCTP_INP_READ_UNLOCK(inp);
-		}
-		return (-1);
-	}
-	if (inp && (inp->sctp_flags & SCTP_PCB_FLAGS_SOCKET_CANT_READ)) {
-		SCTP_INP_READ_UNLOCK(inp);
-		return (0);
-	}
-	if (control->end_added) {
-		/* huh this one is complete? */
-		goto get_out;
-	}
-	mm = m;
-	if (mm == NULL) {
-		goto get_out;
-	}
-	while (mm) {
-		if (SCTP_BUF_LEN(mm) == 0) {
-			/* Skip mbufs with NO lenght */
-			if (prev == NULL) {
-				/* First one */
-				m = sctp_m_free(mm);
-				mm = m;
-			} else {
-				SCTP_BUF_NEXT(prev) = sctp_m_free(mm);
-				mm = SCTP_BUF_NEXT(prev);
-			}
-			continue;
-		}
-		prev = mm;
-		len += SCTP_BUF_LEN(mm);
-		if (sb) {
-			if (SCTP_BASE_SYSCTL(sctp_logging_level) & SCTP_SB_LOGGING_ENABLE) {
-				sctp_sblog(sb, control->do_not_ref_stcb ? NULL : stcb, SCTP_LOG_SBALLOC, SCTP_BUF_LEN(mm));
-			}
-			sctp_sballoc(stcb, sb, mm);
-			if (SCTP_BASE_SYSCTL(sctp_logging_level) & SCTP_SB_LOGGING_ENABLE) {
-				sctp_sblog(sb, control->do_not_ref_stcb ? NULL : stcb, SCTP_LOG_SBRESULT, 0);
-			}
-		}
-		mm = SCTP_BUF_NEXT(mm);
-	}
-	if (prev) {
-		tail = prev;
-	} else {
-		/* Really there should always be a prev */
-		if (m == NULL) {
-			/* Huh nothing left? */
-#ifdef INVARIANTS
-			panic("Nothing left to add?");
-#else
-			goto get_out;
-#endif
-		}
-		tail = m;
-	}
-	if (control->tail_mbuf) {
-		/* append */
-		SCTP_BUF_NEXT(control->tail_mbuf) = m;
-		control->tail_mbuf = tail;
-	} else {
-		/* nothing there */
-#ifdef INVARIANTS
-		if (control->data != NULL) {
-			panic("This should NOT happen");
-		}
-#endif
-		control->data = m;
-		control->tail_mbuf = tail;
-	}
-	atomic_add_int(&control->length, len);
-	if (end) {
-		/* message is complete */
-		if (stcb && (control == stcb->asoc.control_pdapi)) {
-			stcb->asoc.control_pdapi = NULL;
-		}
-		control->held_length = 0;
-		control->end_added = 1;
-	}
-	if (stcb == NULL) {
-		control->do_not_ref_stcb = 1;
-	}
-	/*
-	 * When we are appending in partial delivery, the cum-ack is used
-	 * for the actual pd-api highest tsn on this mbuf. The true cum-ack
-	 * is populated in the outbound sinfo structure from the true cumack
-	 * if the association exists...
-	 */
-	control->sinfo_tsn = control->sinfo_cumtsn = ctls_cumack;
-	if (inp) {
-		SCTP_INP_READ_UNLOCK(inp);
-	}
-	if (inp && inp->sctp_socket) {
-		if (sctp_is_feature_on(inp, SCTP_PCB_FLAGS_ZERO_COPY_ACTIVE)) {
-			SCTP_ZERO_COPY_EVENT(inp, inp->sctp_socket);
-		} else {
-#if defined(__APPLE__) || defined(SCTP_SO_LOCK_TESTING)
-			struct socket *so;
-
-			so = SCTP_INP_SO(inp);
-			if (stcb) {
-				atomic_add_int(&stcb->asoc.refcnt, 1);
-				SCTP_TCB_UNLOCK(stcb);
-			}
-			SCTP_SOCKET_LOCK(so, 1);
-			if (stcb) {
-				SCTP_TCB_LOCK(stcb);
-				atomic_subtract_int(&stcb->asoc.refcnt, 1);
-			}
-			if (inp->sctp_flags & SCTP_PCB_FLAGS_SOCKET_GONE) {
-				SCTP_SOCKET_UNLOCK(so, 1);
-				return (0);
-			}
-#endif
-			sctp_sorwakeup(inp, inp->sctp_socket);
-#if defined(__APPLE__) || defined(SCTP_SO_LOCK_TESTING)
-			SCTP_SOCKET_UNLOCK(so, 1);
-#endif
-		}
-	}
-	return (0);
-}
-
-
 
 /*************HOLD THIS COMMENT FOR PATCH FILE OF
  *************ALTERNATE ROUTING CODE
@@ -5552,6 +5418,12 @@ restart_nosblocks:
 			sctp_m_free(control->aux_data);
 			control->aux_data = NULL;
 		}
+#ifdef INVARIANTS
+		if (control->on_strm_q) {
+			panic("About to free ctl:%p so:%p and its in %d",
+			    control, so, control->on_strm_q);
+		}
+#endif
 		sctp_free_remote_addr(control->whoFrom);
 		sctp_free_a_readq(stcb, control);
 		if (hold_rlock) {
@@ -5822,15 +5694,8 @@ get_more_data:
 				/* error we are out of here */
 				goto release;
 			}
-			if ((SCTP_BUF_NEXT(m) == NULL) &&
-			    (cp_len >= SCTP_BUF_LEN(m)) &&
-			    ((control->end_added == 0) ||
-			    (control->end_added &&
-			    (TAILQ_NEXT(control, next) == NULL)))
-			    ) {
-				SCTP_INP_READ_LOCK(inp);
-				hold_rlock = 1;
-			}
+			SCTP_INP_READ_LOCK(inp);
+			hold_rlock = 1;
 			if (cp_len == SCTP_BUF_LEN(m)) {
 				if ((SCTP_BUF_NEXT(m) == NULL) &&
 				    (control->end_added)) {
@@ -5948,19 +5813,9 @@ get_more_data:
 #endif
 				}
 		done_with_control:
-				if (TAILQ_NEXT(control, next) == NULL) {
-					/*
-					 * If we don't have a next we need a
-					 * lock, if there is a next
-					 * interrupt is filling ahead of us
-					 * and we don't need a lock to
-					 * remove this guy (which is the
-					 * head of the queue).
-					 */
-					if (hold_rlock == 0) {
-						SCTP_INP_READ_LOCK(inp);
-						hold_rlock = 1;
-					}
+				if (hold_rlock == 0) {
+					SCTP_INP_READ_LOCK(inp);
+					hold_rlock = 1;
 				}
 				TAILQ_REMOVE(&inp->read_queue, control, next);
 				/* Add back any hiddend data */
@@ -5976,6 +5831,12 @@ get_more_data:
 				no_rcv_needed = control->do_not_ref_stcb;
 				sctp_free_remote_addr(control->whoFrom);
 				control->data = NULL;
+#ifdef INVARIANTS
+				if (control->on_strm_q) {
+					panic("About to free ctl:%p so:%p and its in %d",
+					    control, so, control->on_strm_q);
+				}
+#endif
 				sctp_free_a_readq(stcb, control);
 				control = NULL;
 				if ((freed_so_far >= rwnd_req) &&
@@ -7084,7 +6945,7 @@ sctp_over_udp_start(void)
 	}
 	/* Call the special UDP hook. */
 	if ((ret = udp_set_kernel_tunneling(SCTP_BASE_INFO(udp4_tun_socket),
-	    sctp_recv_udp_tunneled_packet, NULL))) {
+	    sctp_recv_udp_tunneled_packet, NULL, NULL))) {
 		sctp_over_udp_stop();
 		return (ret);
 	}
@@ -7108,7 +6969,7 @@ sctp_over_udp_start(void)
 	}
 	/* Call the special UDP hook. */
 	if ((ret = udp_set_kernel_tunneling(SCTP_BASE_INFO(udp6_tun_socket),
-	    sctp_recv_udp_tunneled_packet, NULL))) {
+	    sctp_recv_udp_tunneled_packet, NULL, NULL))) {
 		sctp_over_udp_stop();
 		return (ret);
 	}
