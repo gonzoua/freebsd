@@ -177,6 +177,7 @@ gpiokey_intr(void *arg)
 }
 
 
+#if 0
 static void
 gpiokey_identify(driver_t *driver, device_t bus)
 {
@@ -197,6 +198,7 @@ gpiokey_identify(driver_t *driver, device_t bus)
 		}
 	}
 }
+#endif
 
 static int
 gpiokey_probe(device_t dev)
@@ -239,13 +241,17 @@ static int
 gpiokey_attach(device_t dev)
 {
 	struct gpiokey_softc *sc;
+	int err;
+	gpio_pin_t pin;
 
 	sc = device_get_softc(dev);
 	sc->sc_dev = dev;
 	sc->sc_busdev = device_get_parent(dev);
 
-	sc->sc_irq_res = bus_alloc_resource_any(dev, SYS_RES_IRQ, &sc->sc_irq_rid,
-	    RF_ACTIVE);
+	err = gpio_pin_get_by_ofw_idx(dev, 0, &pin);
+	printf("--> err=%d, pin=%p\n", err, pin);
+	sc->sc_irq_res = gpio_alloc_intr_resource(dev, &sc->sc_irq_rid,
+	    RF_ACTIVE, pin, GPIO_INTR_EDGE_BOTH);
 	if (!sc->sc_irq_res) {
 		device_printf(dev, "cannot allocate interrupt\n");
 		return (ENXIO);
@@ -305,7 +311,7 @@ static devclass_t gpiokey_devclass;
 
 static device_method_t gpiokey_methods[] = {
 	/* Device interface */
-	DEVMETHOD(device_identify,	gpiokey_identify),
+	// DEVMETHOD(device_identify,	gpiokey_identify),
 
 	DEVMETHOD(device_probe,		gpiokey_probe),
 	DEVMETHOD(device_attach,	gpiokey_attach),
@@ -320,4 +326,5 @@ static driver_t gpiokey_driver = {
 	sizeof(struct gpiokey_softc),
 };
 
-DRIVER_MODULE(gpiokey, gpiobus, gpiokey_driver, gpiokey_devclass, 0, 0);
+DRIVER_MODULE(gpiokey, gpiokeys, gpiokey_driver, gpiokey_devclass, 0, 0);
+MODULE_DEPEND(gpiokey, gpiokeys, 1, 1, 1);

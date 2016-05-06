@@ -54,6 +54,7 @@ __FBSDID("$FreeBSD$");
 #include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/ofw_bus_subr.h>
 
+#include <dev/gpio/gpiobusvar.h>
 #include <dev/gpio/gpiokeys.h>
 
 #define GPIOKEYS_LOCK(_sc)		mtx_lock(&(_sc)->sc_mtx)
@@ -62,6 +63,12 @@ __FBSDID("$FreeBSD$");
 	mtx_init(&_sc->sc_mtx, device_get_nameunit(_sc->sc_dev), \
 	    "gpiokeys", MTX_DEF)
 #define GPIOKEYS_LOCK_DESTROY(_sc)	mtx_destroy(&_sc->sc_mtx);
+
+#define GPIOKEY_LOCK(_key)		mtx_lock(&(_key)->mtx)
+#define	GPIOKEY_UNLOCK(_key)		mtx_unlock(&(_key)->mtx)
+#define GPIOKEY_LOCK_INIT(_key) \
+	mtx_init(&_key->mtx, "gpiokey", "gpiokey", MTX_DEF)
+#define GPIOKEY_LOCK_DESTROY(_key)	mtx_destroy(&_key->mtx);
 
 #define	KEY_PRESS	  0
 #define	KEY_RELEASE	  0x80
@@ -77,10 +84,35 @@ __FBSDID("$FreeBSD$");
 #define	GPIOKEYS_GLOBAL_NFKEY        (sizeof(fkey_tab)/sizeof(fkey_tab[0]))	/* units */
 #define	GPIOKEYS_GLOBAL_BUFFER_SIZE	      64	/* bytes */
 
-struct gpiokeys_softc 
+#define	AUTOREPEAT_DELAY	250
+#define	AUTOREPEAT_REPEAT	34
+
+/* No key code */
+#define GPIOKEY_NONE	0
+
+#define	GPIOKEY_E0(k)	(SCAN_PREFIX_E0 | k)
+
+struct gpiokey
+{
+	gpio_pin_t	pin;
+	int		irq_rid;
+	struct resource	*irq_res;
+	void		*intr_hl;
+	struct mtx	mtx;
+	uint32_t	keycode;
+	int		autorepeat;
+	struct callout	debounce_callout;
+	struct callout	repeat_callout;
+	int		repeat_delay;
+	int		repeat;
+};
+
+struct gpiokeys_softc
 {
 	device_t	sc_dev;
 	struct mtx	sc_mtx;
+	struct gpiokey	*sc_keys;
+	int		sc_total_keys;
 
 	keyboard_t	sc_kbd;
 	keymap_t	sc_keymap;
@@ -121,6 +153,156 @@ static int	gpiokeys_enable(keyboard_t *);
 static int	gpiokeys_disable(keyboard_t *);
 static void	gpiokeys_event_keyinput(struct gpiokeys_softc *);
 
+static uint32_t
+gpiokey_map_linux_code(uint32_t linux_code)
+{
+	switch (linux_code) {
+		case 28: /* ENTER */
+			return 28;
+			break;
+		case 105: /* LEFT */
+			return GPIOKEY_E0(0x4b);
+			break;
+		case 106: /* RIGHT */
+			return GPIOKEY_E0(0x4d);
+			break;
+		case 103: /* UP */
+			return GPIOKEY_E0(0x48);
+			break;
+		case 108: /* DOWN */
+			return GPIOKEY_E0(0x50);
+			break;
+
+		default:
+			return GPIOKEY_NONE;
+	}
+}
+
+static void
+gpiokey_autorepeat(void *arg)
+{
+	struct gpiokey *key;
+
+	key = arg;
+
+	if (key->keycode == GPIOKEY_NONE)
+		return;
+
+	gpiokeys_key_event(key->keycode, 1);
+
+	callout_reset(&key->repeat_callout, key->repeat,
+		    gpiokey_autorepeat, key);
+}
+
+static void
+gpiokey_debounced_intr(void *arg)
+{
+	struct gpiokey *key;
+	bool active;
+
+	key = arg;
+
+	if (key->keycode == GPIOKEY_NONE)
+		return;
+
+	gpio_pin_is_active(key->pin, &active);
+	if (active) {
+		gpiokeys_key_event(key->keycode, 1);
+		if (key->autorepeat) {
+			callout_reset(&key->repeat_callout, key->repeat_delay,
+			    gpiokey_autorepeat, key);
+		}
+	}
+	else {
+		if (key->autorepeat &&
+		    callout_pending(&key->repeat_callout))
+			callout_stop(&key->repeat_callout);
+		gpiokeys_key_event(key->keycode, 0);
+	}
+}
+
+static void
+gpiokey_intr(void *arg)
+{
+	struct gpiokey *key;
+	int debounce_ticks;
+
+	key = arg;
+
+	GPIOKEY_LOCK(key);
+	debounce_ticks = hz*5/1000;
+	if (debounce_ticks == 0)
+		debounce_ticks = 1;
+	if (!callout_pending(&key->debounce_callout))
+		callout_reset(&key->debounce_callout, debounce_ticks,
+		    gpiokey_debounced_intr, key);
+	GPIOKEY_UNLOCK(key);
+}
+
+static int
+gpiokeys_attach_key(struct gpiokeys_softc *sc, phandle_t node,
+    struct gpiokey *key)
+{
+	pcell_t prop;
+	char *name;
+	uint32_t code;
+	int err;
+
+	name = NULL;
+	if (OF_getprop_alloc(node, "label", 1, (void **)&name) == -1)
+		OF_getprop_alloc(node, "name", 1, (void **)&name);
+
+	key->autorepeat = OF_hasprop(node, "autorepeat");
+	if ((OF_getprop(node, "freebsd,code", &prop, sizeof(prop))) > 0)
+		key->keycode = fdt32_to_cpu(prop);
+	else if ((OF_getprop(node, "linux,code", &prop, sizeof(prop))) > 0) {
+		code = fdt32_to_cpu(prop);
+		key->keycode = gpiokey_map_linux_code(code);
+		if (key->keycode == GPIOKEY_NONE)
+			device_printf(sc->sc_dev, "failed to map linux,code value %d\n", code);
+	}
+	else
+		device_printf(sc->sc_dev, "no key code property\n");
+
+	err = gpio_pin_get_by_ofw_idx(node, 0, &key->pin);
+	if (err) {
+		device_printf(sc->sc_dev, "failed to map pin\n");
+		return (ENXIO);
+	}
+	key->irq_res = gpio_alloc_intr_resource(sc->sc_dev, &key->irq_rid,
+	    RF_ACTIVE, key->pin, GPIO_INTR_EDGE_BOTH);
+	if (!key->irq_res) {
+		device_printf(sc->sc_dev, "cannot allocate interrupt\n");
+		return (ENXIO);
+	}
+
+	if (bus_setup_intr(sc->sc_dev, key->irq_res, INTR_TYPE_MISC | INTR_MPSAFE,
+			NULL, gpiokey_intr, sc,
+			&key->intr_hl) != 0) {
+		bus_release_resource(sc->sc_dev, SYS_RES_IRQ, key->irq_rid,
+		    key->irq_res);
+		device_printf(sc->sc_dev, "Unable to setup the irq handler.\n");
+		return (ENXIO);
+	}
+
+	GPIOKEY_LOCK_INIT(key);
+
+	key->repeat_delay = hz*AUTOREPEAT_DELAY/1000;
+	if (key->repeat_delay == 0)
+		key->repeat_delay = 1;
+
+	key->repeat = hz*AUTOREPEAT_REPEAT/1000;
+	if (key->repeat == 0)
+		key->repeat = 1;
+
+	callout_init_mtx(&key->debounce_callout, &key->mtx, 0);
+	callout_init_mtx(&key->repeat_callout, &key->mtx, 0);
+
+	return (0);
+}
+
+
+
 static int
 gpiokeys_probe(device_t dev)
 {
@@ -138,6 +320,11 @@ gpiokeys_attach(device_t dev)
 	int unit;
 	struct gpiokeys_softc *sc;
 	keyboard_t *kbd;
+	phandle_t keys, child;
+	int total_keys;
+
+	if ((keys = ofw_bus_get_node(dev)) == -1)
+		return (ENXIO);
 
 	sc = device_get_softc(dev);
 	sc->sc_dev = dev;
@@ -184,7 +371,31 @@ gpiokeys_attach(device_t dev)
 
 	gpiokeys_sc = sc;
 
+	total_keys = 0;
+
+	/* Traverse the 'gpio-keys' node and count keys */
+	for (child = OF_child(keys); child != 0; child = OF_peer(child)) {
+		if (!OF_hasprop(child, "gpios"))
+			continue;
+		total_keys++;
+	}
+
+	if (total_keys) {
+		sc->sc_keys =  malloc(sizeof(struct gpiokey) * total_keys,
+		    M_DEVBUF, M_WAITOK | M_ZERO);
+
+		sc->sc_total_keys = 0;
+		/* Traverse the 'gpio-keys' node and count keys */
+		for (child = OF_child(keys); child != 0; child = OF_peer(child)) {
+			if (!OF_hasprop(child, "gpios"))
+				continue;
+			gpiokeys_attach_key(sc, child ,&sc->sc_keys[sc->sc_total_keys]);
+			sc->sc_total_keys++;
+		}
+	}
+
 	return (0);
+
 detach:
 	gpiokeys_detach(dev);
 	return (ENXIO);
@@ -197,6 +408,8 @@ gpiokeys_detach(device_t dev)
 
 	sc = device_get_softc(dev);
 	GPIOKEYS_LOCK_DESTROY(sc);
+	if (sc->sc_keys)
+		free(sc->sc_keys, M_DEVBUF);
 
 	return (0);
 }
