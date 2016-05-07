@@ -327,6 +327,27 @@ gpiokeys_attach_key(struct gpiokeys_softc *sc, phandle_t node,
 		free(name, M_OFWPROP);
 }
 
+static void
+gpiokeys_detach_key(struct gpiokeys_softc *sc, struct gpiokey *key)
+{
+
+	GPIOKEY_LOCK(key);
+	if (key->intr_hl)
+		bus_teardown_intr(sc->sc_dev, key->irq_res, key->intr_hl);
+	if (key->irq_res)
+		bus_release_resource(sc->sc_dev, SYS_RES_IRQ,
+		    key->irq_rid, key->irq_res);
+	if (key->pin)
+		gpio_pin_release(key->pin);
+	if (callout_pending(&key->repeat_callout))
+		callout_stop(&key->repeat_callout);
+	if (callout_pending(&key->debounce_callout))
+		callout_stop(&key->debounce_callout);
+	GPIOKEY_UNLOCK(key);
+
+	GPIOKEY_LOCK_DESTROY(key);
+}
+
 static int
 gpiokeys_probe(device_t dev)
 {
@@ -429,8 +450,13 @@ static int
 gpiokeys_detach(device_t dev)
 {
 	struct gpiokeys_softc *sc;
+	int i;
 
 	sc = device_get_softc(dev);
+
+	for (i = 0; i < sc->sc_total_keys; i++)
+		gpiokeys_detach_key(sc, &sc->sc_keys[i]);
+
 	GPIOKEYS_LOCK_DESTROY(sc);
 	if (sc->sc_keys)
 		free(sc->sc_keys, M_DEVBUF);
