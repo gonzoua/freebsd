@@ -277,7 +277,7 @@ gpiokeys_attach_key(struct gpiokeys_softc *sc, phandle_t node,
 	}
 
 	if (bus_setup_intr(sc->sc_dev, key->irq_res, INTR_TYPE_MISC | INTR_MPSAFE,
-			NULL, gpiokey_intr, sc,
+			NULL, gpiokey_intr, key,
 			&key->intr_hl) != 0) {
 		bus_release_resource(sc->sc_dev, SYS_RES_IRQ, key->irq_rid,
 		    key->irq_res);
