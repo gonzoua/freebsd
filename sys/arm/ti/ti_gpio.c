@@ -714,7 +714,7 @@ ti_gpio_attach(device_t dev)
 	    sizeof(*sc->sc_irq_polarity) * sc->sc_maxpin,
 	    M_DEVBUF, M_WAITOK | M_ZERO);
 	for (i = 0; i < sc->sc_maxpin; i++) {
-		sc->sc_irq_trigger[i] = INTR_TRIGGER_EDGE;
+		sc->sc_irq_trigger[i] = INTR_TRIGGER_LEVEL;
 		sc->sc_irq_polarity[i] = INTR_POLARITY_LOW;
 	}
 
@@ -1144,15 +1144,6 @@ ti_gpio_mask_irq_internal(struct ti_gpio_softc *sc, int irq)
 		val &= ~TI_GPIO_MASK(irq);
 		ti_gpio_write_4(sc, reg, val);
 	}
-
-	val = ti_gpio_read_4(sc, TI_GPIO_FALLINGDETECT);
-	val &= ~TI_GPIO_MASK(irq);
-	ti_gpio_write_4(sc, TI_GPIO_FALLINGDETECT, val);
-
-	val = ti_gpio_read_4(sc, TI_GPIO_RISINGDETECT);
-	val &= ~TI_GPIO_MASK(irq);
-	ti_gpio_write_4(sc, TI_GPIO_RISINGDETECT, val);
-
 	TI_GPIO_UNLOCK(sc);
 }
 
@@ -1165,15 +1156,6 @@ ti_gpio_unmask_irq_internal(struct ti_gpio_softc *sc, int irq)
 		return;
 
 	TI_GPIO_LOCK(sc);
-
-	val = ti_gpio_read_4(sc, TI_GPIO_FALLINGDETECT);
-	val |= TI_GPIO_MASK(irq);
-	ti_gpio_write_4(sc, TI_GPIO_FALLINGDETECT, val);
-
-	val = ti_gpio_read_4(sc, TI_GPIO_RISINGDETECT);
-	val |= TI_GPIO_MASK(irq);
-	ti_gpio_write_4(sc, TI_GPIO_RISINGDETECT, val);
-
 	reg = ti_gpio_intr_reg(sc, irq);
 	if (reg != 0) {
 		val = ti_gpio_read_4(sc, reg);
