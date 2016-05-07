@@ -1014,7 +1014,7 @@ static device_method_t gpiokeys_methods[] = {
 	DEVMETHOD(device_attach,	gpiokeys_attach),
 	DEVMETHOD(device_detach,	gpiokeys_detach),
 
-	{ 0, 0 }
+	DEVMETHOD_END
 };
 
 static driver_t gpiokeys_driver = {
