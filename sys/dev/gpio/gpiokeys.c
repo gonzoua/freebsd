@@ -239,7 +239,7 @@ gpiokey_intr(void *arg)
 	GPIOKEY_UNLOCK(key);
 }
 
-static int
+static void
 gpiokeys_attach_key(struct gpiokeys_softc *sc, phandle_t node,
     struct gpiokey *key)
 {
@@ -247,45 +247,22 @@ gpiokeys_attach_key(struct gpiokeys_softc *sc, phandle_t node,
 	char *name;
 	uint32_t code;
 	int err;
+	const char *key_name;
+
+	GPIOKEY_LOCK_INIT(key);
+	callout_init_mtx(&key->debounce_callout, &key->mtx, 0);
+	callout_init_mtx(&key->repeat_callout, &key->mtx, 0);
 
 	name = NULL;
 	if (OF_getprop_alloc(node, "label", 1, (void **)&name) == -1)
 		OF_getprop_alloc(node, "name", 1, (void **)&name);
 
-	key->autorepeat = OF_hasprop(node, "autorepeat");
-	if ((OF_getprop(node, "freebsd,code", &prop, sizeof(prop))) > 0)
-		key->keycode = fdt32_to_cpu(prop);
-	else if ((OF_getprop(node, "linux,code", &prop, sizeof(prop))) > 0) {
-		code = fdt32_to_cpu(prop);
-		key->keycode = gpiokey_map_linux_code(code);
-		if (key->keycode == GPIOKEY_NONE)
-			device_printf(sc->sc_dev, "failed to map linux,code value %d\n", code);
-	}
+	if (name != NULL)
+		key_name = name;
 	else
-		device_printf(sc->sc_dev, "no key code property\n");
+		key_name = "unknown";
 
-	err = gpio_pin_get_by_ofw_idx(node, 0, &key->pin);
-	if (err) {
-		device_printf(sc->sc_dev, "failed to map pin\n");
-		return (ENXIO);
-	}
-	key->irq_res = gpio_alloc_intr_resource(sc->sc_dev, &key->irq_rid,
-	    RF_ACTIVE, key->pin, GPIO_INTR_EDGE_BOTH);
-	if (!key->irq_res) {
-		device_printf(sc->sc_dev, "cannot allocate interrupt\n");
-		return (ENXIO);
-	}
-
-	if (bus_setup_intr(sc->sc_dev, key->irq_res, INTR_TYPE_MISC | INTR_MPSAFE,
-			NULL, gpiokey_intr, key,
-			&key->intr_hl) != 0) {
-		bus_release_resource(sc->sc_dev, SYS_RES_IRQ, key->irq_rid,
-		    key->irq_res);
-		device_printf(sc->sc_dev, "Unable to setup the irq handler.\n");
-		return (ENXIO);
-	}
-
-	GPIOKEY_LOCK_INIT(key);
+	key->autorepeat = OF_hasprop(node, "autorepeat");
 
 	key->repeat_delay = hz*AUTOREPEAT_DELAY/1000;
 	if (key->repeat_delay == 0)
@@ -295,13 +272,60 @@ gpiokeys_attach_key(struct gpiokeys_softc *sc, phandle_t node,
 	if (key->repeat == 0)
 		key->repeat = 1;
 
-	callout_init_mtx(&key->debounce_callout, &key->mtx, 0);
-	callout_init_mtx(&key->repeat_callout, &key->mtx, 0);
+	if ((OF_getprop(node, "freebsd,code", &prop, sizeof(prop))) > 0)
+		key->keycode = fdt32_to_cpu(prop);
+	else if ((OF_getprop(node, "linux,code", &prop, sizeof(prop))) > 0) {
+		code = fdt32_to_cpu(prop);
+		key->keycode = gpiokey_map_linux_code(code);
+		if (key->keycode == GPIOKEY_NONE)
+			device_printf(sc->sc_dev, "<%s> failed to map linux,code value 0x%x\n",
+			    key_name, code);
+	}
+	else
+		device_printf(sc->sc_dev, "<%s> no linux,code or freebsd,code property\n",
+		    key_name);
 
-	return (0);
+	err = gpio_pin_get_by_ofw_idx(node, 0, &key->pin);
+	if (err) {
+		device_printf(sc->sc_dev, "<%s> failed to map pin\n", key_name);
+		if (name)
+			free(name, M_OFWPROP);
+		return;
+	}
+
+	key->irq_res = gpio_alloc_intr_resource(sc->sc_dev, &key->irq_rid,
+	    RF_ACTIVE, key->pin, GPIO_INTR_EDGE_BOTH);
+	if (!key->irq_res) {
+		device_printf(sc->sc_dev, "<%s> cannot allocate interrupt\n", key_name);
+		gpio_pin_release(key->pin);
+		key->pin = NULL;
+		if (name)
+			free(name, M_OFWPROP);
+		return;
+	}
+
+	if (bus_setup_intr(sc->sc_dev, key->irq_res, INTR_TYPE_MISC | INTR_MPSAFE,
+			NULL, gpiokey_intr, key,
+			&key->intr_hl) != 0) {
+		device_printf(sc->sc_dev, "<%s> unable to setup the irq handler\n", key_name);
+		bus_release_resource(sc->sc_dev, SYS_RES_IRQ, key->irq_rid,
+		    key->irq_res);
+		gpio_pin_release(key->pin);
+		key->pin = NULL;
+		key->irq_res = NULL;
+		if (name)
+			free(name, M_OFWPROP);
+		return;
+	}
+
+	if (bootverbose)
+		device_printf(sc->sc_dev, "<%s> code=%08x, autorepeat=%d, "\
+		    "repeat=%d, repeat_delay=%d\n", key_name, key->keycode,
+		    key->autorepeat, key->repeat, key->repeat_delay);
+
+	if (name)
+		free(name, M_OFWPROP);
 }
-
-
 
 static int
 gpiokeys_probe(device_t dev)
