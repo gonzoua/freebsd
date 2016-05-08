@@ -285,7 +285,7 @@ gpiokeys_attach_key(struct gpiokeys_softc *sc, phandle_t node,
 		device_printf(sc->sc_dev, "<%s> no linux,code or freebsd,code property\n",
 		    key_name);
 
-	err = gpio_pin_get_by_ofw_idx(node, 0, &key->pin);
+	err = gpio_pin_get_by_ofw_idx(sc->sc_dev, node, 0, &key->pin);
 	if (err) {
 		device_printf(sc->sc_dev, "<%s> failed to map pin\n", key_name);
 		if (name)

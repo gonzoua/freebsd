@@ -56,8 +56,8 @@ static int ofw_gpiobus_parse_gpios_impl(device_t, phandle_t, char *,
  *
  */
 static int
-gpio_pin_get_by_ofw_impl(phandle_t cnode, char *prop_name, int idx,
-    gpio_pin_t *out_pin)
+gpio_pin_get_by_ofw_impl(device_t consumer, phandle_t cnode,
+    char *prop_name, int idx, gpio_pin_t *out_pin)
 {
 	phandle_t xref;
 	pcell_t *cells;
@@ -103,28 +103,31 @@ gpio_pin_get_by_ofw_impl(phandle_t cnode, char *prop_name, int idx,
 }
 
 int
-gpio_pin_get_by_ofw_idx(phandle_t node, int idx, gpio_pin_t *pin)
+gpio_pin_get_by_ofw_idx(device_t consumer, phandle_t node,
+    int idx, gpio_pin_t *pin)
 {
 
-	return (gpio_pin_get_by_ofw_impl(node, "gpios", idx, pin));
+	return (gpio_pin_get_by_ofw_impl(consumer, node, "gpios", idx, pin));
 }
 
 int
-gpio_pin_get_by_ofw_property(phandle_t node, char *name, gpio_pin_t *pin)
+gpio_pin_get_by_ofw_property(device_t consumer, phandle_t node,
+    char *name, gpio_pin_t *pin)
 {
 
-	return (gpio_pin_get_by_ofw_impl(node, name, 0, pin));
+	return (gpio_pin_get_by_ofw_impl(consumer, node, name, 0, pin));
 }
 
 int
-gpio_pin_get_by_ofw_name(phandle_t node, char *name, gpio_pin_t *pin)
+gpio_pin_get_by_ofw_name(device_t consumer, phandle_t node,
+    char *name, gpio_pin_t *pin)
 {
 	int rv, idx;
 
 	rv = ofw_bus_find_string_index(node, "gpio-names", name, &idx);
 	if (rv != 0)
 		return (rv);
-	return (gpio_pin_get_by_ofw_idx(node, idx, pin));
+	return (gpio_pin_get_by_ofw_idx(consumer, node, idx, pin));
 }
 
 void
