@@ -87,11 +87,6 @@ __FBSDID("$FreeBSD$");
 #define	AUTOREPEAT_DELAY	250
 #define	AUTOREPEAT_REPEAT	34
 
-/* No key code */
-#define GPIOKEY_NONE	0
-
-#define	GPIOKEY_E0(k)	(SCAN_PREFIX_E0 | k)
-
 struct gpiokey
 {
 	gpio_pin_t	pin;
@@ -153,29 +148,39 @@ static int	gpiokeys_enable(keyboard_t *);
 static int	gpiokeys_disable(keyboard_t *);
 static void	gpiokeys_event_keyinput(struct gpiokeys_softc *);
 
-static uint32_t
-gpiokey_map_linux_code(uint32_t linux_code)
+static void
+gpiokeys_put_key(struct gpiokeys_softc *sc, uint32_t key)
 {
-	switch (linux_code) {
-		case 28: /* ENTER */
-			return 28;
-			break;
-		case 105: /* LEFT */
-			return GPIOKEY_E0(0x4b);
-			break;
-		case 106: /* RIGHT */
-			return GPIOKEY_E0(0x4d);
-			break;
-		case 103: /* UP */
-			return GPIOKEY_E0(0x48);
-			break;
-		case 108: /* DOWN */
-			return GPIOKEY_E0(0x50);
-			break;
-
-		default:
-			return GPIOKEY_NONE;
+	if (sc->sc_inputs < GPIOKEYS_GLOBAL_IN_BUF_SIZE) {
+		sc->sc_input[sc->sc_inputtail] = key;
+		++(sc->sc_inputs);
+		++(sc->sc_inputtail);
+		if (sc->sc_inputtail >= GPIOKEYS_GLOBAL_IN_BUF_SIZE) {
+			sc->sc_inputtail = 0;
+		}
+	} else {
+		device_printf(sc->sc_dev, "input buffer is full\n");
 	}
+}
+
+static void
+gpiokeys_key_event(uint16_t keycode, int pressed)
+{
+	uint32_t key;
+
+	key = keycode & SCAN_KEYCODE_MASK;
+
+	if (!pressed)
+		key |= KEY_RELEASE;
+
+	if (keycode & SCAN_PREFIX_E0)
+		gpiokeys_put_key(gpiokeys_sc, 0xe0);
+	else if (keycode & SCAN_PREFIX_E1)
+		gpiokeys_put_key(gpiokeys_sc, 0xe1);
+
+	gpiokeys_put_key(gpiokeys_sc, key);
+
+	gpiokeys_event_keyinput(gpiokeys_sc);
 }
 
 static void
@@ -464,46 +469,6 @@ gpiokeys_detach(device_t dev)
 	return (0);
 }
 
-static void
-gpiokeys_put_key(struct gpiokeys_softc *sc, uint32_t key)
-{
-	if (sc->sc_inputs < GPIOKEYS_GLOBAL_IN_BUF_SIZE) {
-		sc->sc_input[sc->sc_inputtail] = key;
-		++(sc->sc_inputs);
-		++(sc->sc_inputtail);
-		if (sc->sc_inputtail >= GPIOKEYS_GLOBAL_IN_BUF_SIZE) {
-			sc->sc_inputtail = 0;
-		}
-	} else {
-		device_printf(sc->sc_dev, "input buffer is full\n");
-	}
-}
-
-
-
-void
-gpiokeys_key_event(uint16_t keycode, int pressed)
-{
-	uint32_t key;
-
-	key = keycode & SCAN_KEYCODE_MASK;
-
-	if (!pressed)
-		key |= KEY_RELEASE;
-
-	if (keycode & SCAN_PREFIX_E0)
-		gpiokeys_put_key(gpiokeys_sc, 0xe0);
-	else if (keycode & SCAN_PREFIX_E1)
-		gpiokeys_put_key(gpiokeys_sc, 0xe1);
-
-	gpiokeys_put_key(gpiokeys_sc, key);
-
-	gpiokeys_event_keyinput(gpiokeys_sc);
-}
-
-
-
-
 /* early keyboard probe, not supported */
 static int
 gpiokeys_configure(int flags)
@@ -610,7 +575,6 @@ static int
 gpiokeys_check(keyboard_t *kbd)
 {
 	struct gpiokeys_softc *sc = kbd->kb_data;
-
 
 	if (!KBD_IS_ACTIVE(kbd))
 		return (0);
@@ -886,7 +850,6 @@ gpiokeys_ioctl(keyboard_t *kbd, u_long cmd, caddr_t arg)
 
 	return (result);
 }
-
 
 /* clear the internal state of the keyboard */
 static void

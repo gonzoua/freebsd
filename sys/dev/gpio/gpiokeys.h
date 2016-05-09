@@ -31,7 +31,9 @@
 #define	SCAN_KEYCODE_MASK	0xff
 #define	SCAN_PREFIX_E0		0x10000000
 #define	SCAN_PREFIX_E1		0x20000000
+#define	GPIOKEY_E0(k)	(SCAN_PREFIX_E0 | k)
+#define GPIOKEY_NONE		0xffffffff
 
-void gpiokeys_key_event(uint16_t keycode, int pressed);
+uint32_t gpiokey_map_linux_code(uint32_t linux_code);
 
 #endif /* __GPIOKEYS_H__ */
