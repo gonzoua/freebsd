@@ -100,6 +100,7 @@ struct gpiokey
 	struct callout	repeat_callout;
 	int		repeat_delay;
 	int		repeat;
+	int		debounce_interval;
 };
 
 struct gpiokeys_softc
@@ -235,7 +236,7 @@ gpiokey_intr(void *arg)
 	key = arg;
 
 	GPIOKEY_LOCK(key);
-	debounce_ticks = hz*5/1000;
+	debounce_ticks = (hz * key->debounce_interval) / 1000;
 	if (debounce_ticks == 0)
 		debounce_ticks = 1;
 	if (!callout_pending(&key->debounce_callout))
@@ -276,6 +277,11 @@ gpiokeys_attach_key(struct gpiokeys_softc *sc, phandle_t node,
 	key->repeat = (hz * AUTOREPEAT_REPEAT) / 1000;
 	if (key->repeat == 0)
 		key->repeat = 1;
+
+	if ((OF_getprop(node, "debounce-interval", &prop, sizeof(prop))) > 0)
+		key->debounce_interval = fdt32_to_cpu(prop);
+	else
+		key->debounce_interval = 5;
 
 	if ((OF_getprop(node, "freebsd,code", &prop, sizeof(prop))) > 0)
 		key->keycode = fdt32_to_cpu(prop);
