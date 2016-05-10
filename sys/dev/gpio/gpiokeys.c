@@ -269,11 +269,11 @@ gpiokeys_attach_key(struct gpiokeys_softc *sc, phandle_t node,
 
 	key->autorepeat = OF_hasprop(node, "autorepeat");
 
-	key->repeat_delay = hz*AUTOREPEAT_DELAY/1000;
+	key->repeat_delay = (hz * AUTOREPEAT_DELAY) / 1000;
 	if (key->repeat_delay == 0)
 		key->repeat_delay = 1;
 
-	key->repeat = hz*AUTOREPEAT_REPEAT/1000;
+	key->repeat = (hz * AUTOREPEAT_REPEAT) / 1000;
 	if (key->repeat == 0)
 		key->repeat = 1;
 
