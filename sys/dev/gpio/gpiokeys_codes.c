@@ -137,8 +137,6 @@ gpiokey_map_linux_code(uint32_t linux_code)
 {
 	int i;
 
-	i = 0;
-
 	for (i = 0; gpiokeys_codes_map[i].linux_code != GPIOKEY_NONE; i++) {
 		if (gpiokeys_codes_map[i].linux_code == linux_code)
 			return (gpiokeys_codes_map[i].bsd_code);
