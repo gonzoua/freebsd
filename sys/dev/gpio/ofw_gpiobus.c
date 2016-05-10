@@ -65,6 +65,9 @@ gpio_pin_get_by_ofw_impl(device_t consumer, phandle_t cnode,
 	struct gpiobus_pin pin;
 	int ncells, rv;
 
+	KASSERT(consumer != NULL && cnode > 0,
+	    ("both consumer and cnode required"));
+
 	rv = ofw_bus_parse_xref_list_alloc(cnode, prop_name, "#gpio-cells",
 	    idx, &xref, &ncells, &cells);
 	if (rv != 0)
@@ -123,6 +126,9 @@ gpio_pin_get_by_ofw_name(device_t consumer, phandle_t node,
     char *name, gpio_pin_t *pin)
 {
 	int rv, idx;
+
+	KASSERT(consumer != NULL && node > 0,
+	    ("both consumer and node required"));
 
 	rv = ofw_bus_find_string_index(node, "gpio-names", name, &idx);
 	if (rv != 0)
