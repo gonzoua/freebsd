@@ -57,18 +57,18 @@ __FBSDID("$FreeBSD$");
 #include <dev/gpio/gpiobusvar.h>
 #include <dev/gpio/gpiokeys.h>
 
-#define GPIOKEYS_LOCK(_sc)		mtx_lock(&(_sc)->sc_mtx)
+#define	GPIOKEYS_LOCK(_sc)		mtx_lock(&(_sc)->sc_mtx)
 #define	GPIOKEYS_UNLOCK(_sc)		mtx_unlock(&(_sc)->sc_mtx)
-#define GPIOKEYS_LOCK_INIT(_sc) \
+#define	GPIOKEYS_LOCK_INIT(_sc) \
 	mtx_init(&_sc->sc_mtx, device_get_nameunit(_sc->sc_dev), \
 	    "gpiokeys", MTX_DEF)
-#define GPIOKEYS_LOCK_DESTROY(_sc)	mtx_destroy(&_sc->sc_mtx);
+#define	GPIOKEYS_LOCK_DESTROY(_sc)	mtx_destroy(&_sc->sc_mtx);
 
-#define GPIOKEY_LOCK(_key)		mtx_lock(&(_key)->mtx)
+#define	GPIOKEY_LOCK(_key)		mtx_lock(&(_key)->mtx)
 #define	GPIOKEY_UNLOCK(_key)		mtx_unlock(&(_key)->mtx)
-#define GPIOKEY_LOCK_INIT(_key) \
+#define	GPIOKEY_LOCK_INIT(_key) \
 	mtx_init(&_key->mtx, "gpiokey", "gpiokey", MTX_DEF)
-#define GPIOKEY_LOCK_DESTROY(_key)	mtx_destroy(&_key->mtx);
+#define	GPIOKEY_LOCK_DESTROY(_key)	mtx_destroy(&_key->mtx);
 
 #define	KEY_PRESS	  0
 #define	KEY_RELEASE	  0x80
