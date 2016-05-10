@@ -351,9 +351,9 @@ gpiokeys_detach_key(struct gpiokeys_softc *sc, struct gpiokey *key)
 	if (key->pin)
 		gpio_pin_release(key->pin);
 	if (callout_pending(&key->repeat_callout))
-		callout_stop(&key->repeat_callout);
+		callout_drain(&key->repeat_callout);
 	if (callout_pending(&key->debounce_callout))
-		callout_stop(&key->debounce_callout);
+		callout_drain(&key->debounce_callout);
 	GPIOKEY_UNLOCK(key);
 
 	GPIOKEY_LOCK_DESTROY(key);
