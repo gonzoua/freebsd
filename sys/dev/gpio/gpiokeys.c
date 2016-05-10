@@ -60,15 +60,16 @@ __FBSDID("$FreeBSD$");
 #define	GPIOKEYS_LOCK(_sc)		mtx_lock(&(_sc)->sc_mtx)
 #define	GPIOKEYS_UNLOCK(_sc)		mtx_unlock(&(_sc)->sc_mtx)
 #define	GPIOKEYS_LOCK_INIT(_sc) \
-	mtx_init(&_sc->sc_mtx, device_get_nameunit(_sc->sc_dev), \
+	mtx_init(&_sc->sc_mtx, device_get_nameunit((_sc)->sc_dev), \
 	    "gpiokeys", MTX_DEF)
-#define	GPIOKEYS_LOCK_DESTROY(_sc)	mtx_destroy(&_sc->sc_mtx);
+#define	GPIOKEYS_LOCK_DESTROY(_sc)	mtx_destroy(&(_sc)->sc_mtx);
+#define	GPIOKEYS_ASSERT_LOCKED(_sc)	mtx_assert(&(_sc)->sc_mtx, MA_OWNED)
 
 #define	GPIOKEY_LOCK(_key)		mtx_lock(&(_key)->mtx)
 #define	GPIOKEY_UNLOCK(_key)		mtx_unlock(&(_key)->mtx)
 #define	GPIOKEY_LOCK_INIT(_key) \
-	mtx_init(&_key->mtx, "gpiokey", "gpiokey", MTX_DEF)
-#define	GPIOKEY_LOCK_DESTROY(_key)	mtx_destroy(&_key->mtx);
+	mtx_init(&(_key)->mtx, "gpiokey", "gpiokey", MTX_DEF)
+#define	GPIOKEY_LOCK_DESTROY(_key)	mtx_destroy(&(_key)->mtx);
 
 #define	KEY_PRESS	  0
 #define	KEY_RELEASE	  0x80
@@ -87,20 +88,23 @@ __FBSDID("$FreeBSD$");
 #define	AUTOREPEAT_DELAY	250
 #define	AUTOREPEAT_REPEAT	34
 
+struct gpiokeys_softc;
+
 struct gpiokey
 {
-	gpio_pin_t	pin;
-	int		irq_rid;
-	struct resource	*irq_res;
-	void		*intr_hl;
-	struct mtx	mtx;
-	uint32_t	keycode;
-	int		autorepeat;
-	struct callout	debounce_callout;
-	struct callout	repeat_callout;
-	int		repeat_delay;
-	int		repeat;
-	int		debounce_interval;
+	struct gpiokeys_softc	*parent_sc;
+	gpio_pin_t		pin;
+	int			irq_rid;
+	struct resource		*irq_res;
+	void			*intr_hl;
+	struct mtx		mtx;
+	uint32_t		keycode;
+	int			autorepeat;
+	struct callout		debounce_callout;
+	struct callout		repeat_callout;
+	int			repeat_delay;
+	int			repeat;
+	int			debounce_interval;
 };
 
 struct gpiokeys_softc
@@ -133,8 +137,6 @@ struct gpiokeys_softc
 	uint8_t		sc_kbd_id;
 };
 
-struct gpiokeys_softc *gpiokeys_sc;
-
 /* gpio-keys device */
 static int gpiokeys_probe(device_t);
 static int gpiokeys_attach(device_t);
@@ -152,6 +154,9 @@ static void	gpiokeys_event_keyinput(struct gpiokeys_softc *);
 static void
 gpiokeys_put_key(struct gpiokeys_softc *sc, uint32_t key)
 {
+
+	GPIOKEYS_ASSERT_LOCKED(sc);
+
 	if (sc->sc_inputs < GPIOKEYS_GLOBAL_IN_BUF_SIZE) {
 		sc->sc_input[sc->sc_inputtail] = key;
 		++(sc->sc_inputs);
@@ -165,23 +170,26 @@ gpiokeys_put_key(struct gpiokeys_softc *sc, uint32_t key)
 }
 
 static void
-gpiokeys_key_event(uint16_t keycode, int pressed)
+gpiokeys_key_event(struct gpiokeys_softc *sc, uint16_t keycode, int pressed)
 {
 	uint32_t key;
+
 
 	key = keycode & SCAN_KEYCODE_MASK;
 
 	if (!pressed)
 		key |= KEY_RELEASE;
 
+	GPIOKEYS_LOCK(sc);
 	if (keycode & SCAN_PREFIX_E0)
-		gpiokeys_put_key(gpiokeys_sc, 0xe0);
+		gpiokeys_put_key(sc, 0xe0);
 	else if (keycode & SCAN_PREFIX_E1)
-		gpiokeys_put_key(gpiokeys_sc, 0xe1);
+		gpiokeys_put_key(sc, 0xe1);
 
-	gpiokeys_put_key(gpiokeys_sc, key);
+	gpiokeys_put_key(sc, key);
+	GPIOKEYS_UNLOCK(sc);
 
-	gpiokeys_event_keyinput(gpiokeys_sc);
+	gpiokeys_event_keyinput(sc);
 }
 
 static void
@@ -194,7 +202,7 @@ gpiokey_autorepeat(void *arg)
 	if (key->keycode == GPIOKEY_NONE)
 		return;
 
-	gpiokeys_key_event(key->keycode, 1);
+	gpiokeys_key_event(key->parent_sc, key->keycode, 1);
 
 	callout_reset(&key->repeat_callout, key->repeat,
 		    gpiokey_autorepeat, key);
@@ -213,7 +221,7 @@ gpiokey_debounced_intr(void *arg)
 
 	gpio_pin_is_active(key->pin, &active);
 	if (active) {
-		gpiokeys_key_event(key->keycode, 1);
+		gpiokeys_key_event(key->parent_sc, key->keycode, 1);
 		if (key->autorepeat) {
 			callout_reset(&key->repeat_callout, key->repeat_delay,
 			    gpiokey_autorepeat, key);
@@ -223,7 +231,7 @@ gpiokey_debounced_intr(void *arg)
 		if (key->autorepeat &&
 		    callout_pending(&key->repeat_callout))
 			callout_stop(&key->repeat_callout);
-		gpiokeys_key_event(key->keycode, 0);
+		gpiokeys_key_event(key->parent_sc, key->keycode, 0);
 	}
 }
 
@@ -256,6 +264,7 @@ gpiokeys_attach_key(struct gpiokeys_softc *sc, phandle_t node,
 	const char *key_name;
 
 	GPIOKEY_LOCK_INIT(key);
+	key->parent_sc = sc;
 	callout_init_mtx(&key->debounce_callout, &key->mtx, 0);
 	callout_init_mtx(&key->repeat_callout, &key->mtx, 0);
 
@@ -425,8 +434,6 @@ gpiokeys_attach(device_t dev)
 		genkbd_diag(kbd, 1);
 	}
 
-	gpiokeys_sc = sc;
-
 	total_keys = 0;
 
 	/* Traverse the 'gpio-keys' node and count keys */
@@ -562,6 +569,8 @@ gpiokeys_do_poll(struct gpiokeys_softc *sc, uint8_t wait)
 	KASSERT((sc->sc_flags & GPIOKEYS_GLOBAL_FLAG_POLLING) != 0,
 	    ("gpiokeys_do_poll called when not polling\n"));
 
+	GPIOKEYS_ASSERT_LOCKED(sc);
+
 	if (!kdb_active && !SCHEDULER_STOPPED()) {
 		while (sc->sc_inputs == 0) {
 			kern_yield(PRI_UNCHANGED);
@@ -581,6 +590,8 @@ static int
 gpiokeys_check(keyboard_t *kbd)
 {
 	struct gpiokeys_softc *sc = kbd->kb_data;
+
+	GPIOKEYS_ASSERT_LOCKED(sc);
 
 	if (!KBD_IS_ACTIVE(kbd))
 		return (0);
@@ -625,6 +636,8 @@ gpiokeys_get_key(struct gpiokeys_softc *sc, uint8_t wait)
 	KASSERT((!kdb_active && !SCHEDULER_STOPPED())
 	    || (sc->sc_flags & GPIOKEYS_GLOBAL_FLAG_POLLING) != 0,
 	    ("not polling in kdb or panic\n"));
+
+	GPIOKEYS_ASSERT_LOCKED(sc);
 
 	if (sc->sc_flags & GPIOKEYS_GLOBAL_FLAG_POLLING)
 		gpiokeys_do_poll(sc, wait);
@@ -920,9 +933,6 @@ gpiokeys_event_keyinput(struct gpiokeys_softc *sc)
 	int c;
 
 	if ((sc->sc_flags & GPIOKEYS_GLOBAL_FLAG_POLLING) != 0)
-		return;
-
-	if (sc->sc_inputs == 0)
 		return;
 
 	if (KBD_IS_ACTIVE(&sc->sc_kbd) &&
