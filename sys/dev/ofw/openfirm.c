@@ -480,6 +480,7 @@ OF_getencprop_alloc(phandle_t package, const char *name, int elsz, void **buf)
 /* Free buffer allocated by OF_getencprop_alloc or OF_getprop_alloc */
 void OF_prop_free(void *buf)
 {
+
 	free(buf, M_OFWPROP);
 }
 
