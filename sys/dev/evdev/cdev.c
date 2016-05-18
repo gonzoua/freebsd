@@ -170,7 +170,7 @@ evdev_read(struct cdev *dev, struct uio *uio, int ioflag)
 	int ret = 0;
 	int remaining;
 
-	debugf("cdev: read %ld bytes by thread %d", uio->uio_resid,
+	debugf("cdev: read %zd bytes by thread %d", uio->uio_resid,
 	    uio->uio_td->td_tid);
 
 	ret = devfs_get_cdevpriv((void **)&state);
@@ -234,7 +234,7 @@ evdev_write(struct cdev *dev, struct uio *uio, int ioflag)
 	struct evdev_cdev_state *state;
 	int ret = 0;
 	
-	debugf("cdev: write %ld bytes by thread %d", uio->uio_resid,
+	debugf("cdev: write %zd bytes by thread %d", uio->uio_resid,
 	    uio->uio_td->td_tid);
 
 	ret = devfs_get_cdevpriv((void **)&state);

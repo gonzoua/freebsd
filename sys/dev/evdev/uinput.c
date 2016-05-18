@@ -130,7 +130,7 @@ uinput_read(struct cdev *dev, struct uio *uio, int ioflag)
 	struct evdev_dev *evdev;
 	int ret = 0;
 
-	debugf("uinput: read %ld bytes by thread %d", uio->uio_resid,
+	debugf("uinput: read %zd bytes by thread %d", uio->uio_resid,
 	    uio->uio_td->td_tid);
 
 	ret = devfs_get_cdevpriv((void **)&state);
@@ -155,7 +155,7 @@ uinput_write(struct cdev *dev, struct uio *uio, int ioflag)
 	struct input_event event;
 	int ret = 0;
 	
-	debugf("uinput: write %ld bytes by thread %d", uio->uio_resid,
+	debugf("uinput: write %zd bytes by thread %d", uio->uio_resid,
 	    uio->uio_td->td_tid);
 
 	ret = devfs_get_cdevpriv((void **)&state);
