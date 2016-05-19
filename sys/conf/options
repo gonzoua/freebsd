@@ -983,6 +983,5 @@ EM_MULTIQUEUE	opt_em.h
 # evdev protocol support
 EVDEV		opt_evdev.h
 
-
 # BHND(4) driver
 BHND_LOGLEVEL	opt_global.h
