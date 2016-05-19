@@ -195,7 +195,7 @@ evdev_register(device_t dev, struct evdev_dev *evdev)
 
 	/* Initialize internal structures */
 	evdev->ev_dev = dev;
-	mtx_init(&evdev->ev_mtx, "evmtx", "evdev", MTX_DEF);
+	mtx_init(&evdev->ev_mtx, "evmtx", NULL, MTX_DEF);
 	LIST_INIT(&evdev->ev_clients);
 
 	if (dev != NULL)
@@ -660,7 +660,7 @@ evdev_register_client(struct evdev_dev *evdev, struct evdev_client **clientp)
 	client = malloc(offsetof(struct evdev_client, ec_buffer_size) +
 	    sizeof(struct input_event) * buffer_size,
 	    M_EVDEV, M_WAITOK | M_ZERO);
-	mtx_init(&client->ec_buffer_mtx, "evclient", "evdev", MTX_DEF);
+	mtx_init(&client->ec_buffer_mtx, "evclient", NULL, MTX_DEF);
 	client->ec_evdev = evdev;
 
 	/* Initialize ring buffer */
