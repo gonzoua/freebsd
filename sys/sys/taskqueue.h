@@ -56,6 +56,7 @@ enum taskqueue_callback_type {
 #define	TASKQUEUE_CALLBACK_TYPE_MIN	TASKQUEUE_CALLBACK_TYPE_INIT
 #define	TASKQUEUE_CALLBACK_TYPE_MAX	TASKQUEUE_CALLBACK_TYPE_SHUTDOWN
 #define	TASKQUEUE_NUM_CALLBACKS		TASKQUEUE_CALLBACK_TYPE_MAX + 1
+#define	TASKQUEUE_NAMELEN		32
 
 typedef void (*taskqueue_callback_fn)(void *context);
 
@@ -221,7 +222,6 @@ int	taskqgroup_adjust(struct taskqgroup *qgroup, int cnt, int stride);
 
 #define GTASK_INIT(task, priority, func, context) do {	\
 	(task)->ta_pending = 0;				\
-	(task)->ta_flags = TASK_SKIP_WAKEUP;		\
 	(task)->ta_priority = (priority);		\
 	(task)->ta_func = (func);			\
 	(task)->ta_context = (context);			\
@@ -236,6 +236,21 @@ int	taskqgroup_adjust(struct taskqgroup *qgroup, int cnt, int stride);
 #define TASKQGROUP_DECLARE(name)			\
 extern struct taskqgroup *qgroup_##name
 
+#ifdef EARLY_AP_STARTUP
+#define TASKQGROUP_DEFINE(name, cnt, stride)				\
+									\
+struct taskqgroup *qgroup_##name;					\
+									\
+static void								\
+taskqgroup_define_##name(void *arg)					\
+{									\
+	qgroup_##name = taskqgroup_create(#name);			\
+	taskqgroup_adjust(qgroup_##name, (cnt), (stride));		\
+}									\
+									\
+SYSINIT(taskqgroup_##name, SI_SUB_INIT_IF, SI_ORDER_FIRST,		\
+	taskqgroup_define_##name, NULL)
+#else
 #define TASKQGROUP_DEFINE(name, cnt, stride)				\
 									\
 struct taskqgroup *qgroup_##name;					\
@@ -259,6 +274,7 @@ SYSINIT(taskqgroup_adj_##name, SI_SUB_SMP, SI_ORDER_ANY,		\
 	taskqgroup_adjust_##name, NULL);				\
 									\
 struct __hack
+#endif
 
 TASKQGROUP_DECLARE(net);
 

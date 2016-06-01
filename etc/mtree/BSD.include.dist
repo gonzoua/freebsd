@@ -157,6 +157,8 @@
         wi
         ..
     ..
+    devdctl
+    ..
     edit
         readline
         ..

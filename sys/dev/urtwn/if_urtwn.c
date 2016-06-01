@@ -350,6 +350,8 @@ static void		urtwn_set_rx_bssid_all(struct urtwn_softc *, int);
 static void		urtwn_set_gain(struct urtwn_softc *, uint8_t);
 static void		urtwn_scan_start(struct ieee80211com *);
 static void		urtwn_scan_end(struct ieee80211com *);
+static void		urtwn_getradiocaps(struct ieee80211com *, int, int *,
+			    struct ieee80211_channel[]);
 static void		urtwn_set_channel(struct ieee80211com *);
 static int		urtwn_wme_update(struct ieee80211com *);
 static void		urtwn_update_slot(struct ieee80211com *);
@@ -458,6 +460,9 @@ static const struct wme_to_queue {
 	{ R92C_EDCA_VO_PARAM, URTWN_BULK_TX_VO}
 };
 
+static const uint8_t urtwn_chan_2ghz[] =
+	{ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 };
+
 static int
 urtwn_match(device_t self)
 {
@@ -492,7 +497,6 @@ urtwn_attach(device_t self)
 	struct usb_attach_arg *uaa = device_get_ivars(self);
 	struct urtwn_softc *sc = device_get_softc(self);
 	struct ieee80211com *ic = &sc->sc_ic;
-	uint8_t bands[IEEE80211_MODE_BYTES];
 	int error;
 
 	device_set_usb_desc(self);
@@ -608,17 +612,16 @@ urtwn_attach(device_t self)
 		ic->ic_rxstream = sc->nrxchains;
 	}
 
-	memset(bands, 0, sizeof(bands));
-	setbit(bands, IEEE80211_MODE_11B);
-	setbit(bands, IEEE80211_MODE_11G);
-	if (urtwn_enable_11n)
-		setbit(bands, IEEE80211_MODE_11NG);
-	ieee80211_init_channels(ic, NULL, bands);
+	/* XXX TODO: setup regdomain if R92C_CHANNEL_PLAN_BY_HW bit is set. */
+
+	urtwn_getradiocaps(ic, IEEE80211_CHAN_MAX, &ic->ic_nchans,
+	    ic->ic_channels);
 
 	ieee80211_ifattach(ic);
 	ic->ic_raw_xmit = urtwn_raw_xmit;
 	ic->ic_scan_start = urtwn_scan_start;
 	ic->ic_scan_end = urtwn_scan_end;
+	ic->ic_getradiocaps = urtwn_getradiocaps;
 	ic->ic_set_channel = urtwn_set_channel;
 	ic->ic_transmit = urtwn_transmit;
 	ic->ic_parent = urtwn_parent;
@@ -2624,10 +2627,11 @@ urtwn_newstate(struct ieee80211vap *vap, enum ieee80211_state nstate, int arg)
 		if (ic->ic_promisc == 0) {
 			reg = urtwn_read_4(sc, R92C_RCR);
 
-			if (vap->iv_opmode != IEEE80211_M_HOSTAP)
+			if (vap->iv_opmode != IEEE80211_M_HOSTAP) {
 				reg |= R92C_RCR_CBSSID_DATA;
-			if (vap->iv_opmode != IEEE80211_M_IBSS)
-				reg |= R92C_RCR_CBSSID_BCN;
+				if (vap->iv_opmode != IEEE80211_M_IBSS)
+					reg |= R92C_RCR_CBSSID_BCN;
+			}
 
 			urtwn_write_4(sc, R92C_RCR, reg);
 		}
@@ -2838,26 +2842,24 @@ urtwn_tx_data(struct urtwn_softc *sc, struct ieee80211_node *ni,
 	struct ieee80211_channel *chan;
 	struct ieee80211_frame *wh;
 	struct r92c_tx_desc *txd;
-	uint8_t macid, raid, rate, ridx, subtype, type, tid, qsel;
+	uint8_t macid, raid, rate, ridx, type, tid, qos, qsel;
 	int hasqos, ismcast;
 
 	URTWN_ASSERT_LOCKED(sc);
 
-	/*
-	 * Software crypto.
-	 */
 	wh = mtod(m, struct ieee80211_frame *);
 	type = wh->i_fc[0] & IEEE80211_FC0_TYPE_MASK;
-	subtype = wh->i_fc[0] & IEEE80211_FC0_SUBTYPE_MASK;
 	hasqos = IEEE80211_QOS_HAS_SEQ(wh);
 	ismcast = IEEE80211_IS_MULTICAST(wh->i_addr1);
 
 	/* Select TX ring for this frame. */
 	if (hasqos) {
-		tid = ((const struct ieee80211_qosframe *)wh)->i_qos[0];
-		tid &= IEEE80211_QOS_TID;
-	} else
+		qos = ((const struct ieee80211_qosframe *)wh)->i_qos[0];
+		tid = qos & IEEE80211_QOS_TID;
+	} else {
+		qos = 0;
 		tid = 0;
+	}
 
 	chan = (ni->ni_chan != IEEE80211_CHAN_ANYC) ?
 		ni->ni_chan : ic->ic_curchan;
@@ -2923,6 +2925,14 @@ urtwn_tx_data(struct urtwn_softc *sc, struct ieee80211_node *ni,
 		txd->txdw0 |= htole32(R92C_TXDW0_BMCAST);
 
 	if (!ismcast) {
+		/* Unicast frame, check if an ACK is expected. */
+		if (!qos || (qos & IEEE80211_QOS_ACKPOLICY) !=
+		    IEEE80211_QOS_ACKPOLICY_NOACK) {
+			txd->txdw5 |= htole32(R92C_TXDW5_RTY_LMT_ENA);
+			txd->txdw5 |= htole32(SM(R92C_TXDW5_RTY_LMT,
+			    tp->maxretry));
+		}
+
 		if (sc->chip & URTWN_CHIP_88E) {
 			struct urtwn_node *un = URTWN_NODE(ni);
 			macid = un->id;
@@ -2946,8 +2956,7 @@ urtwn_tx_data(struct urtwn_softc *sc, struct ieee80211_node *ni,
 				switch (ic->ic_protmode) {
 				case IEEE80211_PROT_CTSONLY:
 					txd->txdw4 |= htole32(
-					    R92C_TXDW4_CTS2SELF |
-					    R92C_TXDW4_HWRTSEN);
+					    R92C_TXDW4_CTS2SELF);
 					break;
 				case IEEE80211_PROT_RTSCTS:
 					txd->txdw4 |= htole32(
@@ -3102,12 +3111,16 @@ urtwn_tx_raw(struct urtwn_softc *sc, struct ieee80211_node *ni,
 	if (IEEE80211_IS_MULTICAST(wh->i_addr1))
 		txd->txdw0 |= htole32(R92C_TXDW0_BMCAST);
 
+	if ((params->ibp_flags & IEEE80211_BPF_NOACK) == 0) {
+		txd->txdw5 |= htole32(R92C_TXDW5_RTY_LMT_ENA);
+		txd->txdw5 |= htole32(SM(R92C_TXDW5_RTY_LMT,
+		    params->ibp_try0));
+	}
 	if (params->ibp_flags & IEEE80211_BPF_RTS)
-		txd->txdw4 |= htole32(R92C_TXDW4_RTSEN);
+		txd->txdw4 |= htole32(R92C_TXDW4_RTSEN | R92C_TXDW4_HWRTSEN);
 	if (params->ibp_flags & IEEE80211_BPF_CTS)
 		txd->txdw4 |= htole32(R92C_TXDW4_CTS2SELF);
 	if (txd->txdw4 & htole32(R92C_TXDW4_RTSEN | R92C_TXDW4_CTS2SELF)) {
-		txd->txdw4 |= htole32(R92C_TXDW4_HWRTSEN);
 		txd->txdw4 |= htole32(SM(R92C_TXDW4_RTSRATE,
 		    URTWN_RIDX_OFDM24));
 	}
@@ -4709,7 +4722,8 @@ urtwn_scan_start(struct ieee80211com *ic)
 
 	URTWN_LOCK(sc);
 	/* Receive beacons / probe responses from any BSSID. */
-	if (ic->ic_opmode != IEEE80211_M_IBSS)
+	if (ic->ic_opmode != IEEE80211_M_IBSS &&
+	    ic->ic_opmode != IEEE80211_M_HOSTAP)
 		urtwn_set_rx_bssid_all(sc, 1);
 
 	/* Set gain for scanning. */
@@ -4724,12 +4738,29 @@ urtwn_scan_end(struct ieee80211com *ic)
 
 	URTWN_LOCK(sc);
 	/* Restore limitations. */
-	if (ic->ic_promisc == 0 && ic->ic_opmode != IEEE80211_M_IBSS)
+	if (ic->ic_promisc == 0 &&
+	    ic->ic_opmode != IEEE80211_M_IBSS &&
+	    ic->ic_opmode != IEEE80211_M_HOSTAP)
 		urtwn_set_rx_bssid_all(sc, 0);
 
 	/* Set gain under link. */
 	urtwn_set_gain(sc, 0x32);
 	URTWN_UNLOCK(sc);
+}
+
+static void
+urtwn_getradiocaps(struct ieee80211com *ic,
+    int maxchans, int *nchans, struct ieee80211_channel chans[])
+{
+	uint8_t bands[IEEE80211_MODE_BYTES];
+
+	memset(bands, 0, sizeof(bands));
+	setbit(bands, IEEE80211_MODE_11B);
+	setbit(bands, IEEE80211_MODE_11G);
+	if (urtwn_enable_11n)
+		setbit(bands, IEEE80211_MODE_11NG);
+	ieee80211_add_channel_list_2ghz(chans, maxchans, nchans,
+	    urtwn_chan_2ghz, nitems(urtwn_chan_2ghz), bands, 0);
 }
 
 static void
@@ -4902,13 +4933,12 @@ urtwn_set_promisc(struct urtwn_softc *sc)
 	if (vap->iv_state == IEEE80211_S_RUN) {
 		switch (vap->iv_opmode) {
 		case IEEE80211_M_STA:
-			mask2 |= R92C_RCR_CBSSID_DATA;
-			/* FALLTHROUGH */
-		case IEEE80211_M_HOSTAP:
 			mask2 |= R92C_RCR_CBSSID_BCN;
-			break;
+			/* FALLTHROUGH */
 		case IEEE80211_M_IBSS:
 			mask2 |= R92C_RCR_CBSSID_DATA;
+			break;
+		case IEEE80211_M_HOSTAP:
 			break;
 		default:
 			device_printf(sc->sc_dev, "%s: undefined opmode %d\n",

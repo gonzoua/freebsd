@@ -30,15 +30,49 @@
 #define _VMBUS_VAR_H_
 
 #include <sys/param.h>
+#include <sys/bus_dma.h>
+#include <sys/taskqueue.h>
+
+#include <dev/hyperv/include/hyperv_busdma.h>
+
+/*
+ * NOTE: DO NOT CHANGE THIS.
+ */
+#define VMBUS_SINT_MESSAGE	2
+/*
+ * NOTE:
+ * - DO NOT set it to the same value as VMBUS_SINT_MESSAGE.
+ * - DO NOT set it to 0.
+ */
+#define VMBUS_SINT_TIMER	4
 
 struct vmbus_pcpu_data {
-	int		event_flag_cnt;	/* # of event flags */
+	u_long			*intr_cnt;	/* Hyper-V interrupt counter */
+	struct vmbus_message	*message;	/* shared messages */
+	uint32_t		vcpuid;		/* virtual cpuid */
+	int			event_flags_cnt;/* # of event flags */
+	struct vmbus_evtflags	*event_flags;	/* shared event flags */
+
+	/* Rarely used fields */
+	struct hyperv_dma	message_dma;	/* busdma glue */
+	struct hyperv_dma	event_flags_dma;/* busdma glue */
+	struct taskqueue	*event_tq;	/* event taskq */
+	struct taskqueue	*message_tq;	/* message taskq */
+	struct task		message_task;	/* message task */
 } __aligned(CACHE_LINE_SIZE);
 
 struct vmbus_softc {
 	void			(*vmbus_event_proc)(struct vmbus_softc *, int);
 	struct vmbus_pcpu_data	vmbus_pcpu[MAXCPU];
+
+	/* Rarely used fields */
+	device_t		vmbus_dev;
+	int			vmbus_idtvec;
+	uint32_t		vmbus_flags;	/* see VMBUS_FLAG_ */
 };
+
+#define VMBUS_FLAG_ATTACHED	0x0001	/* vmbus was attached */
+#define VMBUS_FLAG_SYNIC	0x0002	/* SynIC was setup */
 
 extern struct vmbus_softc	*vmbus_sc;
 
@@ -48,15 +82,23 @@ vmbus_get_softc(void)
 	return vmbus_sc;
 }
 
-#define VMBUS_SC_PCPU_GET(sc, field, cpu)	(sc)->vmbus_pcpu[(cpu)].field
-#define VMBUS_SC_PCPU_PTR(sc, field, cpu)	&(sc)->vmbus_pcpu[(cpu)].field
-#define VMBUS_PCPU_GET(field, cpu)		\
-	VMBUS_SC_PCPU_GET(vmbus_get_softc(), field, (cpu))
-#define VMBUS_PCPU_PTR(field, cpu)		\
-	VMBUS_SC_PCPU_PTR(vmbus_get_softc(), field, (cpu))
+static __inline device_t
+vmbus_get_device(void)
+{
+	return vmbus_sc->vmbus_dev;
+}
+
+#define VMBUS_PCPU_GET(sc, field, cpu)	(sc)->vmbus_pcpu[(cpu)].field
+#define VMBUS_PCPU_PTR(sc, field, cpu)	&(sc)->vmbus_pcpu[(cpu)].field
+
+struct hv_vmbus_channel;
+struct trapframe;
 
 void	vmbus_on_channel_open(const struct hv_vmbus_channel *);
 void	vmbus_event_proc(struct vmbus_softc *, int);
 void	vmbus_event_proc_compat(struct vmbus_softc *, int);
+void	vmbus_handle_intr(struct trapframe *);
+
+void	vmbus_et_intr(struct trapframe *);
 
 #endif	/* !_VMBUS_VAR_H_ */

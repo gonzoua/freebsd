@@ -32,7 +32,9 @@
 #include <sys/mbuf.h>
 #include <sys/mutex.h>
 
-#include "hv_vmbus_priv.h"
+#include <dev/hyperv/vmbus/hv_vmbus_priv.h>
+#include <dev/hyperv/vmbus/vmbus_reg.h>
+#include <dev/hyperv/vmbus/vmbus_var.h>
 
 /*
  * Internal functions
@@ -300,8 +302,14 @@ vmbus_channel_cpu_set(struct hv_vmbus_channel *chan, int cpu)
 {
 	KASSERT(cpu >= 0 && cpu < mp_ncpus, ("invalid cpu %d", cpu));
 
+	if (hv_vmbus_protocal_version == HV_VMBUS_VERSION_WS2008 ||
+	    hv_vmbus_protocal_version == HV_VMBUS_VERSION_WIN7) {
+		/* Only cpu0 is supported */
+		cpu = 0;
+	}
+
 	chan->target_cpu = cpu;
-	chan->target_vcpu = hv_vmbus_g_context.hv_vcpu_index[cpu];
+	chan->target_vcpu = VMBUS_PCPU_GET(vmbus_get_softc(), vcpuid, cpu);
 
 	if (bootverbose) {
 		printf("vmbus_chan%u: assigned to cpu%u [vcpu%u]\n",
@@ -357,9 +365,7 @@ vmbus_channel_select_defcpu(struct hv_vmbus_channel *channel)
 		}
 	}
 
-	if ((hv_vmbus_protocal_version == HV_VMBUS_VERSION_WS2008) ||
-	    (hv_vmbus_protocal_version == HV_VMBUS_VERSION_WIN7) ||
-	    (!is_perf_channel)) {
+	if (!is_perf_channel) {
 		/* Stick to cpu0 */
 		vmbus_channel_cpu_set(channel, 0);
 		return;
@@ -712,8 +718,8 @@ hv_vmbus_release_unattached_channels(void)
 	    }
 	    hv_vmbus_free_vmbus_channel(channel);
 	}
-	bzero(hv_vmbus_g_connection.channels, 
-		sizeof(hv_vmbus_channel*) * HV_CHANNEL_MAX_COUNT);
+	bzero(hv_vmbus_g_connection.channels,
+	    sizeof(hv_vmbus_channel*) * VMBUS_CHAN_MAX);
 	mtx_unlock(&hv_vmbus_g_connection.channel_lock);
 }
 
@@ -744,7 +750,7 @@ vmbus_select_outgoing_channel(struct hv_vmbus_channel *primary)
 		return outgoing_channel;
 	}
 
-	cur_vcpu = hv_vmbus_g_context.hv_vcpu_index[smp_pro_id];
+	cur_vcpu = VMBUS_PCPU_GET(vmbus_get_softc(), vcpuid, smp_pro_id);
 	
 	TAILQ_FOREACH(new_channel, &primary->sc_list_anchor, sc_list_entry) {
 		if (new_channel->state != HV_CHANNEL_OPENED_STATE){
