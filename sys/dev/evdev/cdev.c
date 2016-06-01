@@ -118,7 +118,7 @@ evdev_open(struct cdev *dev, int oflags, int devtype, struct thread *td)
 		return (ENODEV);
 
 	state = malloc(sizeof(struct evdev_cdev_state), M_EVDEV, M_WAITOK | M_ZERO);
-	
+
 	ret = evdev_register_client(evdev, &state->ecs_client);
 	if (ret != 0) {
 		free(state, M_EVDEV);
@@ -233,7 +233,7 @@ evdev_write(struct cdev *dev, struct uio *uio, int ioflag)
 	struct evdev_dev *evdev = sc->ecs_evdev;
 	struct evdev_cdev_state *state;
 	int ret = 0;
-	
+
 	debugf("cdev: write %zd bytes by thread %d", uio->uio_resid,
 	    uio->uio_td->td_tid);
 

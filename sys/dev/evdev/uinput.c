@@ -154,7 +154,7 @@ uinput_write(struct cdev *dev, struct uio *uio, int ioflag)
 	struct uinput_user_dev userdev;
 	struct input_event event;
 	int ret = 0;
-	
+
 	debugf("uinput: write %zd bytes by thread %d", uio->uio_resid,
 	    uio->uio_td->td_tid);
 
@@ -201,7 +201,7 @@ uinput_setup_provider(struct evdev_dev *evdev, struct uinput_user_dev *udev)
 
 	evdev_set_name(evdev, udev->name);
 	memcpy(&evdev->ev_id, &udev->id, sizeof(struct input_id));
-	
+
 	bzero(&absinfo, sizeof(struct input_absinfo));
 	for (i = 0; i < ABS_CNT; i++) {
 		if (!isset(&evdev->ev_abs_flags, i))

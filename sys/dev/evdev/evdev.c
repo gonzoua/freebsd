@@ -200,7 +200,7 @@ evdev_register(device_t dev, struct evdev_dev *evdev)
 
 	if (dev != NULL)
 		strlcpy(evdev->ev_shortname, device_get_nameunit(dev), NAMELEN);
-	
+
 	if ((evdev->ev_flags & EV_REPEAT_MASK) == EV_EVDEV_REPEAT) {
 		/* Initialize callout */
 		callout_init(&evdev->ev_rep_callout, 1);
@@ -637,7 +637,7 @@ evdev_inject_event(struct evdev_dev *evdev, uint16_t type, uint16_t code,
 inline int
 evdev_sync(struct evdev_dev *evdev)
 {
-	
+
 	return (evdev_push_event(evdev, EV_SYN, SYN_REPORT, 1));
 }
 
@@ -645,7 +645,7 @@ evdev_sync(struct evdev_dev *evdev)
 inline int
 evdev_mt_sync(struct evdev_dev *evdev)
 {
-	
+
 	return (evdev_push_event(evdev, EV_SYN, SYN_MT_REPORT, 1));
 }
 
@@ -817,7 +817,7 @@ evdev_assign_id(struct evdev_dev *dev)
 static void
 evdev_start_repeat(struct evdev_dev *dev, int32_t key)
 {
-	
+
 }
 
 static void
@@ -843,7 +843,7 @@ evdev_client_push(struct evdev_client *client, uint16_t type, uint16_t code,
 {
 	struct timeval time;
 	size_t count, head, tail, ready;
-	
+
 	EVDEV_CLIENT_LOCKQ_ASSERT(client);
 	head = client->ec_buffer_head;
 	tail = client->ec_buffer_tail;
@@ -969,7 +969,7 @@ evdev_client_filter_queue(struct evdev_client *client, uint16_t type)
 		/* Rewrite entry */
 		memcpy(&client->ec_buffer[tail], event,
 		    sizeof(struct input_event));
-	
+
 		last_was_syn = (event->type == EV_SYN &&
 		    event->code == SYN_REPORT);
 
