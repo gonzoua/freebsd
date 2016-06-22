@@ -609,7 +609,7 @@ evdev_ioctl_eviocgbit(struct evdev_dev *evdev, int type, int len, caddr_t data)
 		return (ENOTTY);
 	}
 
-	/* 
+	/*
 	 * Clear ioctl data buffer in case it's bigger than
 	 * bitmap size
 	 */
