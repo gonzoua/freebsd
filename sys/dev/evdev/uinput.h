@@ -1,44 +1,39 @@
-/*
- *  User level driver support for input subsystem
+/*-
+ * Copyright (c) 2014-2015 Jakub Wojciech Klama <jceel@FreeBSD.org>
+ * Copyright (c) 2016 Oleksandr Tymoshenko <gonzo@FreeBSD.org>
+ * All rights reserved.
  *
- * Heavily based on evdev.c by Vojtech Pavlik
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
  *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
- *
- * Author: Aristeu Sergio Rozanski Filho <aris@cathedrallabs.org>
- *
- * Changes/Revisions:
- *	0.4	01/09/2014 (Benjamin Tissoires <benjamin.tissoires@redhat.com>)
- *		- add UI_GET_SYSNAME ioctl
- *	0.3	24/05/2006 (Anssi Hannula <anssi.hannulagmail.com>)
- *		- update ff support for the changes in kernel interface
- *		- add UINPUT_VERSION
- *	0.2	16/10/2004 (Micah Dowty <micah@navi.cx>)
- *		- added force feedback support
- *             - added UI_SET_PHYS
- *	0.1	20/06/2002
- *		- first public version
+ * $FreeBSD$
  */
-#ifndef _UAPI__UINPUT_H_
-#define _UAPI__UINPUT_H_
+
+#ifndef _EVDEV_UINPUT_H_
+#define	_EVDEV_UINPUT_H_
 
 #include <sys/types.h>
 #include <dev/evdev/input.h>
 
 #define UINPUT_VERSION		4
-
 
 struct uinput_ff_upload {
 	uint32_t		request_id;
@@ -55,8 +50,12 @@ struct uinput_ff_erase {
 
 /* ioctl */
 #define UINPUT_IOCTL_BASE	'U'
+
 #define UI_DEV_CREATE		_IO(UINPUT_IOCTL_BASE, 1)
 #define UI_DEV_DESTROY		_IO(UINPUT_IOCTL_BASE, 2)
+
+#define UI_GET_SYSNAME(len)	_IOC(IOC_OUT, UINPUT_IOCTL_BASE, 44, len)
+#define UI_GET_VERSION		_IOR(UINPUT_IOCTL_BASE, 45, unsigned int)
 
 #define UI_SET_EVBIT		_IOWINT(UINPUT_IOCTL_BASE, 100)
 #define UI_SET_KEYBIT		_IOWINT(UINPUT_IOCTL_BASE, 101)
@@ -75,83 +74,19 @@ struct uinput_ff_erase {
 #define UI_BEGIN_FF_ERASE	_IOWR(UINPUT_IOCTL_BASE, 202, struct uinput_ff_erase)
 #define UI_END_FF_ERASE		_IOW(UINPUT_IOCTL_BASE, 203, struct uinput_ff_erase)
 
-/**
- * UI_GET_SYSNAME - get the devfs name of the created uinput device
- *
- * @return the devfs name of the created virtual input device.
- * The complete devfs path is then /dev/input/--NAME--
- * Usually, it is in the form "eventN"
- */
-#define UI_GET_SYSNAME(len)	_IOC(IOC_OUT, UINPUT_IOCTL_BASE, 44, len)
-
-/**
- * UI_GET_VERSION - Return version of uinput protocol
- *
- * This writes uinput protocol version implemented by the kernel into
- * the integer pointed to by the ioctl argument. The protocol version
- * is hard-coded in the kernel and is independent of the uinput device.
- */
-#define UI_GET_VERSION		_IOR(UINPUT_IOCTL_BASE, 45, unsigned int)
-
-/*
- * To write a force-feedback-capable driver, the upload_effect
- * and erase_effect callbacks in input_dev must be implemented.
- * The uinput driver will generate a fake input event when one of
- * these callbacks are invoked. The userspace code then uses
- * ioctls to retrieve additional parameters and send the return code.
- * The callback blocks until this return code is sent.
- *
- * The described callback mechanism is only used if ff_effects_max
- * is set.
- *
- * To implement upload_effect():
- *   1. Wait for an event with type == EV_UINPUT and code == UI_FF_UPLOAD.
- *      A request ID will be given in 'value'.
- *   2. Allocate a uinput_ff_upload struct, fill in request_id with
- *      the 'value' from the EV_UINPUT event.
- *   3. Issue a UI_BEGIN_FF_UPLOAD ioctl, giving it the
- *      uinput_ff_upload struct. It will be filled in with the
- *      ff_effects passed to upload_effect().
- *   4. Perform the effect upload, and place a return code back into
-        the uinput_ff_upload struct.
- *   5. Issue a UI_END_FF_UPLOAD ioctl, also giving it the
- *      uinput_ff_upload_effect struct. This will complete execution
- *      of our upload_effect() handler.
- *
- * To implement erase_effect():
- *   1. Wait for an event with type == EV_UINPUT and code == UI_FF_ERASE.
- *      A request ID will be given in 'value'.
- *   2. Allocate a uinput_ff_erase struct, fill in request_id with
- *      the 'value' from the EV_UINPUT event.
- *   3. Issue a UI_BEGIN_FF_ERASE ioctl, giving it the
- *      uinput_ff_erase struct. It will be filled in with the
- *      effect ID passed to erase_effect().
- *   4. Perform the effect erasure, and place a return code back
- *      into the uinput_ff_erase struct.
- *   5. Issue a UI_END_FF_ERASE ioctl, also giving it the
- *      uinput_ff_erase_effect struct. This will complete execution
- *      of our erase_effect() handler.
- */
-
-/*
- * This is the new event type, used only by uinput.
- * 'code' is UI_FF_UPLOAD or UI_FF_ERASE, and 'value'
- * is the unique request ID. This number was picked
- * arbitrarily, above EV_MAX (since the input system
- * never sees it) but in the range of a 16-bit int.
- */
 #define EV_UINPUT		0x0101
 #define UI_FF_UPLOAD		1
 #define UI_FF_ERASE		2
 
 #define UINPUT_MAX_NAME_SIZE	80
 struct uinput_user_dev {
-	char name[UINPUT_MAX_NAME_SIZE];
-	struct input_id id;
-	uint32_t ff_effects_max;
-	int32_t absmax[ABS_CNT];
-	int32_t absmin[ABS_CNT];
-	int32_t absfuzz[ABS_CNT];
-	int32_t absflat[ABS_CNT];
+	char		name[UINPUT_MAX_NAME_SIZE];
+	struct input_id	id;
+	uint32_t	ff_effects_max;
+	int32_t		absmax[ABS_CNT];
+	int32_t		absmin[ABS_CNT];
+	int32_t		absfuzz[ABS_CNT];
+	int32_t		absflat[ABS_CNT];
 };
-#endif /* _UAPI__UINPUT_H_ */
+
+#endif /* _EVDEV_UINPUT_H_ */
