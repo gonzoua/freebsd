@@ -1,5 +1,4 @@
 /*-
- * Copyright (c) 2014-2015 Jakub Wojciech Klama <jceel@FreeBSD.org>
  * Copyright (c) 2016 Oleksandr Tymoshenko <gonzo@FreeBSD.org>
  * All rights reserved.
  *
