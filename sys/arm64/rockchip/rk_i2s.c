@@ -98,6 +98,8 @@ __FBSDID("$FreeBSD$");
 
 #define DIV_ROUND_CLOSEST(n,d)  (((n) + (d) / 2) / (d))
 
+#define	AUDIO_RATE	48000
+
 static struct ofw_compat_data compat_data[] = {
 	{ "rockchip,rk3399-i2s",		1 },
 	{ NULL,					0 }
@@ -140,10 +142,11 @@ rk_i2s_init(struct rk_i2s_softc *sc)
 	uint32_t bus_clock_div, lr_clock_div;
 	clk_t parent;
 
+	// to trigger re-parenting
+	clk_set_freq(sc->clk, 12288000, 0);
 
-	error = clk_set_freq(sc->clk, 1000000, CLK_SET_ROUND_DOWN);
 	if (clk_get_parent(sc->clk, &parent) == 0) {
-		error = clk_set_freq(parent, 1000000, CLK_SET_ROUND_DOWN);
+		error = clk_set_freq(parent, 12288000, CLK_SET_ROUND_DOWN);
 
 		if (error != 0) {
 			device_printf(sc->dev, "cannot set freq for i2s_clk clock\n");
@@ -179,19 +182,17 @@ rk_i2s_init(struct rk_i2s_softc *sc)
 		device_printf(sc->dev, "failed to get clk frequency: err=%d\n", error);
 		return (error);
 	}
-	bus_clk_freq = sc->bclk_fs * 48000;
+	bus_clk_freq = sc->bclk_fs * AUDIO_RATE;
 	bus_clock_div = DIV_ROUND_CLOSEST(clk_freq, bus_clk_freq);
 	lr_clock_div = sc->bclk_fs;
-	bus_clock_div = lr_clock_div = 254;
-	device_printf(sc->dev, "--> %08x %08x\n", bus_clock_div, lr_clock_div);
+	device_printf(sc->dev, "clk_freq = %jd\n", clk_freq);
+	device_printf(sc->dev, "bus_clock_div = %d, lr_clock_div = %d\n", bus_clock_div, lr_clock_div);
 
 	val &= ~(I2S_CKR_MDIV_MASK | I2S_CKR_RSD_MASK | I2S_CKR_TSD_MASK);
 	val |= I2S_CKR_MDIV(bus_clock_div);
 	val |= I2S_CKR_RSD(lr_clock_div);
 	val |= I2S_CKR_TSD(lr_clock_div);
 
-	// val = 0x00071f1f;
-	device_printf(sc->dev, "I2S_CKR = %08x\n", val);
 	RK_I2S_WRITE_4(sc, I2S_CKR, val);
 
 	val = I2S_TXCR_IBM_NORMAL | I2S_TXCR_VDW_16 | I2S_CSR_2;
@@ -312,7 +313,7 @@ rk_i2s_attach(device_t dev)
 	/* TODO: read from "rockchip,bclk-fs" */
 	sc->bclk_fs = 64;
 
-	if (device_get_unit(dev) == 0)
+	// if (device_get_unit(dev) == 1)
 		rk_i2s_init(sc);
 
 	return (0);
