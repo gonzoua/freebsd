@@ -51,12 +51,14 @@ __FBSDID("$FreeBSD$");
 
 #include <dev/iicbus/iiconf.h>
 #include <dev/iicbus/iicbus.h>
+#include <sys/sysctl.h>
 
 #include "iicbus_if.h"
 
 
 #define	RT5640_RESET		0x00
 #define	RT5640_HP_VOL		0x02
+#define	RT5640_DAC1_DIG_VOL	0x19
 #define	RT5640_AD_DA_MIXER	0x29
 #define	RT5640_STO_DAC_MIXER	0x2a
 #define	RT5640_DIG_MIXER	0x2c
@@ -287,8 +289,9 @@ rt5640_init(void *arg)
 	// reg &= ~((1 << 14) | (1 << 13));
 	// unmute HPOVOL
 	reg &= ~((1 << 13));
+	// unmute DAC1
+	// reg &= ~((1 << 14));
 	rt5640_write2(sc, RT5640_HPO_MIXER, reg);
-	rt5640_write2(sc, RT5640_HPO_MIXER, 0); // LINUX
 
 	// "DAC L1/R1"
 	rt5640_read2(sc, RT5640_PWR_DIG1, &reg);
@@ -334,6 +337,7 @@ rt5640_init(void *arg)
 	// slave
 	reg |= (1 << 15);
 	rt5640_write2(sc, RT5640_I2S1_SDP, reg);
+	printf("gonzo RT5640_I2S1_SDP = %08x\n", reg);
 
 	// DAC L1/R1 Switch
 	rt5640_read2(sc, RT5640_DIG_MIXER, &reg);
@@ -364,8 +368,13 @@ rt5640_init(void *arg)
 	rt5640_read2(sc, RT5640_STO_DAC_MIXER, &reg);
 	reg &= ~((1 << 14) | (1 << 6));
 	rt5640_write2(sc, RT5640_STO_DAC_MIXER, reg);
-	rt5640_write2(sc, RT5640_STO_DAC_MIXER, 0x00000414); // LINUX
-	rt5640_write2(sc, 4, 0); // LINUX
+
+	// IF1_DAC_x digital volume
+	rt5640_read2(sc, RT5640_DAC1_DIG_VOL, &reg);
+	reg &= ~(0xffff);
+	// XXX: volume
+	reg |= 0x5050;
+	rt5640_write2(sc, RT5640_DAC1_DIG_VOL, reg);
 
 	// PLL1
 	rt5640_read2(sc, RT5640_PWR_ANLG2, &reg);
@@ -375,14 +384,6 @@ rt5640_init(void *arg)
 	rt5640_write2(sc, RT5640_ADDA_CLK1, 0x114);
 
 	rt5640_powerup(sc);
-
-	int i;
-	for (i = 0; i < 0x100; i++) {
-		rt5640_read2(sc, i, &reg);
-		printf("gonzo [%02x] = %08x\n", i, reg);
-	}
-
-	return;
 }
 
 static int
@@ -417,6 +418,8 @@ rt5640_attach(device_t dev)
 		return (ENXIO);
 	}
 	clk_set_freq(sc->clk, 12288000, 0);
+
+	clk_enable(sc->clk);
 
 	/*
 	 * Wait until i2c is ready to set up the chip
