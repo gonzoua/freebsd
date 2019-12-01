@@ -40,8 +40,15 @@ __FBSDID("$FreeBSD$");
 #include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/ofw_bus_subr.h>
 
-struct simpleaudio_softc {
+struct audio_soc_link {
+	device_t	cpu_dev;
+	device_t	codec_dev;
+	unsigned int	mclk_fs;
+};
+
+struct audio_soc_softc {
 	device_t	dev;
+	char		*name;
 };
 
 static struct ofw_compat_data compat_data[] = {
@@ -49,12 +56,12 @@ static struct ofw_compat_data compat_data[] = {
 	{NULL,			0},
 };
 
-static int	simpleaudio_probe(device_t dev);
-static int	simpleaudio_attach(device_t dev);
-static int	simpleaudio_detach(device_t dev);
+static int	audio_soc_probe(device_t dev);
+static int	audio_soc_attach(device_t dev);
+static int	audio_soc_detach(device_t dev);
 
 static int
-simpleaudio_probe(device_t dev)
+audio_soc_probe(device_t dev)
 {
 
 	if (!ofw_bus_status_okay(dev))
@@ -69,38 +76,56 @@ simpleaudio_probe(device_t dev)
 }
 
 static int
-simpleaudio_attach(device_t dev)
+audio_soc_attach(device_t dev)
 {
-	struct simpleaudio_softc	*sc;
+	struct audio_soc_softc *sc;
+	char *name;
+	phandle_t node;
+	int ret;
 	
 	sc = device_get_softc(dev);
 	sc->dev = dev;
+	node = ofw_bus_get_node(dev);
+
+	ret = OF_getprop_alloc(node, "name", (void **)&name);
+	if (ret == -1)
+		name = "SoC audio";
+
+	sc->name = strdup(name, M_DEVBUF);
+
+	if (ret != -1)
+		OF_prop_free(name);
 
 	return (0);
 }
 
 static int
-simpleaudio_detach(device_t dev)
+audio_soc_detach(device_t dev)
 {
+	struct audio_soc_softc *sc;
+	
+	sc = device_get_softc(dev);
+	if (sc->name)
+		free(sc->name, M_DEVBUF);
 
 	return (0);
 }
 
-static device_method_t simpleaudio_methods[] = {
+static device_method_t audio_soc_methods[] = {
         /* device_if methods */
-	DEVMETHOD(device_probe,		simpleaudio_probe),
-	DEVMETHOD(device_attach,	simpleaudio_attach),
-	DEVMETHOD(device_detach,	simpleaudio_detach),
+	DEVMETHOD(device_probe,		audio_soc_probe),
+	DEVMETHOD(device_attach,	audio_soc_attach),
+	DEVMETHOD(device_detach,	audio_soc_detach),
 
 	DEVMETHOD_END,
 };
 
-static driver_t simpleaudio_driver = {
-	"simpleaudio",
-	simpleaudio_methods,
-	sizeof(struct simpleaudio_softc),
+static driver_t audio_soc_driver = {
+	"ausoc",
+	audio_soc_methods,
+	sizeof(struct audio_soc_softc),
 };
-static devclass_t simpleaudio_devclass;
+static devclass_t audio_soc_devclass;
 
-DRIVER_MODULE(simpleaudiocodec, simplebus, simpleaudio_driver, simpleaudio_devclass, NULL, NULL);
-MODULE_VERSION(simpleaudiocodec, 1);
+DRIVER_MODULE(audio_soc, simplebus, audio_soc_driver, audio_soc_devclass, NULL, NULL);
+MODULE_VERSION(audio_soc, 1);
