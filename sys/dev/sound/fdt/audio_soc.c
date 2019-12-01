@@ -40,6 +40,8 @@ __FBSDID("$FreeBSD$");
 #include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/ofw_bus_subr.h>
 
+#include <dev/sound/fdt/audio_dai.h>
+
 struct audio_soc_link {
 	device_t	cpu_dev;
 	device_t	codec_dev;
@@ -55,6 +57,20 @@ static struct ofw_compat_data compat_data[] = {
 	{"simple-audio-card",	1},
 	{NULL,			0},
 };
+
+static struct {
+	const char *name;
+	unsigned int fmt;
+} ausoc_dai_formats[] = {
+	{ "i2s",	AUDIO_DAI_FORMAT_I2S },
+	{ "right_j",	AUDIO_DAI_FORMAT_RJ },
+	{ "left_j",	AUDIO_DAI_FORMAT_LJ },
+	{ "dsp_a",	AUDIO_DAI_FORMAT_DSPA },
+	{ "dsp_b",	AUDIO_DAI_FORMAT_DSPB },
+	{ "ac97",	AUDIO_DAI_FORMAT_AC97 },
+	{ "pdm",	AUDIO_DAI_FORMAT_PDM },
+};
+
 
 static int	audio_soc_probe(device_t dev);
 static int	audio_soc_attach(device_t dev);
@@ -81,7 +97,9 @@ audio_soc_attach(device_t dev)
 	struct audio_soc_softc *sc;
 	char *name;
 	phandle_t node;
-	int ret;
+	int i, ret;
+	char tmp[32];
+	unsigned int fmt, pol, clk;
 	
 	sc = device_get_softc(dev);
 	sc->dev = dev;
@@ -95,6 +113,40 @@ audio_soc_attach(device_t dev)
 
 	if (ret != -1)
 		OF_prop_free(name);
+
+	ret = OF_getprop(node, "simple-audio-card,format", tmp, sizeof(tmp));
+	if (ret == 0) {
+		for (i = 0; i < nitems(ausoc_dai_formats); i++) {
+			if (strcmp(tmp, ausoc_dai_formats[i].name) == 0) {
+				fmt = ausoc_dai_formats[i].fmt;
+				break;
+			}
+		}
+		if (i == nitems(ausoc_dai_formats))
+			return (EINVAL);
+	} else
+		fmt = AUDIO_DAI_FORMAT_I2S;
+
+	bool frame_master = true;
+	bool bitclock_master = true;
+
+	if (frame_master) {
+		clk = bitclock_master ?
+		    AUDIO_DAI_CLOCK_CBM_CFM : AUDIO_DAI_CLOCK_CBS_CFM;
+	} else {
+		clk = bitclock_master ?
+		    AUDIO_DAI_CLOCK_CBM_CFS : AUDIO_DAI_CLOCK_CBS_CFS;
+	}
+
+	bool bitclock_inversion = OF_hasprop(node, "simple-audio-card,bitclock-inversion");
+	bool frame_inversion = OF_hasprop(node, "simple-audio-card,frame-inversion");
+	if (bitclock_inversion) {
+		pol = frame_inversion ?
+		    AUDIO_DAI_POLARITY_IB_IF : AUDIO_DAI_POLARITY_IB_NF;
+	} else {
+		pol = frame_inversion ?
+		    AUDIO_DAI_POLARITY_NB_IF : AUDIO_DAI_POLARITY_NB_NF;
+	}
 
 	return (0);
 }
