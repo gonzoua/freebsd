@@ -407,6 +407,7 @@ rt5640_attach(device_t dev)
 {
 	struct rt5640_softc	*sc;
 	int error;
+	phandle_t node;
 	
 	sc = device_get_softc(dev);
 	sc->dev = dev;
@@ -428,6 +429,9 @@ rt5640_attach(device_t dev)
 	sc->init_hook.ich_arg = sc;
 	if (config_intrhook_establish(&sc->init_hook) != 0)
 		return (ENOMEM);
+
+	node = ofw_bus_get_node(dev);
+	OF_device_register_xref(OF_xref_from_node(node), dev);
 
 	return (0);
 }

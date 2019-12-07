@@ -52,6 +52,7 @@ __FBSDID("$FreeBSD$");
 
 #include "opt_snd.h"
 #include <dev/sound/pcm/sound.h>
+#include "audio_dai_if.h"
 
 #define	AUDIO_BUFFER_SIZE	48000 * 4
 
@@ -117,7 +118,7 @@ static struct resource_spec rk_i2s_spec[] = {
 	{ -1, 0 }
 };
 
-struct rk_i2s_info {
+struct rk_i2s_softc {
 	device_t	dev;
 	struct resource	*res[2];
 	struct mtx	mtx;
@@ -126,8 +127,6 @@ struct rk_i2s_info {
 	void *		intrhand;
 	uint32_t	bclk_fs;
 	struct syscon	*grf;
-	struct pcm_channel 	*pcm;		/* PCM channel */
-	struct snd_dbuf		*buf; 		/* PCM buffer */
 	/* Pointer to first unsubmitted sample */
 	uint32_t		unsubmittedptr;
 };
@@ -140,103 +139,6 @@ struct rk_i2s_info {
 static int rk_i2s_probe(device_t dev);
 static int rk_i2s_attach(device_t dev);
 static int rk_i2s_detach(device_t dev);
-static void rk_i2s_intr(void *arg);
-
-static uint32_t
-rk_i2s_chan_setblocksize(kobj_t obj, void *data, uint32_t blocksz)
-{
-
-	return (blocksz);
-}
-
-static int
-rk_i2s_chan_setformat(kobj_t obj, void *data, uint32_t format)
-{
-
-	/* TODO: implement */
-	return (0);
-}
-
-static uint32_t
-rk_i2s_chan_setspeed(kobj_t obj, void *data, uint32_t speed)
-{
-
-	/* TODO: implement */
-	return (AUDIO_RATE);
-}
-
-static uint32_t
-rk_i2s_chan_getptr(kobj_t obj, void *data)
-{
-	struct rk_i2s_info 	*i2s = data;
-	uint32_t r;
-
-	RK_I2S_LOCK(i2s);
-	r = i2s->unsubmittedptr;
-	RK_I2S_UNLOCK(i2s);
-
-	return (r);
-
-}
-
-static void *
-rk_i2s_chan_init(kobj_t obj, void *devinfo, struct snd_dbuf *b,
-	struct pcm_channel *c, int dir)
-{
-	struct rk_i2s_info 	*i2s = devinfo;
-	device_t		dev;
-	void			*buffer;
-
-	i2s->pcm = c;
-	i2s->buf = b;
-	dev = i2s->dev;
-
-	buffer = malloc(AUDIO_BUFFER_SIZE, M_DEVBUF, M_WAITOK | M_ZERO);
-
-	if (sndbuf_setup(b, buffer, AUDIO_BUFFER_SIZE) != 0) {
-		device_printf(i2s->dev, "sndbuf_setup failed\n");
-		free(buffer, M_DEVBUF);
-		return NULL;
-	}
-
-	return (i2s);
-}
-
-static int
-rk_i2s_chan_trigger(kobj_t obj, void *data, int go)
-{
-	struct rk_i2s_info 	*i2s = data;
-	uint32_t val;
-
-	switch (go) {
-	case PCMTRIG_START:
-		RK_I2S_WRITE_4(i2s, I2S_INTCR, 0x01f00f1);
-		val = I2S_XFER_TXS_START | I2S_XFER_RXS_START;
-		RK_I2S_WRITE_4(i2s, I2S_XFER, val);
-		return (0);
-
-	case PCMTRIG_STOP:
-	case PCMTRIG_ABORT:
-			RK_I2S_WRITE_4(i2s, I2S_XFER, 0);
-			RK_I2S_WRITE_4(i2s, I2S_INTCR, 0x01f000f0);
-
-		RK_I2S_LOCK(i2s);
-		i2s->unsubmittedptr = 0;
-		sndbuf_reset(i2s->buf);
-		RK_I2S_UNLOCK(i2s);
-		return (0);
-	}
-
-	return (0);
-}
-
-static int
-rk_i2s_chan_free(kobj_t obj, void *data)
-{
-
-	/* TODO: implement */
-	return (0);
-}
 
 static uint32_t sc_fmt[] = {
 	SND_FORMAT(AFMT_S16_LE, 2, 0),
@@ -244,27 +146,9 @@ static uint32_t sc_fmt[] = {
 };
 static struct pcmchan_caps rk_i2s_caps = {48000, 48000, sc_fmt, 0};
 
-static struct pcmchan_caps *
-rk_i2s_chan_getcaps(kobj_t obj, void *data)
-{
-	return (&rk_i2s_caps);
-}
-
-static kobj_method_t rk_i2s_chan_methods[] = {
-	KOBJMETHOD(channel_init, 	rk_i2s_chan_init),
-	KOBJMETHOD(channel_free, 	rk_i2s_chan_free),
-	KOBJMETHOD(channel_setformat, 	rk_i2s_chan_setformat),
-	KOBJMETHOD(channel_setspeed, 	rk_i2s_chan_setspeed),
-	KOBJMETHOD(channel_setblocksize,rk_i2s_chan_setblocksize),
-	KOBJMETHOD(channel_trigger,	rk_i2s_chan_trigger),
-	KOBJMETHOD(channel_getptr,	rk_i2s_chan_getptr),
-	KOBJMETHOD(channel_getcaps,	rk_i2s_chan_getcaps),
-	KOBJMETHOD_END
-};
-CHANNEL_DECLARE(rk_i2s_chan);
 
 static int
-rk_i2s_init(struct rk_i2s_info *sc)
+rk_i2s_init(struct rk_i2s_softc *sc)
 {
 	uint32_t val;
 	uint64_t clk_freq;
@@ -381,79 +265,53 @@ rk_i2s_probe(device_t dev)
 static int
 rk_i2s_attach(device_t dev)
 {
-	struct rk_i2s_info *i2s;
+	struct rk_i2s_softc *sc;
 	int error;
 	phandle_t node;
 
-	i2s = malloc(sizeof *i2s, M_DEVBUF, M_WAITOK | M_ZERO);
-	if (i2s == NULL)
-		return (ENOMEM);
+	sc = device_get_softc(dev);
+	sc->dev = dev;
 
-	i2s->dev = dev;
+	mtx_init(&sc->mtx, device_get_nameunit(dev), NULL, MTX_DEF);
 
-	mtx_init(&i2s->mtx, device_get_nameunit(dev), NULL, MTX_DEF);
-
-	if (bus_alloc_resources(dev, rk_i2s_spec, i2s->res) != 0) {
+	if (bus_alloc_resources(dev, rk_i2s_spec, sc->res) != 0) {
 		device_printf(dev, "cannot allocate resources for device\n");
 		error = ENXIO;
 		goto fail;
 	}
 
-	if (bus_setup_intr(dev, i2s->res[1],
-	    INTR_TYPE_MISC | INTR_MPSAFE, NULL, rk_i2s_intr, i2s,
-	    &i2s->intrhand)) {
-		bus_release_resources(dev, rk_i2s_spec, i2s->res);
-		device_printf(dev, "cannot setup interrupt handler\n");
-		return (ENXIO);
-	}
-
 	/* Activate the module clock. */
-	error = clk_get_by_ofw_name(dev, 0, "i2s_hclk", &i2s->hclk);
+	error = clk_get_by_ofw_name(dev, 0, "i2s_hclk", &sc->hclk);
 	if (error != 0) {
 		device_printf(dev, "cannot get i2s_hclk clock\n");
 		goto fail;
 	}
-	error = clk_get_by_ofw_name(dev, 0, "i2s_clk", &i2s->clk);
+	error = clk_get_by_ofw_name(dev, 0, "i2s_clk", &sc->clk);
 	if (error != 0) {
 		device_printf(dev, "cannot get i2s_clk clock\n");
 		goto fail;
 	}
 
-	error = clk_enable(i2s->hclk);
+	error = clk_enable(sc->hclk);
 	if (error != 0) {
 		device_printf(dev, "cannot enable i2s_hclk clock\n");
 		goto fail;
 	}
 
-	#if 0
-	error = clk_enable(i2s->clk);
-	if (error != 0) {
-		device_printf(dev, "cannot enable i2s_clk clock\n");
-		goto fail;
-	}
-	#endif
-
 	node = ofw_bus_get_node(dev);
 	if (OF_hasprop(node, "rockchip,grf") &&
 	    syscon_get_by_ofw_property(dev, node,
-	    "rockchip,grf", &i2s->grf) != 0) {
+	    "rockchip,grf", &sc->grf) != 0) {
 		device_printf(dev, "cannot get grf driver handle\n");
 		return (ENXIO);
 	}
 
 	/* TODO: read from "rockchip,bclk-fs" */
-	i2s->bclk_fs = 64;
+	sc->bclk_fs = 64;
 
-	if (pcm_register(dev, i2s, 1, 0))
-		goto fail;
+	rk_i2s_init(sc);
 
-	pcm_getbuffersize(dev, AUDIO_BUFFER_SIZE, AUDIO_BUFFER_SIZE,
-	    AUDIO_BUFFER_SIZE);
-	pcm_addchan(dev, PCMDIR_PLAY, &rk_i2s_chan_class, i2s);
-
-	pcm_setstatus(dev, "at EXPERIMENT");
-
-		rk_i2s_init(i2s);
+	OF_device_register_xref(OF_xref_from_node(node), dev);
 
 	return (0);
 
@@ -465,7 +323,7 @@ fail:
 static int
 rk_i2s_detach(device_t dev)
 {
-	struct rk_i2s_info *i2s;
+	struct rk_i2s_softc *i2s;
 
 	i2s = device_get_softc(dev);
 
@@ -483,52 +341,116 @@ rk_i2s_detach(device_t dev)
 	return (0);
 }
 
-static void
-rk_i2s_intr(void *arg)
+static int
+rk_i2s_dai_intr(device_t dev, struct snd_dbuf *buf)
 {
-	struct rk_i2s_info *i2s;
+	struct rk_i2s_softc *sc;
 	uint32_t status, ctrl;
 	uint32_t level;
-
 	uint32_t val = 0x00;
+	int ret = 0;
 
-	i2s = arg;
+	sc = device_get_softc(dev);
 
-	RK_I2S_LOCK(i2s);
-	status = RK_I2S_READ_4(i2s, I2S_INTSR);
+	RK_I2S_LOCK(sc);
+	status = RK_I2S_READ_4(sc, I2S_INTSR);
 	if (status & I2S_INTSR_TXUI) {
-		ctrl = RK_I2S_READ_4(i2s, I2S_INTCR);
+		ctrl = RK_I2S_READ_4(sc, I2S_INTCR);
 		ctrl |= I2S_INTCR_TXUIC;
-		RK_I2S_WRITE_4(i2s, I2S_INTCR, ctrl);
+		RK_I2S_WRITE_4(sc, I2S_INTCR, ctrl);
 	}
 
 	if (status & (I2S_INTSR_TXUI | I2S_INTSR_TXEI)) {
-		level = RK_I2S_READ_4(i2s, I2S_TXFIFOLR) & 0x1f;
-		uint8_t *buf;
+		level = RK_I2S_READ_4(sc, I2S_TXFIFOLR) & 0x1f;
+		uint8_t *samples;
 		uint32_t count, size, readyptr, written;
-		count = sndbuf_getready(i2s->buf);
-		size = sndbuf_getsize(i2s->buf);
-		readyptr = sndbuf_getreadyptr(i2s->buf);
+		count = sndbuf_getready(buf);
+		size = sndbuf_getsize(buf);
+		readyptr = sndbuf_getreadyptr(buf);
 
-		buf = (uint8_t*)sndbuf_getbuf(i2s->buf);
+		samples = (uint8_t*)sndbuf_getbuf(buf);
 		written = 0;
 		for (; level < 31; level++) {
-			val  = (buf[readyptr++ % size] << 0);
-			val |= (buf[readyptr++ % size] << 8);
-			val |= (buf[readyptr++ % size] << 16);
-			val |= (buf[readyptr++ % size] << 24);
+			val  = (samples[readyptr++ % size] << 0);
+			val |= (samples[readyptr++ % size] << 8);
+			val |= (samples[readyptr++ % size] << 16);
+			val |= (samples[readyptr++ % size] << 24);
 			written += 4;
-			RK_I2S_WRITE_4(i2s, I2S_TXDR, val);
+			RK_I2S_WRITE_4(sc, I2S_TXDR, val);
 		}
-		i2s->unsubmittedptr += written;
-		i2s->unsubmittedptr %= size;
-		RK_I2S_UNLOCK(i2s);
-		chn_intr(i2s->pcm);
-		RK_I2S_LOCK(i2s);
+		sc->unsubmittedptr += written;
+		sc->unsubmittedptr %= size;
+		ret = 1;
 	}
 
-	RK_I2S_UNLOCK(i2s);
+	RK_I2S_UNLOCK(sc);
+
+	return (ret);
 }
+
+static struct pcmchan_caps *
+rk_i2s_dai_get_caps(device_t dev)
+{
+	return (&rk_i2s_caps);
+}
+
+static int
+rk_i2s_dai_trigger(device_t dev, int go)
+{
+	struct rk_i2s_softc 	*sc = device_get_softc(dev);
+	uint32_t val;
+
+	switch (go) {
+	case PCMTRIG_START:
+		RK_I2S_WRITE_4(sc, I2S_INTCR, 0x01f00f1);
+		val = I2S_XFER_TXS_START | I2S_XFER_RXS_START;
+		RK_I2S_WRITE_4(sc, I2S_XFER, val);
+		break;
+
+	case PCMTRIG_STOP:
+	case PCMTRIG_ABORT:
+		RK_I2S_WRITE_4(sc, I2S_XFER, 0);
+		RK_I2S_WRITE_4(sc, I2S_INTCR, 0x01f000f0);
+
+		RK_I2S_LOCK(sc);
+		sc->unsubmittedptr = 0;
+		RK_I2S_UNLOCK(sc);
+		break;
+	}
+
+	return (0);
+}
+
+static uint32_t
+rk_i2s_dai_get_ptr(device_t dev)
+{
+	struct rk_i2s_softc *sc;
+	uint32_t ptr;
+
+	sc = device_get_softc(dev);
+
+	RK_I2S_LOCK(sc);
+	ptr = sc->unsubmittedptr;
+	RK_I2S_UNLOCK(sc);
+
+	return ptr;
+}
+
+static int
+rk_i2s_dai_setup(device_t dev, driver_intr_t intr_handler, void *intr_arg)
+{
+	struct rk_i2s_softc 	*sc = device_get_softc(dev);
+
+	if (bus_setup_intr(dev, sc->res[1],
+	    INTR_TYPE_MISC | INTR_MPSAFE, NULL, intr_handler, intr_arg,
+	    &sc->intrhand)) {
+		device_printf(dev, "cannot setup interrupt handler\n");
+		return (ENXIO);
+	}
+
+	return (0);
+}
+
 
 static device_method_t rk_i2s_methods[] = {
 	/* Device interface */
@@ -536,13 +458,19 @@ static device_method_t rk_i2s_methods[] = {
 	DEVMETHOD(device_attach,	rk_i2s_attach),
 	DEVMETHOD(device_detach,	rk_i2s_detach),
 
+	DEVMETHOD(audio_dai_setup,	rk_i2s_dai_setup),
+	DEVMETHOD(audio_dai_intr,	rk_i2s_dai_intr),
+	DEVMETHOD(audio_dai_get_caps,	rk_i2s_dai_get_caps),
+	DEVMETHOD(audio_dai_trigger,	rk_i2s_dai_trigger),
+	DEVMETHOD(audio_dai_get_ptr,	rk_i2s_dai_get_ptr),
+
 	DEVMETHOD_END
 };
 
 static driver_t rk_i2s_driver = {
-	"pcm",
+	"i2s",
 	rk_i2s_methods,
-	PCM_SOFTC_SIZE,
+	sizeof(struct rk_i2s_softc),
 };
 
 static devclass_t rk_i2s_devclass;

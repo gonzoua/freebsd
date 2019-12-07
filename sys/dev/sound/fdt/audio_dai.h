@@ -51,4 +51,10 @@
 #define	AUDIO_DAI_JACK_HP		0
 #define	AUDIO_DAI_JACK_MIC		1
 
+#define	AUDIO_DAI_FORMAT(fmt, pol, clk)		(((fmt) << 16) | ((pol) << 8) | (clk))
+#define	AUDIO_DAI_FORMAT_FORMAT(format)		(((format) >> 16) & 0xff)
+#define	AUDIO_DAI_FORMAT_POLARITY(format)	(((format) >> 8) & 0xff)
+#define	AUDIO_DAI_FORMAT_CLOCK(format)		(((format) >> 0) & 0xff)
+
+
 #endif /* __DAI_H__ */

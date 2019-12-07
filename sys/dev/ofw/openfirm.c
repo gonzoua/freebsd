@@ -70,6 +70,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/queue.h>
 #include <sys/systm.h>
 #include <sys/endian.h>
+#include <sys/bus.h>
 
 #include <machine/stdarg.h>
 
@@ -690,6 +691,7 @@ OF_device_register_xref(phandle_t xref, device_t dev)
 {
 	struct xrefinfo *xi;
 
+	printf("adding reference xref=%d (%s)\n", xref, device_get_nameunit(dev));
 	/*
 	 * If the given xref handle doesn't already exist in the list then we
 	 * add a list entry.  In theory this can only happen on a system where

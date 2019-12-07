@@ -41,16 +41,25 @@ __FBSDID("$FreeBSD$");
 #include <dev/ofw/ofw_bus_subr.h>
 
 #include <dev/sound/fdt/audio_dai.h>
+#include <dev/sound/pcm/sound.h>
+#include "audio_dai_if.h"
 
-struct audio_soc_link {
-	device_t	cpu_dev;
-	device_t	codec_dev;
-	unsigned int	mclk_fs;
-};
+#define	AUDIO_BUFFER_SIZE	48000 * 4
 
 struct audio_soc_softc {
-	device_t	dev;
-	char		*name;
+	/*
+	 * pcm_register assumes that sc is snddev_info,
+	 * so this has to be first structure member for "compatiblity"
+	 */
+	struct snddev_info	info;
+	device_t		dev;
+	char			*name;
+	struct intr_config_hook init_hook;
+	device_t		cpu_dev;
+	device_t		codec_dev;
+	unsigned int		mclk_fs;
+	struct pcm_channel 	*pcm;		/* PCM channel */
+	struct snd_dbuf		*buf; 		/* PCM buffer */
 };
 
 static struct ofw_compat_data compat_data[] = {
@@ -71,10 +80,113 @@ static struct {
 	{ "pdm",	AUDIO_DAI_FORMAT_PDM },
 };
 
-
 static int	audio_soc_probe(device_t dev);
 static int	audio_soc_attach(device_t dev);
 static int	audio_soc_detach(device_t dev);
+
+static uint32_t
+audio_soc_chan_setblocksize(kobj_t obj, void *data, uint32_t blocksz)
+{
+
+	return (blocksz);
+}
+
+static int
+audio_soc_chan_setformat(kobj_t obj, void *data, uint32_t format)
+{
+
+	printf("%s:%s:%d\n", __FILE__, __func__, __LINE__);
+	return (0);
+}
+
+static uint32_t
+audio_soc_chan_setspeed(kobj_t obj, void *data, uint32_t speed)
+{
+
+	printf("%s:%s:%d\n", __FILE__, __func__, __LINE__);
+	return (speed);
+}
+
+static uint32_t
+audio_soc_chan_getptr(kobj_t obj, void *data)
+{
+	struct audio_soc_softc *sc;
+
+	sc = data;
+
+	return AUDIO_DAI_GET_PTR(sc->cpu_dev);
+}
+
+static void *
+audio_soc_chan_init(kobj_t obj, void *devinfo, struct snd_dbuf *b,
+	struct pcm_channel *c, int dir)
+{
+	struct audio_soc_softc *sc;
+	void *buffer;
+
+	sc = devinfo;
+	buffer = malloc(AUDIO_BUFFER_SIZE, M_DEVBUF, M_WAITOK | M_ZERO);
+
+	if (sndbuf_setup(b, buffer, AUDIO_BUFFER_SIZE) != 0) {
+		// device_printf(i2s->dev, "sndbuf_setup failed\n");
+		free(buffer, M_DEVBUF);
+		return NULL;
+	}
+	sc->buf = b;
+	sc->pcm = c;
+
+	return (devinfo);
+}
+
+static int
+audio_soc_chan_trigger(kobj_t obj, void *data, int go)
+{
+	struct audio_soc_softc *sc;
+
+	sc = (struct audio_soc_softc *)data;
+	return AUDIO_DAI_TRIGGER(sc->cpu_dev, go);
+}
+
+static int
+audio_soc_chan_free(kobj_t obj, void *data)
+{
+
+	printf("%s:%s:%d\n", __FILE__, __func__, __LINE__);
+	return (0);
+}
+
+static struct pcmchan_caps *
+audio_soc_chan_getcaps(kobj_t obj, void *data)
+{
+	struct audio_soc_softc *sc = data;
+
+	return AUDIO_DAI_GET_CAPS(sc->cpu_dev);
+}
+
+static kobj_method_t audio_soc_chan_methods[] = {
+	KOBJMETHOD(channel_init, 	audio_soc_chan_init),
+	KOBJMETHOD(channel_free, 	audio_soc_chan_free),
+	KOBJMETHOD(channel_setformat, 	audio_soc_chan_setformat),
+	KOBJMETHOD(channel_setspeed, 	audio_soc_chan_setspeed),
+	KOBJMETHOD(channel_setblocksize,audio_soc_chan_setblocksize),
+	KOBJMETHOD(channel_trigger,	audio_soc_chan_trigger),
+	KOBJMETHOD(channel_getptr,	audio_soc_chan_getptr),
+	KOBJMETHOD(channel_getcaps,	audio_soc_chan_getcaps),
+	KOBJMETHOD_END
+};
+CHANNEL_DECLARE(audio_soc_chan);
+
+static void
+audio_soc_intr(void *arg)
+{
+	struct audio_soc_softc *sc;
+	int channel_intr_required;
+
+	sc = (struct audio_soc_softc *)arg;
+	channel_intr_required = AUDIO_DAI_INTR(sc->cpu_dev, sc->buf);
+	if (channel_intr_required)
+		chn_intr(sc->pcm);
+}
 
 static int
 audio_soc_probe(device_t dev)
@@ -89,6 +201,63 @@ audio_soc_probe(device_t dev)
 	}
 
 	return (ENXIO);
+}
+
+static void
+audio_soc_init(void *arg)
+{
+	struct audio_soc_softc *sc;
+	phandle_t node, child;
+	device_t daidev;
+	uint32_t xref;
+
+	sc = (struct audio_soc_softc *)arg;
+	config_intrhook_disestablish(&sc->init_hook);
+
+	node = ofw_bus_get_node(sc->dev);
+	/* TODO: handle multi-link nodes */
+	child = ofw_bus_find_child(node, "simple-audio-card,cpu");
+	if (child == 0) {
+		device_printf(sc->dev, "cpu node is missing\n");
+		return;
+	}
+	if ((OF_getencprop(child, "sound-dai", &xref, sizeof(xref))) <= 0) {
+		device_printf(sc->dev, "missing sound-dai property in cpu node\n");
+		return;
+	}
+	daidev = OF_device_from_xref(xref);
+	if (daidev == NULL) {
+		device_printf(sc->dev, "no driver attached to cpu node\n");
+		return;
+	}
+	sc->cpu_dev = daidev;
+
+	child = ofw_bus_find_child(node, "simple-audio-card,codec");
+	if (child == 0) {
+		device_printf(sc->dev, "codec node is missing\n");
+		return;
+	}
+	if ((OF_getencprop(child, "sound-dai", &xref, sizeof(xref))) <= 0) {
+		device_printf(sc->dev, "missing sound-dai property in codec node\n");
+		return;
+	}
+	daidev = OF_device_from_xref(xref);
+	if (daidev == NULL) {
+		device_printf(sc->dev, "no driver attached to codec node\n");
+		return;
+	}
+	sc->codec_dev = daidev;
+
+	if (pcm_register(sc->dev, sc, 1, 0))
+		return;
+
+	pcm_getbuffersize(sc->dev, AUDIO_BUFFER_SIZE, AUDIO_BUFFER_SIZE,
+	    AUDIO_BUFFER_SIZE);
+	pcm_addchan(sc->dev, PCMDIR_PLAY, &audio_soc_chan_class, sc);
+
+	pcm_setstatus(sc->dev, "at EXPERIMENT");
+
+	AUDIO_DAI_SETUP(sc->cpu_dev, audio_soc_intr, sc);
 }
 
 static int
@@ -110,6 +279,7 @@ audio_soc_attach(device_t dev)
 		name = "SoC audio";
 
 	sc->name = strdup(name, M_DEVBUF);
+	device_set_desc(dev, sc->name);
 
 	if (ret != -1)
 		OF_prop_free(name);
@@ -148,6 +318,14 @@ audio_soc_attach(device_t dev)
 		    AUDIO_DAI_POLARITY_NB_IF : AUDIO_DAI_POLARITY_NB_NF;
 	}
 
+
+	(void)&audio_soc_chan_class;
+
+	sc->init_hook.ich_func = audio_soc_init;
+	sc->init_hook.ich_arg = sc;
+	if (config_intrhook_establish(&sc->init_hook) != 0)
+		return (ENOMEM);
+
 	return (0);
 }
 
@@ -173,7 +351,7 @@ static device_method_t audio_soc_methods[] = {
 };
 
 static driver_t audio_soc_driver = {
-	"ausoc",
+	"pcm",
 	audio_soc_methods,
 	sizeof(struct audio_soc_softc),
 };
