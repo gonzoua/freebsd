@@ -71,11 +71,11 @@ __FBSDID("$FreeBSD$");
 #define		I2S_CKR_MSS_MASTER	(0 << 27)
 #define		I2S_CKR_MSS_SLAVE	(1 << 27)
 #define		I2S_CKR_CKP		(1 << 26)
-#define		I2S_CKR_MDIV(n)		((n) << 16)
+#define		I2S_CKR_MDIV(n)		(((n) - 1) << 16)
 #define		I2S_CKR_MDIV_MASK	(0xff << 16)
-#define		I2S_CKR_RSD(n)		((n) << 8)
+#define		I2S_CKR_RSD(n)		(((n) - 1) << 8)
 #define		I2S_CKR_RSD_MASK	(0xff << 8)
-#define		I2S_CKR_TSD(n)		((n) << 0)
+#define		I2S_CKR_TSD(n)		(((n) - 1) << 0)
 #define		I2S_CKR_TSD_MASK	(0xff << 0)
 #define	I2S_TXFIFOLR	0x000c
 #define	I2S_DMACR	0x0010
@@ -84,7 +84,10 @@ __FBSDID("$FreeBSD$");
 #define		I2S_DMACR_TDE_ENABLE	(1 << 8)
 #define		I2S_DMACR_TDL(n)	((n) << 0)
 #define	I2S_INTCR	0x0014
+#define		I2S_INTCR_RFT(n)	(((n) - 1) << 20)
+#define		I2S_INTCR_TFT(n)	(((n) - 1) << 4)
 #define		I2S_INTCR_TXUIC		(1 << 2)
+#define		I2S_INTCR_TXEIE		(1 << 0)
 #define	I2S_INTSR	0x0018
 #define		I2S_INTSR_TXUI		(1 << 1)
 #define		I2S_INTSR_TXEI		(1 << 0)
@@ -92,6 +95,8 @@ __FBSDID("$FreeBSD$");
 #define		I2S_XFER_RXS_START	(1 << 1)
 #define		I2S_XFER_TXS_START	(1 << 0)
 #define	I2S_CLR		0x0020
+#define		I2S_CLR_RXC		(1 << 1)
+#define		I2S_CLR_TXC		(1 << 0)
 #define	I2S_TXDR	0x0024
 #define	I2S_RXDR	0x0028
 #define	I2S_RXFIFOLR	0x002c
@@ -106,6 +111,7 @@ __FBSDID("$FreeBSD$");
 #define DIV_ROUND_CLOSEST(n,d)  (((n) + (d) / 2) / (d))
 
 #define	AUDIO_RATE	48000
+#define	FIFO_SIZE	32
 
 static struct ofw_compat_data compat_data[] = {
 	{ "rockchip,rk3399-i2s",		1 },
@@ -125,7 +131,6 @@ struct rk_i2s_softc {
 	clk_t		clk;
 	clk_t		hclk;
 	void *		intrhand;
-	uint32_t	bclk_fs;
 	struct syscon	*grf;
 	/* Pointer to first unsubmitted sample */
 	uint32_t		unsubmittedptr;
@@ -162,14 +167,6 @@ rk_i2s_init(struct rk_i2s_softc *sc)
 
 	if (clk_get_parent(sc->clk, &parent) == 0) {
 		error = clk_set_freq(parent, 256 * AUDIO_RATE, CLK_SET_ROUND_DOWN);
-
-		if (error != 0) {
-			device_printf(sc->dev, "cannot set freq for i2s_clk clock\n");
-		}
-
-	}
-	else {
-		device_printf(sc->dev, "failed to get parent!!!!\n");
 	}
 
 	error = clk_enable(sc->clk);
@@ -178,11 +175,9 @@ rk_i2s_init(struct rk_i2s_softc *sc)
 		return (ENXIO);
 	}
 
-	RK_I2S_WRITE_4(sc, I2S_TXCR, 0x00071f1f);
-#if 0
-	RK_I2S_WRITE_4(sc, I2S_DMACR, 0x001f0000);
-#endif
-	RK_I2S_WRITE_4(sc, I2S_INTCR, 0x01f000f0);
+	val = I2S_INTCR_TFT(FIFO_SIZE/2);
+	val |= I2S_INTCR_RFT(FIFO_SIZE/2);
+	RK_I2S_WRITE_4(sc, I2S_INTCR, val);
 
 	/* Set format */
 	val = RK_I2S_READ_4(sc, I2S_CKR);
@@ -201,13 +196,9 @@ rk_i2s_init(struct rk_i2s_softc *sc)
 		device_printf(sc->dev, "failed to get clk frequency: err=%d\n", error);
 		return (error);
 	}
-	bus_clk_freq = sc->bclk_fs * AUDIO_RATE;
+	bus_clk_freq = 2 * 32 * AUDIO_RATE;
 	bus_clock_div = DIV_ROUND_CLOSEST(clk_freq, bus_clk_freq);
-	lr_clock_div = sc->bclk_fs;
-	bus_clock_div = bus_clock_div - 1;
-	lr_clock_div -= 1;
-	device_printf(sc->dev, "clk_freq = %jd\n", clk_freq);
-	device_printf(sc->dev, "bus_clock_div = %d, lr_clock_div = %d\n", bus_clock_div, lr_clock_div);
+	lr_clock_div = bus_clk_freq / AUDIO_RATE;
 
 	val &= ~(I2S_CKR_MDIV_MASK | I2S_CKR_RSD_MASK | I2S_CKR_TSD_MASK);
 	val |= I2S_CKR_MDIV(bus_clock_div);
@@ -232,17 +223,6 @@ rk_i2s_init(struct rk_i2s_softc *sc)
 		val |= (1 << 1) << 16;
 		SYSCON_WRITE_4(sc->grf, 0xe640, val);
 	}
-
-	val = I2S_DMACR_TDL(16);
-	RK_I2S_WRITE_4(sc, I2S_DMACR, val);
-	val |= I2S_DMACR_RDL(16);
-	RK_I2S_WRITE_4(sc, I2S_DMACR, val);
-
-#if 0
-	val |= I2S_DMACR_TDE_ENABLE;
-	RK_I2S_WRITE_4(sc, I2S_DMACR, val);
-#endif
-	RK_I2S_WRITE_4(sc, I2S_DMACR, 0x001f0000);
 
 	RK_I2S_WRITE_4(sc, I2S_XFER, 0);
 
@@ -280,18 +260,19 @@ rk_i2s_attach(device_t dev)
 		goto fail;
 	}
 
-	/* Activate the module clock. */
 	error = clk_get_by_ofw_name(dev, 0, "i2s_hclk", &sc->hclk);
 	if (error != 0) {
 		device_printf(dev, "cannot get i2s_hclk clock\n");
 		goto fail;
 	}
+
 	error = clk_get_by_ofw_name(dev, 0, "i2s_clk", &sc->clk);
 	if (error != 0) {
 		device_printf(dev, "cannot get i2s_clk clock\n");
 		goto fail;
 	}
 
+	/* Activate the module clock. */
 	error = clk_enable(sc->hclk);
 	if (error != 0) {
 		device_printf(dev, "cannot enable i2s_hclk clock\n");
@@ -305,9 +286,6 @@ rk_i2s_attach(device_t dev)
 		device_printf(dev, "cannot get grf driver handle\n");
 		return (ENXIO);
 	}
-
-	/* TODO: read from "rockchip,bclk-fs" */
-	sc->bclk_fs = 64;
 
 	rk_i2s_init(sc);
 
@@ -345,7 +323,7 @@ static int
 rk_i2s_dai_intr(device_t dev, struct snd_dbuf *buf)
 {
 	struct rk_i2s_softc *sc;
-	uint32_t status, ctrl;
+	uint32_t status;
 	uint32_t level;
 	uint32_t val = 0x00;
 	int ret = 0;
@@ -354,13 +332,8 @@ rk_i2s_dai_intr(device_t dev, struct snd_dbuf *buf)
 
 	RK_I2S_LOCK(sc);
 	status = RK_I2S_READ_4(sc, I2S_INTSR);
-	if (status & I2S_INTSR_TXUI) {
-		ctrl = RK_I2S_READ_4(sc, I2S_INTCR);
-		ctrl |= I2S_INTCR_TXUIC;
-		RK_I2S_WRITE_4(sc, I2S_INTCR, ctrl);
-	}
 
-	if (status & (I2S_INTSR_TXUI | I2S_INTSR_TXEI)) {
+	if (status & I2S_INTSR_TXEI) {
 		level = RK_I2S_READ_4(sc, I2S_TXFIFOLR) & 0x1f;
 		uint8_t *samples;
 		uint32_t count, size, readyptr, written;
@@ -370,7 +343,7 @@ rk_i2s_dai_intr(device_t dev, struct snd_dbuf *buf)
 
 		samples = (uint8_t*)sndbuf_getbuf(buf);
 		written = 0;
-		for (; level < 31; level++) {
+		for (; level < FIFO_SIZE - 1; level++) {
 			val  = (samples[readyptr++ % size] << 0);
 			val |= (samples[readyptr++ % size] << 8);
 			val |= (samples[readyptr++ % size] << 16);
@@ -402,15 +375,28 @@ rk_i2s_dai_trigger(device_t dev, int go)
 
 	switch (go) {
 	case PCMTRIG_START:
-		RK_I2S_WRITE_4(sc, I2S_INTCR, 0x01f00f1);
+		val = RK_I2S_READ_4(sc, I2S_INTCR);
+		val |= I2S_INTCR_TXEIE;
+		RK_I2S_WRITE_4(sc, I2S_INTCR, val);
+
 		val = I2S_XFER_TXS_START | I2S_XFER_RXS_START;
 		RK_I2S_WRITE_4(sc, I2S_XFER, val);
 		break;
 
 	case PCMTRIG_STOP:
 	case PCMTRIG_ABORT:
+		val = RK_I2S_READ_4(sc, I2S_INTCR);
+		val &= ~I2S_INTCR_TXEIE;
+		RK_I2S_WRITE_4(sc, I2S_INTCR, val);
+
 		RK_I2S_WRITE_4(sc, I2S_XFER, 0);
-		RK_I2S_WRITE_4(sc, I2S_INTCR, 0x01f000f0);
+
+		val = RK_I2S_READ_4(sc, I2S_CLR);
+		val |= I2S_CLR_TXC;
+		RK_I2S_WRITE_4(sc, I2S_CLR, val);
+
+		while ((RK_I2S_READ_4(sc, I2S_CLR) & I2S_CLR_TXC) != 0)
+			DELAY(1);
 
 		RK_I2S_LOCK(sc);
 		sc->unsubmittedptr = 0;

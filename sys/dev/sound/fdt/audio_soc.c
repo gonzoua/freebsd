@@ -128,7 +128,6 @@ audio_soc_chan_init(kobj_t obj, void *devinfo, struct snd_dbuf *b,
 	buffer = malloc(AUDIO_BUFFER_SIZE, M_DEVBUF, M_WAITOK | M_ZERO);
 
 	if (sndbuf_setup(b, buffer, AUDIO_BUFFER_SIZE) != 0) {
-		// device_printf(i2s->dev, "sndbuf_setup failed\n");
 		free(buffer, M_DEVBUF);
 		return NULL;
 	}
