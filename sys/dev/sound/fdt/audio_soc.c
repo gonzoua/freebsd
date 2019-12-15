@@ -60,6 +60,7 @@ struct audio_soc_softc {
 	unsigned int		mclk_fs;
 	struct pcm_channel 	*pcm;		/* PCM channel */
 	struct snd_dbuf		*buf; 		/* PCM buffer */
+	uint32_t		format;
 };
 
 static struct ofw_compat_data compat_data[] = {
@@ -247,8 +248,20 @@ audio_soc_init(void *arg)
 	}
 	sc->codec_dev = daidev;
 
-	if (pcm_register(sc->dev, sc, 1, 0))
+	if (AUDIO_DAI_INIT(sc->cpu_dev, sc->format)) {
+		device_printf(sc->dev, "failed to initalize cpu node\n");
 		return;
+	}
+
+	if (AUDIO_DAI_INIT(sc->codec_dev, sc->format)) {
+		device_printf(sc->dev, "failed to initalize codec node\n");
+		return;
+	}
+
+	if (pcm_register(sc->dev, sc, 1, 0)) {
+		device_printf(sc->dev, "failed to register PCM\n");
+		return;
+	}
 
 	pcm_getbuffersize(sc->dev, AUDIO_BUFFER_SIZE, AUDIO_BUFFER_SIZE,
 	    AUDIO_BUFFER_SIZE);
@@ -256,7 +269,7 @@ audio_soc_init(void *arg)
 
 	pcm_setstatus(sc->dev, "at EXPERIMENT");
 
-	AUDIO_DAI_SETUP(sc->cpu_dev, audio_soc_intr, sc);
+	AUDIO_DAI_SETUP_INTR(sc->cpu_dev, audio_soc_intr, sc);
 	AUDIO_DAI_SETUP_MIXER(sc->codec_dev, sc->dev);
 }
 
@@ -318,8 +331,7 @@ audio_soc_attach(device_t dev)
 		    AUDIO_DAI_POLARITY_NB_IF : AUDIO_DAI_POLARITY_NB_NF;
 	}
 
-
-	(void)&audio_soc_chan_class;
+	sc->format = AUDIO_DAI_FORMAT(fmt, pol, clk);
 
 	sc->init_hook.ich_func = audio_soc_init;
 	sc->init_hook.ich_arg = sc;

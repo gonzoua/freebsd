@@ -52,6 +52,7 @@ __FBSDID("$FreeBSD$");
 
 #include "opt_snd.h"
 #include <dev/sound/pcm/sound.h>
+#include <dev/sound/fdt/audio_dai.h>
 #include "audio_dai_if.h"
 
 #define	AUDIO_BUFFER_SIZE	48000 * 4
@@ -156,10 +157,7 @@ static int
 rk_i2s_init(struct rk_i2s_softc *sc)
 {
 	uint32_t val;
-	uint64_t clk_freq;
-	uint64_t bus_clk_freq;
 	int error;
-	uint32_t bus_clock_div, lr_clock_div;
 	clk_t parent;
 
 	// to trigger re-parenting
@@ -178,40 +176,6 @@ rk_i2s_init(struct rk_i2s_softc *sc)
 	val = I2S_INTCR_TFT(FIFO_SIZE/2);
 	val |= I2S_INTCR_RFT(FIFO_SIZE/2);
 	RK_I2S_WRITE_4(sc, I2S_INTCR, val);
-
-	/* Set format */
-	val = RK_I2S_READ_4(sc, I2S_CKR);
-
-	val &= ~(I2S_CKR_MSS_MASK);
-	val |= I2S_CKR_MSS_MASTER;
-
-	// data on negedge
-	// val &= ~I2S_CKR_CKP;
-	// val |= (1 << 24);
-	// use only TX lrclk
-	val |= (1 << 28);
-
-	error = clk_get_freq(sc->clk, &clk_freq);
-	if (error != 0) {
-		device_printf(sc->dev, "failed to get clk frequency: err=%d\n", error);
-		return (error);
-	}
-	bus_clk_freq = 2 * 32 * AUDIO_RATE;
-	bus_clock_div = DIV_ROUND_CLOSEST(clk_freq, bus_clk_freq);
-	lr_clock_div = bus_clk_freq / AUDIO_RATE;
-
-	val &= ~(I2S_CKR_MDIV_MASK | I2S_CKR_RSD_MASK | I2S_CKR_TSD_MASK);
-	val |= I2S_CKR_MDIV(bus_clock_div);
-	val |= I2S_CKR_RSD(lr_clock_div);
-	val |= I2S_CKR_TSD(lr_clock_div);
-
-	RK_I2S_WRITE_4(sc, I2S_CKR, val);
-
-	val = I2S_TXCR_IBM_NORMAL | I2S_TXCR_VDW_16 | I2S_CSR_2;
-	RK_I2S_WRITE_4(sc, I2S_TXCR, val);
-
-	val = I2S_RXCR_IBM_NORMAL | I2S_RXCR_VDW_16 | I2S_CSR_2;
-	RK_I2S_WRITE_4(sc, I2S_RXCR, val);
 
 	if (sc->grf) {
 		val = (0 << 11);
@@ -320,6 +284,78 @@ rk_i2s_detach(device_t dev)
 }
 
 static int
+rk_i2s_dai_init(device_t dev, uint32_t format)
+{
+	uint32_t val;
+	int error;
+	uint32_t bus_clock_div, lr_clock_div;
+	struct rk_i2s_softc *sc;
+	uint64_t bus_clk_freq;
+	uint64_t clk_freq;
+	int fmt, pol, clk;
+
+	sc = device_get_softc(dev);
+	return (0);
+
+	fmt = AUDIO_DAI_FORMAT_FORMAT(format);
+	pol = AUDIO_DAI_FORMAT_POLARITY(format);
+	clk = AUDIO_DAI_FORMAT_CLOCK(format);
+
+	/* Set format */
+	val = RK_I2S_READ_4(sc, I2S_CKR);
+
+	val &= ~(I2S_CKR_MSS_MASK);
+	switch (clk) {
+	case AUDIO_DAI_CLOCK_CBM_CFM:
+		val |= I2S_CKR_MSS_MASTER;
+		break;
+	case AUDIO_DAI_CLOCK_CBS_CFS:
+		val |= I2S_CKR_MSS_SLAVE;
+		break;
+	default:
+		return (EINVAL);
+	}
+
+	switch (pol) {
+	case AUDIO_DAI_POLARITY_IB_NF:
+		val |= I2S_CKR_CKP;
+		break;
+	case AUDIO_DAI_POLARITY_NB_NF:
+		val &= ~I2S_CKR_CKP;
+		break;
+	default:
+		return (EINVAL);
+	}
+
+	error = clk_get_freq(sc->clk, &clk_freq);
+	if (error != 0) {
+		device_printf(sc->dev, "failed to get clk frequency: err=%d\n", error);
+		return (error);
+	}
+	bus_clk_freq = 2 * 32 * AUDIO_RATE;
+	bus_clock_div = DIV_ROUND_CLOSEST(clk_freq, bus_clk_freq);
+	lr_clock_div = bus_clk_freq / AUDIO_RATE;
+
+	val &= ~(I2S_CKR_MDIV_MASK | I2S_CKR_RSD_MASK | I2S_CKR_TSD_MASK);
+	val |= I2S_CKR_MDIV(bus_clock_div);
+	val |= I2S_CKR_RSD(lr_clock_div);
+	val |= I2S_CKR_TSD(lr_clock_div);
+
+	RK_I2S_WRITE_4(sc, I2S_CKR, val);
+
+	val = I2S_TXCR_IBM_NORMAL | I2S_TXCR_VDW_16 | I2S_CSR_2;
+	RK_I2S_WRITE_4(sc, I2S_TXCR, val);
+
+	val = I2S_RXCR_IBM_NORMAL | I2S_RXCR_VDW_16 | I2S_CSR_2;
+	RK_I2S_WRITE_4(sc, I2S_RXCR, val);
+
+	RK_I2S_WRITE_4(sc, I2S_XFER, 0);
+
+	return (0);
+}
+
+
+static int
 rk_i2s_dai_intr(device_t dev, struct snd_dbuf *buf)
 {
 	struct rk_i2s_softc *sc;
@@ -423,7 +459,7 @@ rk_i2s_dai_get_ptr(device_t dev)
 }
 
 static int
-rk_i2s_dai_setup(device_t dev, driver_intr_t intr_handler, void *intr_arg)
+rk_i2s_dai_setup_intr(device_t dev, driver_intr_t intr_handler, void *intr_arg)
 {
 	struct rk_i2s_softc 	*sc = device_get_softc(dev);
 
@@ -444,7 +480,8 @@ static device_method_t rk_i2s_methods[] = {
 	DEVMETHOD(device_attach,	rk_i2s_attach),
 	DEVMETHOD(device_detach,	rk_i2s_detach),
 
-	DEVMETHOD(audio_dai_setup,	rk_i2s_dai_setup),
+	DEVMETHOD(audio_dai_init,	rk_i2s_dai_init),
+	DEVMETHOD(audio_dai_setup_intr,	rk_i2s_dai_setup_intr),
 	DEVMETHOD(audio_dai_intr,	rk_i2s_dai_intr),
 	DEVMETHOD(audio_dai_get_caps,	rk_i2s_dai_get_caps),
 	DEVMETHOD(audio_dai_trigger,	rk_i2s_dai_trigger),

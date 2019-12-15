@@ -33,8 +33,14 @@ CODE {
 
 INTERFACE audio_dai;
 
+# set DAI format for communications between CPU/codec node
+METHOD int init {
+	device_t	dev;
+	uint32_t	format;
+}
+
 # Initialize DAI and set up interrrupt handler
-METHOD int setup {
+METHOD int setup_intr {
 	device_t	dev;
 	driver_intr_t	intr_handler;
 	void		*intr_arg;
@@ -56,12 +62,6 @@ METHOD struct pcmchan_caps* get_caps {
 
 METHOD uint32_t get_ptr {
 	device_t	dev;
-}
-
-# set DAI format for communications between CPU/codec node
-METHOD uint32_t set_format {
-	device_t	dev;
-	uint32_t	format;
 }
 
 # Set PCM channel format

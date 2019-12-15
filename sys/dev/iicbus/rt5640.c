@@ -588,10 +588,16 @@ rt5640_detach(device_t dev)
 }
 
 static int
+rt5640_dai_init(device_t dev, uint32_t format)
+{
+
+	return (0);
+}
+
+static int
 rt5640_dai_setup_mixer(device_t dev, device_t pcmdev)
 {
 
-	printf("[%s] %s:%d\n", __func__, __FILE__, __LINE__);
 	mixer_init(pcmdev, &rt5640_mixer_class, dev);
 
 	return (0);
@@ -621,6 +627,7 @@ static device_method_t rt5640_methods[] = {
 	DEVMETHOD(device_attach,	rt5640_attach),
 	DEVMETHOD(device_detach,	rt5640_detach),
 
+	DEVMETHOD(audio_dai_init,	rt5640_dai_init),
 	DEVMETHOD(audio_dai_setup_mixer,	rt5640_dai_setup_mixer),
 	DEVMETHOD(audio_dai_trigger,	rt5640_dai_trigger),
 
