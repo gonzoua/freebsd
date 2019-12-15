@@ -52,15 +52,27 @@ __FBSDID("$FreeBSD$");
 #include <dev/iicbus/iicbus.h>
 #include <sys/sysctl.h>
 
+#include <dev/sound/pcm/sound.h>
+
 #include "iicbus_if.h"
+#include "mixer_if.h"
+#include "audio_dai_if.h"
 
 #define	RT5640_RESET		0x00
 #define	RT5640_HP_VOL		0x02
+#define		MAX_HPO_VOLUME		(0x27)
 #define		HP_VOL_MU_HPO_L		(1 << 15)
 #define		HP_VOL_MU_HPOVOLL_IN	(1 << 14)
 #define		HP_VOL_MU_HPO_R		(1 << 7)
 #define		HP_VOL_MU_HPOVOLR_IN	(1 << 6)
+#define		HP_VOL_VOLUME(l, r)	((l) << 8 | (r))
+#define		HP_VOL_VOLUME_MASK	HP_VOL_VOLUME(0x3f, 0x3f)
 #define	RT5640_DAC1_DIG_VOL	0x19
+#define		MAX_DIG_VOLUME		0xAF
+#define		DAC1_DIG_VOL(l, r)	(((l) << 8) | (r))
+#define		DAC1_DIG_VOL_MASK	DAC1_DIG_VOL(0xff, 0xff)
+#define		DAC1_DIG_VOL_R(v)	((v) & 0xff)
+#define		DAC1_DIG_VOL_L(v)	(((v) >> 8) & 0xff)
 #define	RT5640_AD_DA_MIXER	0x29
 #define		AD_DA_MIXER_MU_IF1_DAC_L		(1 << 14)
 #define		AD_DA_MIXER_MU_IF1_DAC_R		(1 << 6)
@@ -137,6 +149,9 @@ __FBSDID("$FreeBSD$");
 #define	RT5640_VENDOR_ID2	0xff
 
 #define	MAX_BUFFER	16
+
+#define	RT5640_MIXER_DEVS ((1 << SOUND_MIXER_VOLUME) | \
+	(1 << SOUND_MIXER_PHONEOUT))
 
 struct rt5640_softc {
 	device_t	dev;
@@ -285,11 +300,51 @@ rt5640_powerup(struct rt5640_softc *sc)
 }
 
 static void
+rt5640_set_hpo_vol(struct rt5640_softc *sc, unsigned int left, unsigned int right)
+{
+	uint16_t reg;
+	unsigned int l, r;
+
+	if (left > 100)
+		left = 100;
+	if (right > 100)
+		right = 100;
+
+	l = MAX_HPO_VOLUME - (left * MAX_HPO_VOLUME / 100);
+	r = MAX_HPO_VOLUME - (right * MAX_HPO_VOLUME / 100);
+
+	rt5640_read2(sc, RT5640_HP_VOL, &reg);
+	reg &= ~(HP_VOL_VOLUME_MASK);
+	reg |= HP_VOL_VOLUME(l, r);
+	rt5640_write2(sc, RT5640_HP_VOL, reg);
+}
+
+static void
+rt5640_set_if1_vol(struct rt5640_softc *sc, unsigned int left, unsigned int right)
+{
+	uint16_t reg;
+	unsigned int l, r;
+
+	if (left > 100)
+		left = 100;
+	if (right > 100)
+		right = 100;
+
+	l = (left * MAX_DIG_VOLUME / 100);
+	r = (right * MAX_DIG_VOLUME / 100);
+
+	rt5640_read2(sc, RT5640_DAC1_DIG_VOL, &reg);
+	reg &= ~(DAC1_DIG_VOL_MASK);
+	reg |= DAC1_DIG_VOL(l, r);
+	rt5640_write2(sc, RT5640_DAC1_DIG_VOL, reg);
+}
+
+static void
 rt5640_init(void *arg)
 {
 	struct rt5640_softc *sc;
 	uint16_t reg;
-	
+
 	sc = (struct rt5640_softc*)arg;
 	config_intrhook_disestablish(&sc->init_hook);
 
@@ -324,9 +379,6 @@ rt5640_init(void *arg)
 	reg &= ~(HP_VOL_MU_HPO_L | HP_VOL_MU_HPO_R);
 	/* unmute HPOVOL */
 	reg &= ~(HP_VOL_MU_HPOVOLL_IN | HP_VOL_MU_HPOVOLR_IN);
-	/* max volume */
-	reg &= ~(0x3f << 8);
-	reg &= ~(0x3f << 0);
 	rt5640_write2(sc, RT5640_HP_VOL, reg);
 
 	rt5640_read2(sc, RT5640_HPO_MIXER, &reg);
@@ -387,13 +439,6 @@ rt5640_init(void *arg)
 	reg &= ~(STO_DAC_MIXER_MU_STEREO_DACL1 | STO_DAC_MIXER_MU_STEREO_DACR1);
 	rt5640_write2(sc, RT5640_STO_DAC_MIXER, reg);
 
-	// IF1_DAC_x digital volume
-	rt5640_read2(sc, RT5640_DAC1_DIG_VOL, &reg);
-	reg &= ~(0xffff);
-	// XXX: volume
-	reg |= 0x5050;
-	rt5640_write2(sc, RT5640_DAC1_DIG_VOL, reg);
-
 	// PLL1
 	rt5640_read2(sc, RT5640_PWR_ANLG2, &reg);
 	reg |= PWR_ANLG2_POW_PLL;
@@ -407,6 +452,83 @@ rt5640_init(void *arg)
 
 	rt5640_powerup(sc);
 }
+
+static int
+rt5640_mixer_init(struct snd_mixer *m)
+{
+	mix_setdevs(m, RT5640_MIXER_DEVS);
+
+	return (0);
+}
+
+static int
+rt5640_mixer_uninit(struct snd_mixer *m)
+{
+
+	return (0);
+}
+
+static int
+rt5640_mixer_reinit(struct snd_mixer *m)
+{
+
+	return (0);
+}
+
+static int
+rt5640_mixer_set(struct snd_mixer *m, unsigned dev, unsigned left, unsigned right)
+{
+	struct rt5640_softc *sc;
+	struct mtx *mixer_lock;
+	int locked;
+
+	sc = device_get_softc(mix_getdevinfo(m));
+	mixer_lock = mixer_get_lock(m);
+	locked = mtx_owned(mixer_lock);
+
+	/*
+	 * We need to unlock the mixer lock because iicbus_transfer()
+	 * may sleep. The mixer lock itself is unnecessary here
+	 * because it is meant to serialize hardware access, which
+	 * is taken care of by the I2C layer, so this is safe.
+	 */
+	if (locked)
+		mtx_unlock(mixer_lock);
+	switch (dev) {
+	case SOUND_MIXER_VOLUME:
+		rt5640_set_if1_vol(sc, left, right);
+		return (left | (right << 8));
+	case SOUND_MIXER_PHONEOUT:
+		rt5640_set_hpo_vol(sc, left, right);
+		return (left | (right << 8));
+	default:
+		break;
+	}
+
+	if (locked)
+		mtx_lock(mixer_lock);
+
+	return (0);
+}
+
+static u_int32_t
+rt5640_mixer_setrecsrc(struct snd_mixer *m, u_int32_t src)
+{
+
+	return (0);
+}
+
+
+static kobj_method_t rt5640_mixer_methods[] = {
+	KOBJMETHOD(mixer_init, 		rt5640_mixer_init),
+	KOBJMETHOD(mixer_uninit, 	rt5640_mixer_uninit),
+	KOBJMETHOD(mixer_reinit, 	rt5640_mixer_reinit),
+	KOBJMETHOD(mixer_set, 		rt5640_mixer_set),
+	KOBJMETHOD(mixer_setrecsrc, 	rt5640_mixer_setrecsrc),
+	KOBJMETHOD_END
+};
+
+MIXER_DECLARE(rt5640_mixer);
 
 static int
 rt5640_probe(device_t dev)
@@ -430,7 +552,7 @@ rt5640_attach(device_t dev)
 	struct rt5640_softc	*sc;
 	int error;
 	phandle_t node;
-	
+
 	sc = device_get_softc(dev);
 	sc->dev = dev;
 	sc->busdev = device_get_parent(sc->dev);
@@ -465,11 +587,42 @@ rt5640_detach(device_t dev)
 	return (0);
 }
 
+static int
+rt5640_dai_setup_mixer(device_t dev, device_t pcmdev)
+{
+
+	printf("[%s] %s:%d\n", __func__, __FILE__, __LINE__);
+	mixer_init(pcmdev, &rt5640_mixer_class, dev);
+
+	return (0);
+}
+
+static int
+rt5640_dai_trigger(device_t dev, int go)
+{
+
+	switch (go) {
+	case PCMTRIG_START:
+		/* TODO: power up amps */
+		break;
+
+	case PCMTRIG_STOP:
+	case PCMTRIG_ABORT:
+		/* TODO: power down amps */
+		break;
+	}
+
+	return (0);
+}
+
 static device_method_t rt5640_methods[] = {
         /* device_if methods */
 	DEVMETHOD(device_probe,		rt5640_probe),
 	DEVMETHOD(device_attach,	rt5640_attach),
 	DEVMETHOD(device_detach,	rt5640_detach),
+
+	DEVMETHOD(audio_dai_setup_mixer,	rt5640_dai_setup_mixer),
+	DEVMETHOD(audio_dai_trigger,	rt5640_dai_trigger),
 
 	DEVMETHOD_END,
 };

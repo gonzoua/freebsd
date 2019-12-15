@@ -257,6 +257,7 @@ audio_soc_init(void *arg)
 	pcm_setstatus(sc->dev, "at EXPERIMENT");
 
 	AUDIO_DAI_SETUP(sc->cpu_dev, audio_soc_intr, sc);
+	AUDIO_DAI_SETUP_MIXER(sc->codec_dev, sc->dev);
 }
 
 static int

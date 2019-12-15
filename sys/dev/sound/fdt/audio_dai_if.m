@@ -40,6 +40,11 @@ METHOD int setup {
 	void		*intr_arg;
 }
 
+METHOD int setup_mixer {
+	device_t	dev;
+	device_t	ausocdev;
+}
+
 METHOD int trigger {
 	device_t	dev;
 	int		go;
