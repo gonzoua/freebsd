@@ -191,7 +191,15 @@ static int
 audio_soc_chan_free(kobj_t obj, void *data)
 {
 
-	printf("%s:%s:%d\n", __FILE__, __func__, __LINE__);
+	struct audio_soc_softc *sc;
+	void *buffer;
+
+	sc = (struct audio_soc_softc *)data;
+
+	buffer = sndbuf_getbuf(sc->buf);
+	if (buffer)
+		free(buffer, M_DEVBUF);
+
 	return (0);
 }
 
