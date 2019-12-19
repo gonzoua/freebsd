@@ -60,6 +60,10 @@ struct audio_soc_softc {
 	unsigned int		mclk_fs;
 	struct pcm_channel 	*pcm;		/* PCM channel */
 	struct snd_dbuf		*buf; 		/* PCM buffer */
+	/*
+	 * The format is from the CPU node, for CODEC node clock roles
+	 * need to be reversed.
+	 */
 	uint32_t		format;
 };
 
@@ -84,6 +88,36 @@ static struct {
 static int	audio_soc_probe(device_t dev);
 static int	audio_soc_attach(device_t dev);
 static int	audio_soc_detach(device_t dev);
+
+/*
+ * Invert master/slave roles for CODEC side of the node
+ */
+static uint32_t
+audio_soc_reverse_clocks(uint32_t format)
+{
+	int fmt, pol, clk;
+
+	fmt = AUDIO_DAI_FORMAT_FORMAT(format);
+	pol = AUDIO_DAI_FORMAT_POLARITY(format);
+	clk = AUDIO_DAI_FORMAT_CLOCK(format);
+
+	switch (clk) {
+	case AUDIO_DAI_CLOCK_CBM_CFM:
+		clk = AUDIO_DAI_CLOCK_CBS_CFS;
+		break;
+	case AUDIO_DAI_CLOCK_CBS_CFM:
+		clk = AUDIO_DAI_CLOCK_CBM_CFS;
+		break;
+	case AUDIO_DAI_CLOCK_CBM_CFS:
+		clk = AUDIO_DAI_CLOCK_CBS_CFM;
+		break;
+	case AUDIO_DAI_CLOCK_CBS_CFS:
+		clk = AUDIO_DAI_CLOCK_CBM_CFM;
+		break;
+	}
+
+	return AUDIO_DAI_FORMAT(fmt, pol, clk);
+}
 
 static uint32_t
 audio_soc_chan_setblocksize(kobj_t obj, void *data, uint32_t blocksz)
@@ -253,7 +287,8 @@ audio_soc_init(void *arg)
 		return;
 	}
 
-	if (AUDIO_DAI_INIT(sc->codec_dev, sc->format)) {
+	/* Reverse clock roles for CODEC */
+	if (AUDIO_DAI_INIT(sc->codec_dev, audio_soc_reverse_clocks(sc->format))) {
 		device_printf(sc->dev, "failed to initalize codec node\n");
 		return;
 	}

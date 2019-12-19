@@ -63,9 +63,25 @@ __FBSDID("$FreeBSD$");
 #define		I2S_CSR_6		(2 << 15)
 #define		I2S_CSR_8		(3 << 15)
 #define		I2S_TXCR_IBM_NORMAL	(0 << 9)
+#define		I2S_TXCR_IBM_LJ		(1 << 9)
+#define		I2S_TXCR_IBM_RJ		(2 << 9)
+#define		I2S_TXCR_PBM_NODELAY	(0 << 7)
+#define		I2S_TXCR_PBM_1		(1 << 7)
+#define		I2S_TXCR_PBM_2		(2 << 7)
+#define		I2S_TXCR_PBM_3		(3 << 7)
+#define		I2S_TXCR_TFS_I2S	(0 << 5)
+#define		I2S_TXCR_TFS_PCM	(1 << 5)
 #define		I2S_TXCR_VDW_16		(0xf << 0)
 #define	I2S_RXCR	0x0004
 #define		I2S_RXCR_IBM_NORMAL	(0 << 9)
+#define		I2S_RXCR_IBM_LJ		(1 << 9)
+#define		I2S_RXCR_IBM_RJ		(2 << 9)
+#define		I2S_RXCR_PBM_NODELAY	(0 << 7)
+#define		I2S_RXCR_PBM_1		(1 << 7)
+#define		I2S_RXCR_PBM_2		(2 << 7)
+#define		I2S_RXCR_PBM_3		(3 << 7)
+#define		I2S_RXCR_TFS_I2S	(0 << 5)
+#define		I2S_RXCR_TFS_PCM	(1 << 5)
 #define		I2S_RXCR_VDW_16		(0xf << 0)
 #define	I2S_CKR		0x0008
 #define		I2S_CKR_MSS_MASK	(1 << 27)
@@ -286,7 +302,7 @@ rk_i2s_detach(device_t dev)
 static int
 rk_i2s_dai_init(device_t dev, uint32_t format)
 {
-	uint32_t val;
+	uint32_t val, txcr, rxcr;
 	int error;
 	uint32_t bus_clock_div, lr_clock_div;
 	struct rk_i2s_softc *sc;
@@ -295,7 +311,6 @@ rk_i2s_dai_init(device_t dev, uint32_t format)
 	int fmt, pol, clk;
 
 	sc = device_get_softc(dev);
-	return (0);
 
 	fmt = AUDIO_DAI_FORMAT_FORMAT(format);
 	pol = AUDIO_DAI_FORMAT_POLARITY(format);
@@ -343,11 +358,40 @@ rk_i2s_dai_init(device_t dev, uint32_t format)
 
 	RK_I2S_WRITE_4(sc, I2S_CKR, val);
 
-	val = I2S_TXCR_IBM_NORMAL | I2S_TXCR_VDW_16 | I2S_CSR_2;
-	RK_I2S_WRITE_4(sc, I2S_TXCR, val);
+	txcr = I2S_TXCR_VDW_16 | I2S_CSR_2;
+	rxcr = I2S_RXCR_VDW_16 | I2S_CSR_2;
 
-	val = I2S_RXCR_IBM_NORMAL | I2S_RXCR_VDW_16 | I2S_CSR_2;
-	RK_I2S_WRITE_4(sc, I2S_RXCR, val);
+	switch (fmt) {
+	case AUDIO_DAI_FORMAT_I2S:
+		txcr |= I2S_TXCR_IBM_NORMAL;
+		rxcr |= I2S_RXCR_IBM_NORMAL;
+		break;
+	case AUDIO_DAI_FORMAT_LJ:
+		txcr |= I2S_TXCR_IBM_LJ;
+		rxcr |= I2S_RXCR_IBM_LJ;
+		break;
+	case AUDIO_DAI_FORMAT_RJ:
+		txcr |= I2S_TXCR_IBM_RJ;
+		rxcr |= I2S_RXCR_IBM_RJ;
+		break;
+	case AUDIO_DAI_FORMAT_DSPA:
+		txcr |= I2S_TXCR_TFS_PCM;
+		rxcr |= I2S_RXCR_TFS_PCM;
+		txcr |= I2S_TXCR_PBM_1;
+		rxcr |= I2S_RXCR_PBM_1;
+		break;
+	case AUDIO_DAI_FORMAT_DSPB:
+		txcr |= I2S_TXCR_TFS_PCM;
+		rxcr |= I2S_RXCR_TFS_PCM;
+		txcr |= I2S_TXCR_PBM_2;
+		rxcr |= I2S_RXCR_PBM_2;
+		break;
+	default:
+		return EINVAL;
+	}
+
+	RK_I2S_WRITE_4(sc, I2S_TXCR, txcr);
+	RK_I2S_WRITE_4(sc, I2S_RXCR, rxcr);
 
 	RK_I2S_WRITE_4(sc, I2S_XFER, 0);
 

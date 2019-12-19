@@ -52,6 +52,7 @@ __FBSDID("$FreeBSD$");
 #include <dev/iicbus/iicbus.h>
 #include <sys/sysctl.h>
 
+#include <dev/sound/fdt/audio_dai.h>
 #include <dev/sound/pcm/sound.h>
 
 #include "iicbus_if.h"
@@ -114,6 +115,14 @@ __FBSDID("$FreeBSD$");
 #define	RT5640_PR_INDEX		0x6a
 #define	RT5640_PR_DATA		0x6c
 #define	RT5640_I2S1_SDP		0x70
+#define		I2S1_SDP_SEL_I2S1_MS_SLAVE	(1 << 15)
+#define		I2S1_SDP_INV_I2S1_BCLK		(1 << 7)
+#define		I2S1_SDP_SEL_I2S1_LEN_MASK	(3 << 2)
+#define		I2S1_SDP_SEL_I2S1_FORMAT_MASK	(3 << 0)
+#define		I2S1_SDP_SEL_I2S1_FORMAT_I2S	(0 << 0)
+#define		I2S1_SDP_SEL_I2S1_FORMAT_I2S_LJ	(1 << 0)
+#define		I2S1_SDP_SEL_I2S1_FORMAT_PCM_A	(2 << 0)
+#define		I2S1_SDP_SEL_I2S1_FORMAT_PCM_B	(3 << 0)
 #define	RT5640_ADDA_CLK1	0x73
 #define		ADDA_CLK1_SEL_I2S_PRE_DIV1_1	(0 << 12)
 #define		ADDA_CLK1_SEL_I2S_PRE_DIV2_1	(0 << 8)
@@ -399,16 +408,6 @@ rt5640_init(void *arg)
 	reg |= PWR_DIG1_EN_I2S1;
 	rt5640_write2(sc, RT5640_PWR_DIG1, reg);
 
-	/* I2S1 setup */
-	rt5640_read2(sc, RT5640_I2S1_SDP, &reg);
-	// channel mapping
-	reg &= ~(0x7 << 12);
-	// format
-	reg &= ~(0xf);
-	// slave
-	reg |= (1 << 15);
-	rt5640_write2(sc, RT5640_I2S1_SDP, reg);
-
 	/* Unmute DAC L1/R1 Switch */
 	rt5640_read2(sc, RT5640_DIG_MIXER, &reg);
 	reg &= ~(DIG_MIXER_MU_DACL1_TO_DACL | DIG_MIXER_MU_DACR1_TO_DACR);
@@ -590,6 +589,66 @@ rt5640_detach(device_t dev)
 static int
 rt5640_dai_init(device_t dev, uint32_t format)
 {
+	struct rt5640_softc* sc;
+	int fmt, pol, clk;
+	uint16_t reg;
+
+	sc = (struct rt5640_softc*)device_get_softc(dev);
+
+	fmt = AUDIO_DAI_FORMAT_FORMAT(format);
+	pol = AUDIO_DAI_FORMAT_POLARITY(format);
+	clk = AUDIO_DAI_FORMAT_CLOCK(format);
+
+	/* I2S1 setup */
+	rt5640_read2(sc, RT5640_I2S1_SDP, &reg);
+
+	/* channel mapping */
+	reg &= ~(0x7 << 12);
+
+	switch (pol) {
+	case AUDIO_DAI_POLARITY_IB_NF:
+		reg |= I2S1_SDP_INV_I2S1_BCLK;
+		break;
+	case AUDIO_DAI_POLARITY_NB_NF:
+		reg &= ~I2S1_SDP_INV_I2S1_BCLK;
+		break;
+	default:
+		return (EINVAL);
+	}
+
+	switch (clk) {
+	case AUDIO_DAI_CLOCK_CBM_CFM:
+		reg &= ~I2S1_SDP_SEL_I2S1_MS_SLAVE;
+		break;
+	case AUDIO_DAI_CLOCK_CBS_CFS:
+		reg |= I2S1_SDP_SEL_I2S1_MS_SLAVE;
+		break;
+	default:
+		return (EINVAL);
+	}
+
+	/* 16 bit samples */
+	reg &= ~I2S1_SDP_SEL_I2S1_LEN_MASK;
+	/* set format */
+	reg &= ~I2S1_SDP_SEL_I2S1_FORMAT_MASK;
+	switch (fmt) {
+	case AUDIO_DAI_FORMAT_I2S:
+		reg |= I2S1_SDP_SEL_I2S1_FORMAT_I2S;
+		break;
+	case AUDIO_DAI_FORMAT_LJ:
+		reg |= I2S1_SDP_SEL_I2S1_FORMAT_I2S_LJ;
+		break;
+	case AUDIO_DAI_FORMAT_DSPA:
+		reg |= I2S1_SDP_SEL_I2S1_FORMAT_PCM_A;
+		break;
+	case AUDIO_DAI_FORMAT_DSPB:
+		reg |= I2S1_SDP_SEL_I2S1_FORMAT_PCM_B;
+		break;
+	default:
+		return EINVAL;
+	}
+
+	rt5640_write2(sc, RT5640_I2S1_SDP, reg);
 
 	return (0);
 }
