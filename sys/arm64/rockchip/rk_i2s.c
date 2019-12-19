@@ -517,6 +517,19 @@ rk_i2s_dai_setup_intr(device_t dev, driver_intr_t intr_handler, void *intr_arg)
 	return (0);
 }
 
+static uint32_t
+rk_i2s_dai_set_chanformat(device_t dev, uint32_t format)
+{
+
+	return (0);
+}
+
+static uint32_t
+rk_i2s_dai_set_chanspeed(device_t dev, uint32_t speed)
+{
+
+	return (speed);
+}
 
 static device_method_t rk_i2s_methods[] = {
 	/* Device interface */
@@ -526,6 +539,8 @@ static device_method_t rk_i2s_methods[] = {
 
 	DEVMETHOD(audio_dai_init,	rk_i2s_dai_init),
 	DEVMETHOD(audio_dai_setup_intr,	rk_i2s_dai_setup_intr),
+	DEVMETHOD(audio_dai_set_chanspeed,	rk_i2s_dai_set_chanspeed),
+	DEVMETHOD(audio_dai_set_chanformat,	rk_i2s_dai_set_chanformat),
 	DEVMETHOD(audio_dai_intr,	rk_i2s_dai_intr),
 	DEVMETHOD(audio_dai_get_caps,	rk_i2s_dai_get_caps),
 	DEVMETHOD(audio_dai_trigger,	rk_i2s_dai_trigger),

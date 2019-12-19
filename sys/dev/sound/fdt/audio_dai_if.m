@@ -33,7 +33,7 @@ CODE {
 
 INTERFACE audio_dai;
 
-# set DAI format for communications between CPU/codec node
+# set DAI format for communications between CPU/codec nodes
 METHOD int init {
 	device_t	dev;
 	uint32_t	format;
@@ -46,6 +46,7 @@ METHOD int setup_intr {
 	void		*intr_arg;
 }
 
+# Setup mixers for codec node
 METHOD int setup_mixer {
 	device_t	dev;
 	device_t	ausocdev;

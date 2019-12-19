@@ -130,16 +130,22 @@ static int
 audio_soc_chan_setformat(kobj_t obj, void *data, uint32_t format)
 {
 
-	printf("%s:%s:%d\n", __FILE__, __func__, __LINE__);
-	return (0);
+	struct audio_soc_softc *sc;
+
+	sc = data;
+
+	return AUDIO_DAI_SET_CHANFORMAT(sc->cpu_dev, format);
 }
 
 static uint32_t
 audio_soc_chan_setspeed(kobj_t obj, void *data, uint32_t speed)
 {
 
-	printf("%s:%s:%d\n", __FILE__, __func__, __LINE__);
-	return (speed);
+	struct audio_soc_softc *sc;
+
+	sc = data;
+
+	return AUDIO_DAI_SET_CHANSPEED(sc->cpu_dev, speed);
 }
 
 static uint32_t
