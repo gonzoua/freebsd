@@ -327,10 +327,12 @@ audio_soc_attach(device_t dev)
 {
 	struct audio_soc_softc *sc;
 	char *name;
-	phandle_t node;
+	phandle_t node, cpu_child;
+	uint32_t xref;
 	int i, ret;
 	char tmp[32];
 	unsigned int fmt, pol, clk;
+	bool frame_master, bitclock_master;
 	
 	sc = device_get_softc(dev);
 	sc->dev = dev;
@@ -359,8 +361,16 @@ audio_soc_attach(device_t dev)
 	} else
 		fmt = AUDIO_DAI_FORMAT_I2S;
 
-	bool frame_master = true;
-	bool bitclock_master = true;
+	/* Unless specified otherwise, CPU node is the master */
+	frame_master = bitclock_master = true;
+
+	cpu_child = ofw_bus_find_child(node, "simple-audio-card,cpu");
+
+	if ((OF_getencprop(node, "simple-audio-card,frame-master", &xref, sizeof(xref))) > 0)
+		frame_master = cpu_child == OF_node_from_xref(xref);
+
+	if ((OF_getencprop(node, "simple-audio-card,bitclock-master", &xref, sizeof(xref))) > 0)
+		bitclock_master = cpu_child == OF_node_from_xref(xref);
 
 	if (frame_master) {
 		clk = bitclock_master ?
