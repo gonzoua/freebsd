@@ -65,6 +65,7 @@ struct audio_soc_softc {
 	 * need to be reversed.
 	 */
 	uint32_t		format;
+	uint32_t		link_mclk_fs;
 };
 
 static struct ofw_compat_data compat_data[] = {
@@ -142,10 +143,26 @@ audio_soc_chan_setspeed(kobj_t obj, void *data, uint32_t speed)
 {
 
 	struct audio_soc_softc *sc;
+	uint32_t rate;
 
 	sc = data;
 
-	return AUDIO_DAI_SET_CHANSPEED(sc->cpu_dev, speed);
+	if (sc->link_mclk_fs) {
+		rate = speed * sc->link_mclk_fs;
+		if (AUDIO_DAI_SET_SYSCLK(sc->cpu_dev, rate, AUDIO_DAI_CLOCK_IN))
+			device_printf(sc->dev, "failed to set sysclk for CPU node");
+
+		if (AUDIO_DAI_SET_SYSCLK(sc->codec_dev, rate, AUDIO_DAI_CLOCK_OUT))
+			device_printf(sc->dev, "failed to set sysclk for codec node");
+	}
+
+	/*
+	 * Let CPU node determine speed
+	 */
+	speed = AUDIO_DAI_SET_CHANSPEED(sc->cpu_dev, speed);
+	AUDIO_DAI_SET_CHANSPEED(sc->codec_dev, speed);
+
+	return (speed);
 }
 
 static uint32_t
@@ -360,6 +377,10 @@ audio_soc_attach(device_t dev)
 			return (EINVAL);
 	} else
 		fmt = AUDIO_DAI_FORMAT_I2S;
+
+	if (OF_getencprop(node, "simple-audio-card,mclk-fs",
+	    &sc->link_mclk_fs, sizeof(sc->link_mclk_fs)) <= 0)
+		sc->link_mclk_fs = 0;
 
 	/* Unless specified otherwise, CPU node is the master */
 	frame_master = bitclock_master = true;

@@ -52,6 +52,13 @@ METHOD int setup_mixer {
 	device_t	ausocdev;
 }
 
+# setup clock speed
+METHOD int set_sysclk {
+	device_t	dev;
+	uint32_t	rate;
+	int		dir;
+}
+
 METHOD int trigger {
 	device_t	dev;
 	int		go;

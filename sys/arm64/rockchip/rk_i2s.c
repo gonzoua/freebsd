@@ -127,7 +127,7 @@ __FBSDID("$FreeBSD$");
 
 #define DIV_ROUND_CLOSEST(n,d)  (((n) + (d) / 2) / (d))
 
-#define	AUDIO_RATE	48000
+#define	RK_I2S_SAMPLING_RATE	48000
 #define	FIFO_SIZE	32
 
 static struct ofw_compat_data compat_data[] = {
@@ -166,7 +166,7 @@ static uint32_t sc_fmt[] = {
 	SND_FORMAT(AFMT_S16_LE, 2, 0),
 	0
 };
-static struct pcmchan_caps rk_i2s_caps = {48000, 48000, sc_fmt, 0};
+static struct pcmchan_caps rk_i2s_caps = {RK_I2S_SAMPLING_RATE, RK_I2S_SAMPLING_RATE, sc_fmt, 0};
 
 
 static int
@@ -174,14 +174,6 @@ rk_i2s_init(struct rk_i2s_softc *sc)
 {
 	uint32_t val;
 	int error;
-	clk_t parent;
-
-	// to trigger re-parenting
-	clk_set_freq(sc->clk, 256 * AUDIO_RATE, 0);
-
-	if (clk_get_parent(sc->clk, &parent) == 0) {
-		error = clk_set_freq(parent, 256 * AUDIO_RATE, CLK_SET_ROUND_DOWN);
-	}
 
 	error = clk_enable(sc->clk);
 	if (error != 0) {
@@ -303,11 +295,7 @@ static int
 rk_i2s_dai_init(device_t dev, uint32_t format)
 {
 	uint32_t val, txcr, rxcr;
-	int error;
-	uint32_t bus_clock_div, lr_clock_div;
 	struct rk_i2s_softc *sc;
-	uint64_t bus_clk_freq;
-	uint64_t clk_freq;
 	int fmt, pol, clk;
 
 	sc = device_get_softc(dev);
@@ -341,20 +329,6 @@ rk_i2s_dai_init(device_t dev, uint32_t format)
 	default:
 		return (EINVAL);
 	}
-
-	error = clk_get_freq(sc->clk, &clk_freq);
-	if (error != 0) {
-		device_printf(sc->dev, "failed to get clk frequency: err=%d\n", error);
-		return (error);
-	}
-	bus_clk_freq = 2 * 32 * AUDIO_RATE;
-	bus_clock_div = DIV_ROUND_CLOSEST(clk_freq, bus_clk_freq);
-	lr_clock_div = bus_clk_freq / AUDIO_RATE;
-
-	val &= ~(I2S_CKR_MDIV_MASK | I2S_CKR_RSD_MASK | I2S_CKR_TSD_MASK);
-	val |= I2S_CKR_MDIV(bus_clock_div);
-	val |= I2S_CKR_RSD(lr_clock_div);
-	val |= I2S_CKR_TSD(lr_clock_div);
 
 	RK_I2S_WRITE_4(sc, I2S_CKR, val);
 
@@ -524,9 +498,56 @@ rk_i2s_dai_set_chanformat(device_t dev, uint32_t format)
 	return (0);
 }
 
+static int
+rk_i2s_dai_set_sysclk(device_t dev, unsigned int rate, int dir)
+{
+	struct rk_i2s_softc *sc;
+	clk_t parent;
+	int error;
+
+	sc = device_get_softc(dev);
+
+	// to trigger re-parenting
+	clk_set_freq(sc->clk, rate, 0);
+
+	if (clk_get_parent(sc->clk, &parent) == 0)
+		error = clk_set_freq(parent, rate, CLK_SET_ROUND_DOWN);
+
+	return (0);
+}
+
 static uint32_t
 rk_i2s_dai_set_chanspeed(device_t dev, uint32_t speed)
 {
+	struct rk_i2s_softc *sc;
+	int error;
+	uint32_t val;
+	uint32_t bus_clock_div, lr_clock_div;
+	uint64_t bus_clk_freq;
+	uint64_t clk_freq;
+
+	 sc = device_get_softc(dev);
+
+	/* Set format */
+	val = RK_I2S_READ_4(sc, I2S_CKR);
+
+	if ((val & I2S_CKR_MSS_SLAVE) == 0) {
+		error = clk_get_freq(sc->clk, &clk_freq);
+		if (error != 0) {
+			device_printf(sc->dev, "failed to get clk frequency: err=%d\n", error);
+			return (error);
+		}
+		bus_clk_freq = 2 * 32 * speed;
+		bus_clock_div = DIV_ROUND_CLOSEST(clk_freq, bus_clk_freq);
+		lr_clock_div = bus_clk_freq / speed;
+
+		val &= ~(I2S_CKR_MDIV_MASK | I2S_CKR_RSD_MASK | I2S_CKR_TSD_MASK);
+		val |= I2S_CKR_MDIV(bus_clock_div);
+		val |= I2S_CKR_RSD(lr_clock_div);
+		val |= I2S_CKR_TSD(lr_clock_div);
+
+		RK_I2S_WRITE_4(sc, I2S_CKR, val);
+	}
 
 	return (speed);
 }
@@ -539,6 +560,7 @@ static device_method_t rk_i2s_methods[] = {
 
 	DEVMETHOD(audio_dai_init,	rk_i2s_dai_init),
 	DEVMETHOD(audio_dai_setup_intr,	rk_i2s_dai_setup_intr),
+	DEVMETHOD(audio_dai_set_sysclk,	rk_i2s_dai_set_sysclk),
 	DEVMETHOD(audio_dai_set_chanspeed,	rk_i2s_dai_set_chanspeed),
 	DEVMETHOD(audio_dai_set_chanformat,	rk_i2s_dai_set_chanformat),
 	DEVMETHOD(audio_dai_intr,	rk_i2s_dai_intr),
