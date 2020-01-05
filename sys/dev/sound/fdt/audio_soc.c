@@ -46,6 +46,13 @@ __FBSDID("$FreeBSD$");
 
 #define	AUDIO_BUFFER_SIZE	48000 * 4
 
+struct audio_soc_channel {
+	struct audio_soc_softc	*sc;	/* parent device's softc */
+	struct pcm_channel 	*pcm;	/* PCM channel */
+	struct snd_dbuf		*buf;	/* PCM buffer */
+	int			dir;	/* direction */
+};
+
 struct audio_soc_softc {
 	/*
 	 * pcm_register assumes that sc is snddev_info,
@@ -58,8 +65,8 @@ struct audio_soc_softc {
 	device_t		cpu_dev;
 	device_t		codec_dev;
 	unsigned int		mclk_fs;
-	struct pcm_channel 	*pcm;		/* PCM channel */
-	struct snd_dbuf		*buf; 		/* PCM buffer */
+	struct audio_soc_channel 	play_channel;
+	struct audio_soc_channel 	rec_channel;
 	/*
 	 * The format is from the CPU node, for CODEC node clock roles
 	 * need to be reversed.
@@ -132,8 +139,10 @@ audio_soc_chan_setformat(kobj_t obj, void *data, uint32_t format)
 {
 
 	struct audio_soc_softc *sc;
+	struct audio_soc_channel *ausoc_chan;
 
-	sc = data;
+	ausoc_chan = data;
+	sc = ausoc_chan->sc;
 
 	return AUDIO_DAI_SET_CHANFORMAT(sc->cpu_dev, format);
 }
@@ -143,9 +152,11 @@ audio_soc_chan_setspeed(kobj_t obj, void *data, uint32_t speed)
 {
 
 	struct audio_soc_softc *sc;
+	struct audio_soc_channel *ausoc_chan;
 	uint32_t rate;
 
-	sc = data;
+	ausoc_chan = data;
+	sc = ausoc_chan->sc;
 
 	if (sc->link_mclk_fs) {
 		rate = speed * sc->link_mclk_fs;
@@ -169,8 +180,10 @@ static uint32_t
 audio_soc_chan_getptr(kobj_t obj, void *data)
 {
 	struct audio_soc_softc *sc;
+	struct audio_soc_channel *ausoc_chan;
 
-	sc = data;
+	ausoc_chan = data;
+	sc = ausoc_chan->sc;
 
 	return AUDIO_DAI_GET_PTR(sc->cpu_dev);
 }
@@ -180,17 +193,21 @@ audio_soc_chan_init(kobj_t obj, void *devinfo, struct snd_dbuf *b,
 	struct pcm_channel *c, int dir)
 {
 	struct audio_soc_softc *sc;
+	struct audio_soc_channel *ausoc_chan;
 	void *buffer;
 
-	sc = devinfo;
+	ausoc_chan = devinfo;
+	sc = ausoc_chan->sc;
 	buffer = malloc(AUDIO_BUFFER_SIZE, M_DEVBUF, M_WAITOK | M_ZERO);
 
 	if (sndbuf_setup(b, buffer, AUDIO_BUFFER_SIZE) != 0) {
 		free(buffer, M_DEVBUF);
 		return NULL;
 	}
-	sc->buf = b;
-	sc->pcm = c;
+
+	ausoc_chan->dir = dir;
+	ausoc_chan->buf = b;
+	ausoc_chan->pcm = c;
 
 	return (devinfo);
 }
@@ -199,8 +216,10 @@ static int
 audio_soc_chan_trigger(kobj_t obj, void *data, int go)
 {
 	struct audio_soc_softc *sc;
+	struct audio_soc_channel *ausoc_chan;
 
-	sc = (struct audio_soc_softc *)data;
+	ausoc_chan = (struct audio_soc_channel *)data;
+	sc = ausoc_chan->sc;
 	return AUDIO_DAI_TRIGGER(sc->cpu_dev, go);
 }
 
@@ -209,11 +228,13 @@ audio_soc_chan_free(kobj_t obj, void *data)
 {
 
 	struct audio_soc_softc *sc;
+	struct audio_soc_channel *ausoc_chan;
 	void *buffer;
 
-	sc = (struct audio_soc_softc *)data;
+	ausoc_chan = (struct audio_soc_channel *)data;
+	sc = ausoc_chan->sc;
 
-	buffer = sndbuf_getbuf(sc->buf);
+	buffer = sndbuf_getbuf(ausoc_chan->buf);
 	if (buffer)
 		free(buffer, M_DEVBUF);
 
@@ -223,7 +244,11 @@ audio_soc_chan_free(kobj_t obj, void *data)
 static struct pcmchan_caps *
 audio_soc_chan_getcaps(kobj_t obj, void *data)
 {
-	struct audio_soc_softc *sc = data;
+	struct audio_soc_softc *sc;
+	struct audio_soc_channel *ausoc_chan;
+
+	ausoc_chan = data;
+	sc = ausoc_chan->sc;
 
 	return AUDIO_DAI_GET_CAPS(sc->cpu_dev);
 }
@@ -248,9 +273,9 @@ audio_soc_intr(void *arg)
 	int channel_intr_required;
 
 	sc = (struct audio_soc_softc *)arg;
-	channel_intr_required = AUDIO_DAI_INTR(sc->cpu_dev, sc->buf);
+	channel_intr_required = AUDIO_DAI_INTR(sc->cpu_dev, sc->play_channel.buf);
 	if (channel_intr_required)
-		chn_intr(sc->pcm);
+		chn_intr(sc->play_channel.pcm);
 }
 
 static int
@@ -324,14 +349,18 @@ audio_soc_init(void *arg)
 		return;
 	}
 
-	if (pcm_register(sc->dev, sc, 1, 0)) {
+	if (pcm_register(sc->dev, sc, 1, 1)) {
 		device_printf(sc->dev, "failed to register PCM\n");
 		return;
 	}
 
 	pcm_getbuffersize(sc->dev, AUDIO_BUFFER_SIZE, AUDIO_BUFFER_SIZE,
 	    AUDIO_BUFFER_SIZE);
-	pcm_addchan(sc->dev, PCMDIR_PLAY, &audio_soc_chan_class, sc);
+	sc->play_channel.sc = sc;
+	sc->rec_channel.sc = sc;
+
+	pcm_addchan(sc->dev, PCMDIR_PLAY, &audio_soc_chan_class, &sc->play_channel);
+	pcm_addchan(sc->dev, PCMDIR_REC, &audio_soc_chan_class, &sc->rec_channel);
 
 	pcm_setstatus(sc->dev, "at EXPERIMENT");
 
