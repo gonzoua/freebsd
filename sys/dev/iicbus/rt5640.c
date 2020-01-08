@@ -663,7 +663,7 @@ rt5640_dai_setup_mixer(device_t dev, device_t pcmdev)
 }
 
 static int
-rt5640_dai_trigger(device_t dev, int go)
+rt5640_dai_trigger(device_t dev, int go, int pcm_dir)
 {
 
 	switch (go) {

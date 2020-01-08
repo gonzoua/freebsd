@@ -185,7 +185,7 @@ audio_soc_chan_getptr(kobj_t obj, void *data)
 	ausoc_chan = data;
 	sc = ausoc_chan->sc;
 
-	return AUDIO_DAI_GET_PTR(sc->cpu_dev);
+	return AUDIO_DAI_GET_PTR(sc->cpu_dev, ausoc_chan->dir);
 }
 
 static void *
@@ -220,7 +220,7 @@ audio_soc_chan_trigger(kobj_t obj, void *data, int go)
 
 	ausoc_chan = (struct audio_soc_channel *)data;
 	sc = ausoc_chan->sc;
-	return AUDIO_DAI_TRIGGER(sc->cpu_dev, go);
+	return AUDIO_DAI_TRIGGER(sc->cpu_dev, go, ausoc_chan->dir);
 }
 
 static int
@@ -273,9 +273,11 @@ audio_soc_intr(void *arg)
 	int channel_intr_required;
 
 	sc = (struct audio_soc_softc *)arg;
-	channel_intr_required = AUDIO_DAI_INTR(sc->cpu_dev, sc->play_channel.buf);
-	if (channel_intr_required)
+	channel_intr_required = AUDIO_DAI_INTR(sc->cpu_dev, sc->play_channel.buf, sc->rec_channel.buf);
+	if (channel_intr_required & AUDIO_DAI_PLAY_INTR)
 		chn_intr(sc->play_channel.pcm);
+	if (channel_intr_required & AUDIO_DAI_REC_INTR)
+		chn_intr(sc->rec_channel.pcm);
 }
 
 static int

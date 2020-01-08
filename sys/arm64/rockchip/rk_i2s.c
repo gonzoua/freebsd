@@ -103,9 +103,11 @@ __FBSDID("$FreeBSD$");
 #define	I2S_INTCR	0x0014
 #define		I2S_INTCR_RFT(n)	(((n) - 1) << 20)
 #define		I2S_INTCR_TFT(n)	(((n) - 1) << 4)
+#define		I2S_INTCR_RXFIE		(1 << 16)
 #define		I2S_INTCR_TXUIC		(1 << 2)
 #define		I2S_INTCR_TXEIE		(1 << 0)
 #define	I2S_INTSR	0x0018
+#define		I2S_INTSR_RXFI		(1 << 16)
 #define		I2S_INTSR_TXUI		(1 << 1)
 #define		I2S_INTSR_TXEI		(1 << 0)
 #define	I2S_XFER	0x001c
@@ -149,8 +151,9 @@ struct rk_i2s_softc {
 	clk_t		hclk;
 	void *		intrhand;
 	struct syscon	*grf;
-	/* Pointer to first unsubmitted sample */
-	uint32_t		unsubmittedptr;
+	/* pointers to playback/capture buffers */
+	uint32_t	play_ptr;
+	uint32_t	rec_ptr;
 };
 
 #define	RK_I2S_LOCK(sc)			mtx_lock(&(sc)->mtx)
@@ -374,7 +377,7 @@ rk_i2s_dai_init(device_t dev, uint32_t format)
 
 
 static int
-rk_i2s_dai_intr(device_t dev, struct snd_dbuf *buf)
+rk_i2s_dai_intr(device_t dev, struct snd_dbuf *play_buf, struct snd_dbuf *rec_buf)
 {
 	struct rk_i2s_softc *sc;
 	uint32_t status;
@@ -391,11 +394,11 @@ rk_i2s_dai_intr(device_t dev, struct snd_dbuf *buf)
 		level = RK_I2S_READ_4(sc, I2S_TXFIFOLR) & 0x1f;
 		uint8_t *samples;
 		uint32_t count, size, readyptr, written;
-		count = sndbuf_getready(buf);
-		size = sndbuf_getsize(buf);
-		readyptr = sndbuf_getreadyptr(buf);
+		count = sndbuf_getready(play_buf);
+		size = sndbuf_getsize(play_buf);
+		readyptr = sndbuf_getreadyptr(play_buf);
 
-		samples = (uint8_t*)sndbuf_getbuf(buf);
+		samples = (uint8_t*)sndbuf_getbuf(play_buf);
 		written = 0;
 		for (; level < FIFO_SIZE - 1; level++) {
 			val  = (samples[readyptr++ % size] << 0);
@@ -405,9 +408,34 @@ rk_i2s_dai_intr(device_t dev, struct snd_dbuf *buf)
 			written += 4;
 			RK_I2S_WRITE_4(sc, I2S_TXDR, val);
 		}
-		sc->unsubmittedptr += written;
-		sc->unsubmittedptr %= size;
-		ret = 1;
+		sc->play_ptr += written;
+		sc->play_ptr %= size;
+		ret |= AUDIO_DAI_PLAY_INTR;
+	}
+
+	if (status & I2S_INTSR_RXFI) {
+		level = RK_I2S_READ_4(sc, I2S_RXFIFOLR) & 0x1f;
+		uint8_t *samples;
+		uint32_t count, size, freeptr, recorded;
+		count = sndbuf_getfree(rec_buf);
+		size = sndbuf_getsize(rec_buf);
+		freeptr = sndbuf_getfreeptr(rec_buf);
+		samples = (uint8_t*)sndbuf_getbuf(rec_buf);
+		recorded = 0;
+		if (level > count / 4)
+			level = count / 4;
+
+		for (; level > 0; level--) {
+			val = RK_I2S_READ_4(sc, I2S_RXDR);
+			samples[freeptr++ % size] = val & 0xff;
+			samples[freeptr++ % size] = (val >> 8) & 0xff;
+			samples[freeptr++ % size] = (val >> 16) & 0xff;
+			samples[freeptr++ % size] = (val >> 24) & 0xff;
+			recorded += 4;
+		}
+		sc->rec_ptr += recorded;
+		sc->rec_ptr %= size;
+		ret |= AUDIO_DAI_REC_INTR;
 	}
 
 	RK_I2S_UNLOCK(sc);
@@ -422,15 +450,22 @@ rk_i2s_dai_get_caps(device_t dev)
 }
 
 static int
-rk_i2s_dai_trigger(device_t dev, int go)
+rk_i2s_dai_trigger(device_t dev, int go, int pcm_dir)
 {
 	struct rk_i2s_softc 	*sc = device_get_softc(dev);
 	uint32_t val;
+	uint32_t clear_bit;
+
+	if ((pcm_dir != PCMDIR_PLAY) && (pcm_dir != PCMDIR_REC))
+		return (EINVAL);
 
 	switch (go) {
 	case PCMTRIG_START:
 		val = RK_I2S_READ_4(sc, I2S_INTCR);
-		val |= I2S_INTCR_TXEIE;
+		if (pcm_dir == PCMDIR_PLAY)
+			val |= I2S_INTCR_TXEIE;
+		else if (pcm_dir == PCMDIR_REC)
+			val |= I2S_INTCR_RXFIE;
 		RK_I2S_WRITE_4(sc, I2S_INTCR, val);
 
 		val = I2S_XFER_TXS_START | I2S_XFER_RXS_START;
@@ -440,20 +475,33 @@ rk_i2s_dai_trigger(device_t dev, int go)
 	case PCMTRIG_STOP:
 	case PCMTRIG_ABORT:
 		val = RK_I2S_READ_4(sc, I2S_INTCR);
-		val &= ~I2S_INTCR_TXEIE;
+		if (pcm_dir == PCMDIR_PLAY)
+			val &= ~I2S_INTCR_TXEIE;
+		else if (pcm_dir == PCMDIR_REC)
+			val &= ~I2S_INTCR_RXFIE;
 		RK_I2S_WRITE_4(sc, I2S_INTCR, val);
 
 		RK_I2S_WRITE_4(sc, I2S_XFER, 0);
 
+		if (pcm_dir == PCMDIR_PLAY)
+			clear_bit = I2S_CLR_TXC;
+		else if (pcm_dir == PCMDIR_REC)
+			clear_bit = I2S_CLR_RXC;
+		else
+			return (EINVAL);
+
 		val = RK_I2S_READ_4(sc, I2S_CLR);
-		val |= I2S_CLR_TXC;
+		val |= clear_bit;
 		RK_I2S_WRITE_4(sc, I2S_CLR, val);
 
-		while ((RK_I2S_READ_4(sc, I2S_CLR) & I2S_CLR_TXC) != 0)
+		while ((RK_I2S_READ_4(sc, I2S_CLR) & clear_bit) != 0)
 			DELAY(1);
 
 		RK_I2S_LOCK(sc);
-		sc->unsubmittedptr = 0;
+		if (pcm_dir == PCMDIR_PLAY)
+			sc->play_ptr = 0;
+		else
+			sc->rec_ptr = 0;
 		RK_I2S_UNLOCK(sc);
 		break;
 	}
@@ -462,7 +510,7 @@ rk_i2s_dai_trigger(device_t dev, int go)
 }
 
 static uint32_t
-rk_i2s_dai_get_ptr(device_t dev)
+rk_i2s_dai_get_ptr(device_t dev, int pcm_dir)
 {
 	struct rk_i2s_softc *sc;
 	uint32_t ptr;
@@ -470,7 +518,10 @@ rk_i2s_dai_get_ptr(device_t dev)
 	sc = device_get_softc(dev);
 
 	RK_I2S_LOCK(sc);
-	ptr = sc->unsubmittedptr;
+	if (pcm_dir == PCMDIR_PLAY)
+		ptr = sc->play_ptr;
+	else
+		ptr = sc->rec_ptr;
 	RK_I2S_UNLOCK(sc);
 
 	return ptr;
@@ -499,7 +550,7 @@ rk_i2s_dai_set_chanformat(device_t dev, uint32_t format)
 }
 
 static int
-rk_i2s_dai_set_sysclk(device_t dev, unsigned int rate, int dir)
+rk_i2s_dai_set_sysclk(device_t dev, unsigned int rate, int dai_dir)
 {
 	struct rk_i2s_softc *sc;
 	clk_t parent;

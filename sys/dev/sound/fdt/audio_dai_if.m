@@ -56,12 +56,13 @@ METHOD int setup_mixer {
 METHOD int set_sysclk {
 	device_t	dev;
 	uint32_t	rate;
-	int		dir;
+	int		dai_dir;
 }
 
 METHOD int trigger {
 	device_t	dev;
 	int		go;
+	int		pcm_dir;
 }
 
 METHOD struct pcmchan_caps* get_caps {
@@ -70,6 +71,7 @@ METHOD struct pcmchan_caps* get_caps {
 
 METHOD uint32_t get_ptr {
 	device_t	dev;
+	int		pcm_dir;
 }
 
 # Set PCM channel format
@@ -88,5 +90,6 @@ METHOD uint32_t set_chanspeed {
 # returns 1 if call to chn_intr required, 0 otherwise
 METHOD int intr {
 	device_t	dev;
-	struct snd_dbuf	*buf;
+	struct snd_dbuf	*play_buf;
+	struct snd_dbuf	*rec_buf;
 }

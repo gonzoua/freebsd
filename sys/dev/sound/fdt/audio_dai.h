@@ -51,6 +51,13 @@
 #define	AUDIO_DAI_JACK_HP		0
 #define	AUDIO_DAI_JACK_MIC		1
 
+/*
+ * Signal to audio_soc that chn_intr required
+ * for either recording or playback
+ */
+#define	AUDIO_DAI_REC_INTR		(1 << 1)
+#define	AUDIO_DAI_PLAY_INTR		(1 << 0)
+
 #define	AUDIO_DAI_FORMAT(fmt, pol, clk)		(((fmt) << 16) | ((pol) << 8) | (clk))
 #define	AUDIO_DAI_FORMAT_FORMAT(format)		(((format) >> 16) & 0xff)
 #define	AUDIO_DAI_FORMAT_POLARITY(format)	(((format) >> 8) & 0xff)
