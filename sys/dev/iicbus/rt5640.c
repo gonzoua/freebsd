@@ -68,12 +68,25 @@ __FBSDID("$FreeBSD$");
 #define		HP_VOL_MU_HPOVOLR_IN	(1 << 6)
 #define		HP_VOL_VOLUME(l, r)	((l) << 8 | (r))
 #define		HP_VOL_VOLUME_MASK	HP_VOL_VOLUME(0x3f, 0x3f)
+#define	RT5640_IN1_IN2		0x0d
+#define		IN1_IN2_EN_IN1_DF	(1 << 7)
 #define	RT5640_DAC1_DIG_VOL	0x19
 #define		MAX_DIG_VOLUME		0xAF
 #define		DAC1_DIG_VOL(l, r)	(((l) << 8) | (r))
 #define		DAC1_DIG_VOL_MASK	DAC1_DIG_VOL(0xff, 0xff)
 #define		DAC1_DIG_VOL_R(v)	((v) & 0xff)
 #define		DAC1_DIG_VOL_L(v)	(((v) >> 8) & 0xff)
+#define	RT5640_ADC_DIG_VOL	0x1C
+#define		ADC_DIG_VOL_MU_ADC_VOL_L	(1 << 15)
+#define		ADC_DIG_VOL_AD_GAIN_L(v)	((v) << 8)
+#define		ADC_DIG_VOL_AD_GAIN_L_MASK	(0x7f << 8)
+#define		ADC_DIG_VOL_MU_ADC_VOL_R	(1 << 7)
+#define		ADC_DIG_VOL_AD_GAIN_R(v)	((v) << 0)
+#define		ADC_DIG_VOL_AD_GAIN_R_MASK	(0x7f << 0)
+#define	RT5640_STO_ADC_MIXER	0x27
+#define		STO_ADC_MIXER_MU_STEREO_ADCL1	(1 << 14)
+#define		STO_ADC_MIXER_SEL_STEREO_ADC1	(1 << 12)
+#define		STO_ADC_MIXER_MU_STEREO_ADCR1	(1 << 6)
 #define	RT5640_AD_DA_MIXER	0x29
 #define		AD_DA_MIXER_MU_IF1_DAC_L		(1 << 14)
 #define		AD_DA_MIXER_MU_IF1_DAC_R		(1 << 6)
@@ -85,7 +98,9 @@ __FBSDID("$FreeBSD$");
 #define		DIG_MIXER_MU_DACR1_TO_DACR		(1 << 11)
 #define	RT5640_DSP_PATH2	0x2e
 #define	RT5640_REC_L2_MIXER	0x3c
+#define		L2_MIXER_MU_BST1_RECMIXL	(1 << 1)
 #define	RT5640_REC_R2_MIXER	0x3e
+#define		R2_MIXER_MU_BST1_RECMIXR	(1 << 1)
 #define	RT5640_HPO_MIXER	0x45
 #define		HPO_MIXER_MU_HPOVOL_HPOMIX	(1 << 13)
 #define	RT5640_OUT_L3_MIXER	0x4f
@@ -97,7 +112,10 @@ __FBSDID("$FreeBSD$");
 #define		PWR_DIG1_EN_I2S1		(1 << 15)
 #define		PWR_DIG1_POWER_DAC_L_1		(1 << 12)
 #define		PWR_DIG1_POWER_DAC_R_1		(1 << 11)
+#define		PWR_DIG1_POWER_ADC_L		(1 << 2)
+#define		PWR_DIG1_POWER_ADC_R		(1 << 1)
 #define	RT5640_PWR_DIG2		0x62
+#define		PWR_DIG2_POW_ADC_STEREO_FILTER	(1 << 15)
 #define	RT5640_PWR_ANLG1	0x63
 #define		PWR_ANLG1_EN_FASTB1	(1 << 14)
 #define		PWR_ANLG1_EN_L_HP	(1 << 7)
@@ -105,10 +123,14 @@ __FBSDID("$FreeBSD$");
 #define		PWR_ANLG1_EN_AMP_HP	(1 << 5)
 #define		PWR_ANLG1_EN_FASTB2	(1 << 3)
 #define	RT5640_PWR_ANLG2	0x64
+#define		PWR_ANLG2_POW_BST1	(1 << 15)
+#define		PWR_ANLG2_POW_MICBIAS1	(1 << 11)
 #define		PWR_ANLG2_POW_PLL	(1 << 9)
 #define	RT5640_PWR_MIXER	0x65
 #define		PWR_MIXER_POW_OUTMIXL	(1 << 15)
 #define		PWR_MIXER_POW_OUTMIXR	(1 << 14)
+#define		PWR_MIXER_POW_RECMIXL	(1 << 11)
+#define		PWR_MIXER_POW_RECMIXR	(1 << 10)
 #define	RT5640_PWR_VOL		0x66
 #define		PWR_VOL_POW_HPOVOLL	(1 << 11)
 #define		PWR_VOL_POW_HPOVOLR	(1 << 10)
@@ -349,6 +371,71 @@ rt5640_set_if1_vol(struct rt5640_softc *sc, unsigned int left, unsigned int righ
 }
 
 static void
+rt5640_setup_microphone(struct rt5640_softc *sc)
+{
+	uint16_t reg;
+
+	/* Power up MICBIAS1 */
+	rt5640_read2(sc, RT5640_PWR_ANLG2, &reg);
+	reg |= PWR_ANLG2_POW_MICBIAS1;
+	rt5640_write2(sc, RT5640_PWR_ANLG2, reg);
+
+	/* Enable power for ADCL and ADCR */
+	rt5640_read2(sc, RT5640_PWR_DIG1, &reg);
+	reg |= (PWR_DIG1_POWER_ADC_L | PWR_DIG1_POWER_ADC_R);
+	rt5640_write2(sc, RT5640_PWR_DIG1, reg);
+
+	// MX-0D[7] - set differential mode
+	rt5640_read2(sc, RT5640_IN1_IN2, &reg);
+	reg |= IN1_IN2_EN_IN1_DF;
+	rt5640_write2(sc, RT5640_IN1_IN2, reg);
+
+	// MX-0D[15:12] - MICBST1 volume
+
+	// MX-64[15] - MICBST1 power
+	rt5640_read2(sc, RT5640_PWR_ANLG2, &reg);
+	reg |= PWR_ANLG2_POW_BST1;
+	rt5640_write2(sc, RT5640_PWR_ANLG2, reg);
+
+	// MX-3C[1] - MICBST1 input in RECMIXL
+	rt5640_read2(sc, RT5640_REC_L2_MIXER, &reg);
+	reg &= ~(L2_MIXER_MU_BST1_RECMIXL);
+	rt5640_write2(sc, RT5640_REC_L2_MIXER, reg);
+
+	// MX-3E[1] - MICBST1 input in RECMIXR
+	rt5640_read2(sc, RT5640_REC_R2_MIXER, &reg);
+	reg &= ~(R2_MIXER_MU_BST1_RECMIXR);
+	rt5640_write2(sc, RT5640_REC_R2_MIXER, reg);
+
+	// MX-65[10/11] - RECMIXL/RECMIXR power
+	rt5640_read2(sc, RT5640_PWR_MIXER, &reg);
+	reg |= (PWR_MIXER_POW_RECMIXL | PWR_MIXER_POW_RECMIXR);
+	rt5640_write2(sc, RT5640_PWR_MIXER, reg);
+
+	// internals
+	rt5640_read2(sc, RT5640_PWR_DIG2, &reg);
+	reg |= PWR_DIG2_POW_ADC_STEREO_FILTER;
+	rt5640_write2(sc, RT5640_PWR_DIG2, reg);
+	// MX-27[12] to select ADCR
+	// MX-27[14] to unmute
+	// MX-27[6] to unmute
+	rt5640_read2(sc, RT5640_STO_ADC_MIXER, &reg);
+	reg |= STO_ADC_MIXER_SEL_STEREO_ADC1;
+	reg &= ~(STO_ADC_MIXER_MU_STEREO_ADCL1 | STO_ADC_MIXER_MU_STEREO_ADCR1);
+	rt5640_write2(sc, RT5640_STO_ADC_MIXER, reg);
+
+	// MX-1C[15] to unmute
+	// MX-1C[14:8] - volume
+	// MX-1C[6:0]  - volume
+	rt5640_read2(sc, RT5640_ADC_DIG_VOL, &reg);
+	reg &= ~(ADC_DIG_VOL_MU_ADC_VOL_L | ADC_DIG_VOL_MU_ADC_VOL_R);
+	reg &= ~(ADC_DIG_VOL_AD_GAIN_R_MASK | ADC_DIG_VOL_MU_ADC_VOL_R);
+	reg |= ADC_DIG_VOL_AD_GAIN_L(0x7f);
+	reg |= ADC_DIG_VOL_AD_GAIN_R(0x7f);
+	rt5640_write2(sc, RT5640_ADC_DIG_VOL, reg);
+}
+
+static void
 rt5640_init(void *arg)
 {
 	struct rt5640_softc *sc;
@@ -448,6 +535,8 @@ rt5640_init(void *arg)
 		ADDA_CLK1_SEL_DAC_OCR_64 |
 		ADDA_CLK1_SEL_ADC_OCR_128;
 	rt5640_write2(sc, RT5640_ADDA_CLK1, reg);
+
+	rt5640_setup_microphone(sc);
 
 	rt5640_powerup(sc);
 }
