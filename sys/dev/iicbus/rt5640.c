@@ -118,6 +118,7 @@ __FBSDID("$FreeBSD$");
 #define		PWR_DIG2_POW_ADC_STEREO_FILTER	(1 << 15)
 #define	RT5640_PWR_ANLG1	0x63
 #define		PWR_ANLG1_EN_FASTB1	(1 << 14)
+#define		PWR_ANLG1_POW_MAIN_BIAS	(1 << 13)
 #define		PWR_ANLG1_EN_L_HP	(1 << 7)
 #define		PWR_ANLG1_EN_R_HP	(1 << 6)
 #define		PWR_ANLG1_EN_AMP_HP	(1 << 5)
@@ -466,8 +467,10 @@ rt5640_init(void *arg)
 	rt5640_write2(sc, RT5640_GCTRL1, reg);
 
 	/* HP L/R amp */
-	// XXX: fixme, should we read reg here first?
+	rt5640_read2(sc, RT5640_PWR_ANLG1, &reg);
 	reg |= (PWR_ANLG1_EN_L_HP | PWR_ANLG1_EN_R_HP);
+	/* XXX: not clear why we need to enable this for playback */
+	reg |= PWR_ANLG1_POW_MAIN_BIAS;
 	rt5640_write2(sc, RT5640_PWR_ANLG1, reg);
 
 	rt5640_read2(sc, RT5640_HP_VOL, &reg);
