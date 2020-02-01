@@ -95,6 +95,7 @@ __FBSDID("$FreeBSD$");
 #define		I2S_CKR_TSD(n)		(((n) - 1) << 0)
 #define		I2S_CKR_TSD_MASK	(0xff << 0)
 #define	I2S_TXFIFOLR	0x000c
+#define		TXFIFO0LR_MASK		0x3f
 #define	I2S_DMACR	0x0010
 #define		I2S_DMACR_RDE_ENABLE	(1 << 24)
 #define		I2S_DMACR_RDL(n)	((n) << 16)
@@ -119,6 +120,7 @@ __FBSDID("$FreeBSD$");
 #define	I2S_TXDR	0x0024
 #define	I2S_RXDR	0x0028
 #define	I2S_RXFIFOLR	0x002c
+#define		RXFIFO0LR_MASK		0x3f
 
 /* syscon */
 #define	I2S_IO_DIRECTION_MASK		(7)
@@ -391,7 +393,7 @@ rk_i2s_dai_intr(device_t dev, struct snd_dbuf *play_buf, struct snd_dbuf *rec_bu
 	status = RK_I2S_READ_4(sc, I2S_INTSR);
 
 	if (status & I2S_INTSR_TXEI) {
-		level = RK_I2S_READ_4(sc, I2S_TXFIFOLR) & 0x1f;
+		level = RK_I2S_READ_4(sc, I2S_TXFIFOLR) & TXFIFO0LR_MASK;
 		uint8_t *samples;
 		uint32_t count, size, readyptr, written;
 		count = sndbuf_getready(play_buf);
@@ -414,7 +416,7 @@ rk_i2s_dai_intr(device_t dev, struct snd_dbuf *play_buf, struct snd_dbuf *rec_bu
 	}
 
 	if (status & I2S_INTSR_RXFI) {
-		level = RK_I2S_READ_4(sc, I2S_RXFIFOLR) & 0x1f;
+		level = RK_I2S_READ_4(sc, I2S_RXFIFOLR) & RXFIFO0LR_MASK;
 		uint8_t *samples;
 		uint32_t count, size, freeptr, recorded;
 		count = sndbuf_getfree(rec_buf);
@@ -481,21 +483,26 @@ rk_i2s_dai_trigger(device_t dev, int go, int pcm_dir)
 			val &= ~I2S_INTCR_RXFIE;
 		RK_I2S_WRITE_4(sc, I2S_INTCR, val);
 
-		RK_I2S_WRITE_4(sc, I2S_XFER, 0);
+		/*
+		 * If there is no other activity going on, stop transfers
+		 */
+		if ((val & (I2S_INTCR_TXEIE | I2S_INTCR_RXFIE)) == 0) {
+			RK_I2S_WRITE_4(sc, I2S_XFER, 0);
 
-		if (pcm_dir == PCMDIR_PLAY)
-			clear_bit = I2S_CLR_TXC;
-		else if (pcm_dir == PCMDIR_REC)
-			clear_bit = I2S_CLR_RXC;
-		else
-			return (EINVAL);
+			if (pcm_dir == PCMDIR_PLAY)
+				clear_bit = I2S_CLR_TXC;
+			else if (pcm_dir == PCMDIR_REC)
+				clear_bit = I2S_CLR_RXC;
+			else
+				return (EINVAL);
 
-		val = RK_I2S_READ_4(sc, I2S_CLR);
-		val |= clear_bit;
-		RK_I2S_WRITE_4(sc, I2S_CLR, val);
+			val = RK_I2S_READ_4(sc, I2S_CLR);
+			val |= clear_bit;
+			RK_I2S_WRITE_4(sc, I2S_CLR, val);
 
-		while ((RK_I2S_READ_4(sc, I2S_CLR) & clear_bit) != 0)
-			DELAY(1);
+			while ((RK_I2S_READ_4(sc, I2S_CLR) & clear_bit) != 0)
+				DELAY(1);
+		}
 
 		RK_I2S_LOCK(sc);
 		if (pcm_dir == PCMDIR_PLAY)
