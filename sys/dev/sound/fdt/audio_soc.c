@@ -161,10 +161,10 @@ audio_soc_chan_setspeed(kobj_t obj, void *data, uint32_t speed)
 	if (sc->link_mclk_fs) {
 		rate = speed * sc->link_mclk_fs;
 		if (AUDIO_DAI_SET_SYSCLK(sc->cpu_dev, rate, AUDIO_DAI_CLOCK_IN))
-			device_printf(sc->dev, "failed to set sysclk for CPU node");
+			device_printf(sc->dev, "failed to set sysclk for CPU node\n");
 
 		if (AUDIO_DAI_SET_SYSCLK(sc->codec_dev, rate, AUDIO_DAI_CLOCK_OUT))
-			device_printf(sc->dev, "failed to set sysclk for codec node");
+			device_printf(sc->dev, "failed to set sysclk for codec node\n");
 	}
 
 	/*
