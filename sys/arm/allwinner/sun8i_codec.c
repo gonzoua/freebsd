@@ -41,6 +41,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/rman.h>
 #include <sys/resource.h>
 #include <machine/bus.h>
+#include <sys/gpio.h>
 
 #include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/ofw_bus_subr.h>
@@ -48,12 +49,79 @@ __FBSDID("$FreeBSD$");
 #include <dev/extres/clk/clk.h>
 #include <dev/extres/hwreset/hwreset.h>
 
-#include "syscon_if.h"
+#include <dev/gpio/gpiobusvar.h>
 
 #include "opt_snd.h"
 #include <dev/sound/pcm/sound.h>
 #include <dev/sound/fdt/audio_dai.h>
 #include "audio_dai_if.h"
+
+#define	SYSCLK_CTL		0x00c
+#define	 AIF1CLK_ENA			(1 << 11)
+#define	 AIF1CLK_SRC_MASK		(3 << 8)
+#define	 AIF1CLK_SRC_PLL		(2 << 8)
+#define	 SYSCLK_ENA			(1 << 3)
+#define	 SYSCLK_SRC			(1 << 0)
+
+#define	MOD_CLK_ENA		0x010
+#define	MOD_RST_CTL		0x014
+#define	MOD_AIF1			(1 << 15)
+#define	MOD_ADC				(1 << 3)
+#define	MOD_DAC				(1 << 2)
+
+#define	SYS_SR_CTRL		0x018
+#define	 AIF1_FS_MASK		(0xf << 12)
+#define	  AIF_FS_48KHZ		(8 << 12)
+
+#define	AIF1CLK_CTRL		0x040
+#define	 AIF1_MSTR_MOD		(1 << 15)
+#define	 AIF1_BCLK_INV		(1 << 14)
+#define	 AIF1_LRCK_INV		(1 << 13)
+#define	 AIF1_BCLK_DIV_MASK	(0xf << 9)
+#define	  AIF1_BCLK_DIV_16	(6 << 9)
+#define	 AIF1_LRCK_DIV_MASK	(7 << 6)
+#define	  AIF1_LRCK_DIV_16	(0 << 6)
+#define	  AIF1_LRCK_DIV_64	(2 << 6)
+#define	 AIF1_WORD_SIZ_MASK	(3 << 4)
+#define	  AIF1_WORD_SIZ_16	(1 << 4)
+#define	 AIF1_DATA_FMT_MASK	(3 << 2)
+#define	  AIF1_DATA_FMT_I2S	(0 << 2)
+#define	  AIF1_DATA_FMT_LJ	(1 << 2)
+#define	  AIF1_DATA_FMT_RJ	(2 << 2)
+#define	  AIF1_DATA_FMT_DSP	(3 << 2)
+
+#define	AIF1_DACDAT_CTRL	0x048
+#define	 AIF1_DAC0L_ENA		(1 << 15)
+#define	 AIF1_DAC0R_ENA		(1 << 14)
+
+#define	ADC_DIG_CTRL		0x100
+#define	 ADC_DIG_CTRL_ENAD	(1 << 15)
+
+#define	HMIC_CTRL1		0x110
+/* TODO: check this mask with datasheet */
+#define	 HMIC_CTRL1_N_MASK		(0xf << 8)
+#define	 HMIC_CTRL1_N(n)		(((n) & 0xf) << 8)
+#define	 HMIC_CTRL1_JACK_IN_IRQ_EN	(1 << 4)
+#define	 HMIC_CTRL1_JACK_OUT_IRQ_EN	(1 << 3)
+#define	 HMIC_CTRL1_MIC_DET_IRQ_EN	(1 << 0)
+
+#define	HMIC_CTRL2		0x114
+#define	 HMIC_CTRL2_MDATA_THRES	__BITS(12,8)
+
+#define	HMIC_STS		0x118
+#define	 HMIC_STS_MIC_PRESENT	(1 << 6)
+#define	 HMIC_STS_JACK_DET_OIRQ	(1 << 4)
+#define	 HMIC_STS_JACK_DET_IIRQ	(1 << 3)
+#define	 HMIC_STS_MIC_DET_ST	(1 << 0)
+
+#define	DAC_DIG_CTRL		0x120
+#define	 DAC_DIG_CTRL_ENDA	(1 << 15)
+
+#define	DAC_MXR_SRC		0x130
+#define	 DACL_MXR_SRC_MASK		(0xf << 12)
+#define	  DACL_MXR_SRC_AIF1_DAC0L (0x8 << 12)
+#define	 DACR_MXR_SRC_MASK		(0xf << 8)
+#define	  DACR_MXR_SRC_AIF1_DAC0R (0x8 << 8)
 
 static struct ofw_compat_data compat_data[] = {
 	{ "allwinner,sun8i-a33-codec",	1},
@@ -72,18 +140,13 @@ struct sun8i_codec_softc {
 	struct mtx	mtx;
 	clk_t		clk_gate;
 	clk_t		clk_mod;
-	struct sunxi_i2s_config	*cfg;
 	void *		intrhand;
-	/* pointers to playback/capture buffers */
-	uint32_t	play_ptr;
-	uint32_t	rec_ptr;
 };
 
-#define	I2S_LOCK(sc)		mtx_lock(&(sc)->mtx)
-#define	I2S_UNLOCK(sc)		mtx_unlock(&(sc)->mtx)
-#define	I2S_READ(sc, reg)	bus_read_4((sc)->res, (reg))
-#define	I2S_WRITE(sc, reg, val)	bus_write_4((sc)->res, (reg), (val))
-#define	I2S_TYPE(sc)		((sc)->cfg->type)
+#define	CODEC_LOCK(sc)			mtx_lock(&(sc)->mtx)
+#define	CODEC_UNLOCK(sc)		mtx_unlock(&(sc)->mtx)
+#define	CODEC_READ(sc, reg)		bus_read_4((sc)->res[0], (reg))
+#define	CODEC_WRITE(sc, reg, val)	bus_write_4((sc)->res[0], (reg), (val))
 
 static int sun8i_codec_probe(device_t dev);
 static int sun8i_codec_attach(device_t dev);
@@ -107,10 +170,13 @@ sun8i_codec_attach(device_t dev)
 {
 	struct sun8i_codec_softc *sc;
 	int error;
+	uint32_t val;
+	struct gpiobus_pin *pa_pin;
 	phandle_t node;
 
 	sc = device_get_softc(dev);
 	sc->dev = dev;
+	node = ofw_bus_get_node(dev);
 
 	mtx_init(&sc->mtx, device_get_nameunit(dev), NULL, MTX_DEF);
 
@@ -138,7 +204,68 @@ sun8i_codec_attach(device_t dev)
 		goto fail;
 	}
 
-	node = ofw_bus_get_node(dev);
+	/* Enable clocks */
+	val = CODEC_READ(sc, SYSCLK_CTL);
+	val |= AIF1CLK_ENA;
+	val &= ~AIF1CLK_SRC_MASK;
+	val |= AIF1CLK_SRC_PLL;
+	val |= SYSCLK_ENA;
+	val &= ~SYSCLK_SRC;
+	CODEC_WRITE(sc, SYSCLK_CTL, val);
+	CODEC_WRITE(sc, MOD_CLK_ENA, MOD_AIF1 | MOD_ADC | MOD_DAC);
+	CODEC_WRITE(sc, MOD_RST_CTL, MOD_AIF1 | MOD_ADC | MOD_DAC);
+
+	/* Enable digital parts */
+	CODEC_WRITE(sc, DAC_DIG_CTRL, DAC_DIG_CTRL_ENDA);
+	CODEC_WRITE(sc, ADC_DIG_CTRL, ADC_DIG_CTRL_ENAD);
+
+	/* Set AIF1 to 48 kHz */
+	val = CODEC_READ(sc, SYS_SR_CTRL);
+	val &= ~AIF1_FS_MASK;
+	val |= AIF_FS_48KHZ;
+	CODEC_WRITE(sc, SYS_SR_CTRL, val);
+
+	/* Set AIF1 to 16-bit */
+	val = CODEC_READ(sc, AIF1CLK_CTRL);
+	val &= ~AIF1_WORD_SIZ_MASK;
+	val |= AIF1_WORD_SIZ_16;
+	CODEC_WRITE(sc, AIF1CLK_CTRL, val);
+
+	/* Enable AIF1 DAC timelot 0 */
+	val = CODEC_READ(sc, AIF1_DACDAT_CTRL);
+	val |= AIF1_DAC0L_ENA;
+	val |= AIF1_DAC0R_ENA;
+	CODEC_WRITE(sc, AIF1_DACDAT_CTRL, val);
+
+	/* DAC mixer source select */
+	val = CODEC_READ(sc, DAC_MXR_SRC);
+	val &= ~DACL_MXR_SRC_MASK;
+	val |= DACL_MXR_SRC_AIF1_DAC0L;
+	val &= ~DACR_MXR_SRC_MASK;
+	val |= DACR_MXR_SRC_AIF1_DAC0R;
+	CODEC_WRITE(sc, DAC_MXR_SRC, val);
+
+	/* Enable PA power */
+	/* Unmute PA */
+	if (gpio_pin_get_by_ofw_property(dev, node, "allwinner,pa-gpios",
+	    &pa_pin) == 0) {
+		error = gpio_pin_set_active(pa_pin, 1);
+		if (error != 0)
+			device_printf(dev, "failed to unmute PA\n");
+	}
+
+#ifdef notyet
+	/* Enable jack detect */
+	val = CODEC_READ(sc, HMIC_CTRL1);
+	val |= HMIC_CTRL1_N(0xff);
+	CODEC_WRITE(sc, HMIC_CTRL1, val);
+
+	val = CODEC_READ(sc, HMIC_CTRL2);
+	val &= ~HMIC_CTRL2_MDATA_THRES;
+	val |= __SHIFTIN(0x17, HMIC_CTRL2_MDATA_THRES);
+	CODEC_WRITE(sc, HMIC_CTRL2, val);
+#endif
+
 	OF_device_register_xref(OF_xref_from_node(node), dev);
 
 	return (0);
@@ -151,21 +278,21 @@ fail:
 static int
 sun8i_codec_detach(device_t dev)
 {
-	struct sun8i_codec_softc *i2s;
+	struct sun8i_codec_softc *sc;
 
-	i2s = device_get_softc(dev);
+	sc = device_get_softc(dev);
 
-	if (i2s->clk_gate)
-		clk_release(i2s->clk_gate);
+	if (sc->clk_gate)
+		clk_release(sc->clk_gate);
 
-	if (i2s->clk_mod)
-		clk_release(i2s->clk_mod);
+	if (sc->clk_mod)
+		clk_release(sc->clk_mod);
 
-	if (i2s->intrhand != NULL)
-		bus_teardown_intr(i2s->dev, i2s->res[1], i2s->intrhand);
+	if (sc->intrhand != NULL)
+		bus_teardown_intr(sc->dev, sc->res[1], sc->intrhand);
 
-	bus_release_resources(dev, sun8i_codec_spec, i2s->res);
-	mtx_destroy(&i2s->mtx);
+	bus_release_resources(dev, sun8i_codec_spec, sc->res);
+	mtx_destroy(&sc->mtx);
 
 	return (0);
 }
@@ -175,12 +302,60 @@ sun8i_codec_dai_init(device_t dev, uint32_t format)
 {
 	struct sun8i_codec_softc *sc;
 	int fmt, pol, clk;
+	uint32_t val;
 
 	sc = device_get_softc(dev);
 
 	fmt = AUDIO_DAI_FORMAT_FORMAT(format);
 	pol = AUDIO_DAI_FORMAT_POLARITY(format);
 	clk = AUDIO_DAI_FORMAT_CLOCK(format);
+
+	val = CODEC_READ(sc, AIF1CLK_CTRL);
+
+	val &= ~AIF1_DATA_FMT_MASK;
+	switch (fmt) {
+	case AUDIO_DAI_FORMAT_I2S:
+		val |= AIF1_DATA_FMT_I2S;
+		break;
+	case AUDIO_DAI_FORMAT_RJ:
+		val |= AIF1_DATA_FMT_RJ;
+		break;
+	case AUDIO_DAI_FORMAT_LJ:
+		val |= AIF1_DATA_FMT_LJ;
+		break;
+	case AUDIO_DAI_FORMAT_DSPA:
+	case AUDIO_DAI_FORMAT_DSPB:
+		val |= AIF1_DATA_FMT_DSP;
+		break;
+	default:
+		return EINVAL;
+	}
+
+	val &= ~(AIF1_BCLK_INV|AIF1_LRCK_INV);
+	/* Codec LRCK polarity is inverted (datasheet is wrong) */
+	if (!AUDIO_DAI_POLARITY_INVERTED_FRAME(pol))
+		val |= AIF1_LRCK_INV;
+	if (AUDIO_DAI_POLARITY_INVERTED_BCLK(pol))
+		val |= AIF1_BCLK_INV;
+
+	switch (clk) {
+	case AUDIO_DAI_CLOCK_CBM_CFM:
+		val &= ~AIF1_MSTR_MOD;	/* codec is master */
+		break;
+	case AUDIO_DAI_CLOCK_CBS_CFS:
+		val |= AIF1_MSTR_MOD;	/* codec is slave */
+		break;
+	default:
+		return EINVAL;
+	}
+
+	val &= ~AIF1_LRCK_DIV_MASK;
+	val |= AIF1_LRCK_DIV_64;
+
+	val &= ~AIF1_BCLK_DIV_MASK;
+	val |= AIF1_BCLK_DIV_16;
+
+	CODEC_WRITE(sc, AIF1CLK_CTRL, val);
 
 	return (0);
 }
