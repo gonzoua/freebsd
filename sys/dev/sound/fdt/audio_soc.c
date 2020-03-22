@@ -46,6 +46,11 @@ __FBSDID("$FreeBSD$");
 
 #define	AUDIO_BUFFER_SIZE	48000 * 4
 
+struct audio_soc_aux_node {
+	SLIST_ENTRY(audio_soc_aux_node)	link;
+	device_t			dev;
+};
+
 struct audio_soc_channel {
 	struct audio_soc_softc	*sc;	/* parent device's softc */
 	struct pcm_channel 	*pcm;	/* PCM channel */
@@ -64,6 +69,7 @@ struct audio_soc_softc {
 	struct intr_config_hook init_hook;
 	device_t		cpu_dev;
 	device_t		codec_dev;
+	SLIST_HEAD(, audio_soc_aux_node)	aux_devs;
 	unsigned int		mclk_fs;
 	struct audio_soc_channel 	play_channel;
 	struct audio_soc_channel 	rec_channel;
@@ -154,6 +160,7 @@ audio_soc_chan_setspeed(kobj_t obj, void *data, uint32_t speed)
 	struct audio_soc_softc *sc;
 	struct audio_soc_channel *ausoc_chan;
 	uint32_t rate;
+	struct audio_soc_aux_node *aux_node;
 
 	ausoc_chan = data;
 	sc = ausoc_chan->sc;
@@ -165,6 +172,11 @@ audio_soc_chan_setspeed(kobj_t obj, void *data, uint32_t speed)
 
 		if (AUDIO_DAI_SET_SYSCLK(sc->codec_dev, rate, AUDIO_DAI_CLOCK_OUT))
 			device_printf(sc->dev, "failed to set sysclk for codec node\n");
+
+		SLIST_FOREACH(aux_node, &sc->aux_devs, link) {
+			if (AUDIO_DAI_SET_SYSCLK(aux_node->dev, rate, AUDIO_DAI_CLOCK_OUT))
+				device_printf(sc->dev, "failed to set sysclk for aux node\n");
+		}
 	}
 
 	/*
@@ -172,6 +184,9 @@ audio_soc_chan_setspeed(kobj_t obj, void *data, uint32_t speed)
 	 */
 	speed = AUDIO_DAI_SET_CHANSPEED(sc->cpu_dev, speed);
 	AUDIO_DAI_SET_CHANSPEED(sc->codec_dev, speed);
+	SLIST_FOREACH(aux_node, &sc->aux_devs, link) {
+		AUDIO_DAI_SET_CHANSPEED(aux_node->dev, speed);
+	}
 
 	return (speed);
 }
@@ -300,8 +315,11 @@ audio_soc_init(void *arg)
 {
 	struct audio_soc_softc *sc;
 	phandle_t node, child;
-	device_t daidev;
+	device_t daidev, auxdev;
 	uint32_t xref;
+	uint32_t *aux_devs;
+	int ncells, i;
+	struct audio_soc_aux_node *aux_node;
 
 	sc = (struct audio_soc_softc *)arg;
 	config_intrhook_disestablish(&sc->init_hook);
@@ -340,6 +358,27 @@ audio_soc_init(void *arg)
 	}
 	sc->codec_dev = daidev;
 
+	/* Add AUX devices */
+	aux_devs = NULL;
+	ncells = OF_getencprop_alloc_multi(node, "simple-audio-card,aux-devs", sizeof(*aux_devs),
+	    (void **)&aux_devs);
+
+	for (i = 0; i < ncells; i++) {
+		auxdev = OF_device_from_xref(aux_devs[i]);
+		if (auxdev == NULL)
+			device_printf(sc->dev, "warning: no driver attached to aux node\n");
+		aux_node = (struct audio_soc_aux_node *)malloc(sizeof(*aux_node), M_DEVBUF, M_NOWAIT);
+		if (aux_node == NULL) {
+			device_printf(sc->dev, "failed to allocate aux node struct\n");
+			return;
+		}
+		aux_node->dev = auxdev;
+		SLIST_INSERT_HEAD(&sc->aux_devs, aux_node, link);
+	}
+
+	if (aux_devs)
+		OF_prop_free(aux_devs);
+
 	if (AUDIO_DAI_INIT(sc->cpu_dev, sc->format)) {
 		device_printf(sc->dev, "failed to initalize cpu node\n");
 		return;
@@ -349,6 +388,13 @@ audio_soc_init(void *arg)
 	if (AUDIO_DAI_INIT(sc->codec_dev, audio_soc_reverse_clocks(sc->format))) {
 		device_printf(sc->dev, "failed to initalize codec node\n");
 		return;
+	}
+
+	SLIST_FOREACH(aux_node, &sc->aux_devs, link) {
+		if (AUDIO_DAI_INIT(aux_node->dev, audio_soc_reverse_clocks(sc->format))) {
+			device_printf(sc->dev, "failed to initalize aux node\n");
+			return;
+		}
 	}
 
 	if (pcm_register(sc->dev, sc, 1, 1)) {
@@ -368,6 +414,9 @@ audio_soc_init(void *arg)
 
 	AUDIO_DAI_SETUP_INTR(sc->cpu_dev, audio_soc_intr, sc);
 	AUDIO_DAI_SETUP_MIXER(sc->codec_dev, sc->dev);
+	SLIST_FOREACH(aux_node, &sc->aux_devs, link) {
+		AUDIO_DAI_SETUP_MIXER(aux_node->dev, sc->dev);
+	}
 }
 
 static int
@@ -395,6 +444,8 @@ audio_soc_attach(device_t dev)
 
 	if (ret != -1)
 		OF_prop_free(name);
+
+	SLIST_INIT(&sc->aux_devs);
 
 	ret = OF_getprop(node, "simple-audio-card,format", tmp, sizeof(tmp));
 	if (ret == 0) {
@@ -456,10 +507,17 @@ static int
 audio_soc_detach(device_t dev)
 {
 	struct audio_soc_softc *sc;
+	struct audio_soc_aux_node *aux;
+
 	
 	sc = device_get_softc(dev);
 	if (sc->name)
 		free(sc->name, M_DEVBUF);
+
+	while ((aux = SLIST_FIRST(&sc->aux_devs)) != NULL) {
+		SLIST_REMOVE_HEAD(&sc->aux_devs, link);
+		free(aux, M_DEVBUF);
+	}
 
 	return (0);
 }
