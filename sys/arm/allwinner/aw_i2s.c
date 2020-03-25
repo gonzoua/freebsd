@@ -55,6 +55,9 @@ __FBSDID("$FreeBSD$");
 #include <dev/sound/fdt/audio_dai.h>
 #include "audio_dai_if.h"
 
+#define	FIFO_SIZE	0x40
+#define	FIFO_LEVEL	0x20
+
 #define	DA_CTL		0x00
 #define		DA_CTL_BCLK_OUT (1 << 18)	/* sun8i */
 #define		DA_CLK_LRCK_OUT (1 << 17)	/* sun8i */
@@ -85,17 +88,26 @@ __FBSDID("$FreeBSD$");
 #define		 DA_FMT_RJ	2
 #define	DA_FAT1		0x08
 #define	DA_ISTA		0x0c
+#define		DA_ISTA_TXUI_INT	(1 << 6)
+#define		DA_ISTA_TXEI_INT	(1 << 4)
+#define		DA_ISTA_RXAI_INT	(1 << 0)
 #define	DA_RXFIFO	0x10
 #define	DA_FCTL		0x14
 #define		DA_FCTL_HUB_EN	(1 << 31)
 #define		DA_FCTL_FTX	(1 << 25)
 #define		DA_FCTL_FRX	(1 << 24)
+#define		DA_FCTL_TXTL_MASK	(0x7f << 12)
+#define		DA_FCTL_TXTL(v)		(((v) & 0x7f) << 12)
 #define		DA_FCTL_TXIM	(1 << 2)
-#define		DA_FCTL_RXIM	__BITS(1,0)
 #define	DA_FSTA		0x18
+#define		DA_FSTA_TXE_CNT(v)	(((v) >> 16) & 0xff)
+#define		DA_FSTA_RXA_CNT(v)	((v) & 0x3f)
 #define	DA_INT		0x1c
 #define		DA_INT_TX_DRQ	(1 << 7)
+#define		DA_INT_TXUI_EN	(1 << 6)
+#define		DA_INT_TXEI_EN	(1 << 4)
 #define		DA_INT_RX_DRQ	(1 << 3)
+#define		DA_INT_RXAI_EN	(1 << 0)
 #define	DA_TXFIFO	0x20
 #define	DA_CLKD		0x24
 #define		DA_CLKD_MCLKO_EN_SUN8I (1 << 8)
@@ -274,6 +286,8 @@ aw_i2s_init(struct aw_i2s_softc *sc)
 
 	val = I2S_READ(sc, DA_FCTL);
 	val &= ~(DA_FCTL_FTX|DA_FCTL_FRX);
+	val &= ~(DA_FCTL_TXTL_MASK);
+	val |= DA_FCTL_TXTL(FIFO_LEVEL);
 	I2S_WRITE(sc, DA_FCTL, val);
 
 	I2S_WRITE(sc, DA_TXCNT, 0);
@@ -502,11 +516,72 @@ aw_i2s_dai_intr(device_t dev, struct snd_dbuf *play_buf, struct snd_dbuf *rec_bu
 {
 	struct aw_i2s_softc *sc;
 	int ret = 0;
+	uint32_t val, status;
 
 	sc = device_get_softc(dev);
 
 	I2S_LOCK(sc);
-	printf("TODO: implement me %s\n", __func__);
+
+	status = I2S_READ(sc, DA_ISTA);
+	/* Clear interrupts */
+	// device_printf(sc->dev, "status: %08x\n", status);
+	I2S_WRITE(sc, DA_ISTA, status);
+
+	if (status & DA_ISTA_TXUI_INT) {
+		uint8_t *samples;
+		uint32_t count, size, readyptr, written, empty;
+
+		val  = I2S_READ(sc, DA_FSTA);
+		empty = DA_FSTA_TXE_CNT(val);
+		count = sndbuf_getready(play_buf);
+		size = sndbuf_getsize(play_buf);
+		readyptr = sndbuf_getreadyptr(play_buf);
+
+		samples = (uint8_t*)sndbuf_getbuf(play_buf);
+		written = 0;
+		if (empty > count / 4)
+			empty = count / 4;
+		for (; empty > 0; empty--) {
+			val  = (samples[readyptr++ % size] << 0);
+			val |= (samples[readyptr++ % size] << 8);
+			val |= (samples[readyptr++ % size] << 16);
+			val |= (samples[readyptr++ % size] << 24);
+			written += 4;
+			I2S_WRITE(sc, DA_TXFIFO, val);
+		}
+		sc->play_ptr += written;
+		sc->play_ptr %= size;
+		ret |= AUDIO_DAI_PLAY_INTR;
+	}
+
+	if (status & DA_ISTA_RXAI_INT) {
+		uint8_t *samples;
+		uint32_t count, size, freeptr, recorded, available;
+
+		val  = I2S_READ(sc, DA_FSTA);
+		available = DA_FSTA_RXA_CNT(val);
+
+		count = sndbuf_getfree(rec_buf);
+		size = sndbuf_getsize(rec_buf);
+		freeptr = sndbuf_getfreeptr(rec_buf);
+		samples = (uint8_t*)sndbuf_getbuf(rec_buf);
+		recorded = 0;
+		if (available > count / 4)
+			available = count / 4;
+
+		for (; available > 0; available--) {
+			val = I2S_READ(sc, DA_RXFIFO);
+			samples[freeptr++ % size] = val & 0xff;
+			samples[freeptr++ % size] = (val >> 8) & 0xff;
+			samples[freeptr++ % size] = (val >> 16) & 0xff;
+			samples[freeptr++ % size] = (val >> 24) & 0xff;
+			recorded += 4;
+		}
+		sc->rec_ptr += recorded;
+		sc->rec_ptr %= size;
+		ret |= AUDIO_DAI_REC_INTR;
+	}
+
 	I2S_UNLOCK(sc);
 
 	return (ret);
@@ -522,23 +597,77 @@ static int
 aw_i2s_dai_trigger(device_t dev, int go, int pcm_dir)
 {
 	struct aw_i2s_softc 	*sc = device_get_softc(dev);
+	uint32_t val;
 
 	if ((pcm_dir != PCMDIR_PLAY) && (pcm_dir != PCMDIR_REC))
 		return (EINVAL);
 
 	switch (go) {
 	case PCMTRIG_START:
-		printf("TODO: implement me %s\n", __func__);
+		if (pcm_dir == PCMDIR_PLAY) {
+			/* Flush FIFO */
+			val = I2S_READ(sc, DA_FCTL);
+			I2S_WRITE(sc, DA_FCTL, val | DA_FCTL_FTX);
+			I2S_WRITE(sc, DA_FCTL, val & ~DA_FCTL_FTX);
+
+			/* Reset TX sample counter */
+			I2S_WRITE(sc, DA_TXCNT, 0);
+
+			/* Enable TX block */
+			val = I2S_READ(sc, DA_CTL);
+			I2S_WRITE(sc, DA_CTL, val | DA_CTL_TXEN);
+
+			/* Enable TX underrun interrupt */
+			val = I2S_READ(sc, DA_INT);
+			I2S_WRITE(sc, DA_INT, val | DA_INT_TXUI_EN);
+		}
+
+		if (pcm_dir == PCMDIR_REC) {
+			/* Flush FIFO */
+			val = I2S_READ(sc, DA_FCTL);
+			I2S_WRITE(sc, DA_FCTL, val | DA_FCTL_FRX);
+			I2S_WRITE(sc, DA_FCTL, val & ~DA_FCTL_FRX);
+
+			/* Reset RX sample counter */
+			I2S_WRITE(sc, DA_RXCNT, 0);
+
+			/* Enable RX block */
+			val = I2S_READ(sc, DA_CTL);
+			I2S_WRITE(sc, DA_CTL, val | DA_CTL_RXEN);
+
+			/* Enable RX data available interrupt */
+			val = I2S_READ(sc, DA_INT);
+			I2S_WRITE(sc, DA_INT, val | DA_INT_RXAI_EN);
+		}
+
 		break;
 
 	case PCMTRIG_STOP:
 	case PCMTRIG_ABORT:
-		printf("TODO: implement me %s\n", __func__);
 		I2S_LOCK(sc);
-		if (pcm_dir == PCMDIR_PLAY)
+
+		if (pcm_dir == PCMDIR_PLAY) {
+			/* Disable TX block */
+			val = I2S_READ(sc, DA_CTL);
+			I2S_WRITE(sc, DA_CTL, val & ~DA_CTL_TXEN);
+
+			/* Enable TX underrun interrupt */
+			val = I2S_READ(sc, DA_INT);
+			I2S_WRITE(sc, DA_INT, val & ~DA_INT_TXUI_EN);
+
 			sc->play_ptr = 0;
-		else
+		} else {
+			/* Disable RX block */
+			val = I2S_READ(sc, DA_CTL);
+			I2S_WRITE(sc, DA_CTL, val & ~DA_CTL_RXEN);
+
+			/* Disable RX data available interrupt */
+			val = I2S_READ(sc, DA_INT);
+			I2S_WRITE(sc, DA_INT, val & ~DA_INT_RXAI_EN);
+
 			sc->rec_ptr = 0;
+		}
+
 		I2S_UNLOCK(sc);
 		break;
 	}
