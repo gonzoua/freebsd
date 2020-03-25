@@ -400,6 +400,7 @@ rk_i2s_dai_intr(device_t dev, struct snd_dbuf *play_buf, struct snd_dbuf *rec_bu
 		size = sndbuf_getsize(play_buf);
 		readyptr = sndbuf_getreadyptr(play_buf);
 
+		/* FIXME: check actual count size */
 		samples = (uint8_t*)sndbuf_getbuf(play_buf);
 		written = 0;
 		for (; level < FIFO_SIZE - 1; level++) {
