@@ -782,8 +782,6 @@ aw_i2s_dai_set_chanspeed(device_t dev, uint32_t speed)
 {
 	struct aw_i2s_softc *sc;
 
-	sc = device_get_softc(dev);
-	printf("TODO: implement me %s\n", __func__);
 	return (speed);
 }
 
