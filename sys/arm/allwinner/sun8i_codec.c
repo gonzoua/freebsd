@@ -363,21 +363,6 @@ sun8i_codec_dai_init(device_t dev, uint32_t format)
 static int
 sun8i_codec_dai_trigger(device_t dev, int go, int pcm_dir)
 {
-	struct sun8i_codec_softc 	*sc = device_get_softc(dev);
-
-	if ((pcm_dir != PCMDIR_PLAY) && (pcm_dir != PCMDIR_REC))
-		return (EINVAL);
-
-	switch (go) {
-	case PCMTRIG_START:
-		device_printf(sc->dev, "TODO: implement me %s\n", __func__);
-		break;
-
-	case PCMTRIG_STOP:
-	case PCMTRIG_ABORT:
-		device_printf(sc->dev, "TODO: implement me %s\n", __func__);
-		break;
-	}
 
 	return (0);
 }
