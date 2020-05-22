@@ -793,6 +793,7 @@ ipfw_config_nat(int ac, char **av)
 		case TOK_SAME_PORTS:
 		case TOK_SKIP_GLOBAL:
 		case TOK_UNREG_ONLY:
+		case TOK_UNREG_CGN:
 		case TOK_RESET_ADDR:
 		case TOK_ALIAS_REV:
 		case TOK_PROXY_ONLY:
@@ -887,6 +888,9 @@ ipfw_config_nat(int ac, char **av)
 		case TOK_UNREG_ONLY:
 			n->mode |= PKT_ALIAS_UNREGISTERED_ONLY;
 			break;
+		case TOK_UNREG_CGN:
+			n->mode |= PKT_ALIAS_UNREGISTERED_CGN;
+			break;
 		case TOK_SKIP_GLOBAL:
 			n->mode |= PKT_ALIAS_SKIP_GLOBAL;
 			break;
@@ -933,6 +937,34 @@ ipfw_config_nat(int ac, char **av)
 		const char *_av[] = {"show", "config", id};
 		ipfw_show_nat(_ac, (char **)(void *)_av);
 	}
+}
+
+static void
+nat_fill_ntlv(ipfw_obj_ntlv *ntlv, int i)
+{
+
+	ntlv->head.type = IPFW_TLV_EACTION_NAME(1); /* it doesn't matter */
+	ntlv->head.length = sizeof(ipfw_obj_ntlv);
+	ntlv->idx = 1;
+	ntlv->set = 0; /* not yet */
+	snprintf(ntlv->name, sizeof(ntlv->name), "%d", i);
+}
+
+int
+ipfw_delete_nat(int i)
+{
+	ipfw_obj_header oh;
+	int ret;
+
+	memset(&oh, 0, sizeof(oh));
+	nat_fill_ntlv(&oh.ntlv, i);
+	ret = do_set3(IP_FW_NAT44_DESTROY, &oh.opheader, sizeof(oh));
+	if (ret == -1) {
+		if (!co.do_quiet)
+			warn("nat %u not available", i);
+		return (EX_UNAVAILABLE);
+	}
+	return (EX_OK);
 }
 
 struct nat_list_arg {

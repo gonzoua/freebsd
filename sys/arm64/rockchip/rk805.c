@@ -85,6 +85,11 @@ struct rk805_reg_sc {
 	struct regnode_std_param *param;
 };
 
+struct reg_list {
+	TAILQ_ENTRY(reg_list)	next;
+	struct rk805_reg_sc	*reg;
+};
+
 struct rk805_softc {
 	device_t		dev;
 	struct mtx		mtx;
@@ -93,12 +98,14 @@ struct rk805_softc {
 	struct intr_config_hook	intr_hook;
 	enum rk_pmic_type	type;
 
-	struct rk805_reg_sc	**regs;
+	TAILQ_HEAD(, reg_list)		regs;
 	int			nregs;
 };
 
+static int rk805_regnode_status(struct regnode *regnode, int *status);
 static int rk805_regnode_set_voltage(struct regnode *regnode, int min_uvolt,
     int max_uvolt, int *udelay);
+static int rk805_regnode_get_voltage(struct regnode *regnode, int *uvolt);
 
 static struct rk805_regdef rk805_regdefs[] = {
 	{
@@ -351,6 +358,7 @@ rk805_read(device_t dev, uint8_t reg, uint8_t *data, uint8_t size)
 static int
 rk805_write(device_t dev, uint8_t reg, uint8_t data)
 {
+
 	return (iicdev_writeto(dev, reg, &data, 1, IIC_INTRWAIT));
 }
 
@@ -359,21 +367,33 @@ rk805_regnode_init(struct regnode *regnode)
 {
 	struct rk805_reg_sc *sc;
 	struct regnode_std_param *param;
-	int rv, udelay;
+	int rv, udelay, uvolt, status;
 
 	sc = regnode_get_softc(regnode);
+	dprintf(sc, "Regulator %s init called\n", sc->def->name);
 	param = regnode_get_stdparam(regnode);
 	if (param->min_uvolt == 0)
 		return (0);
 
+	/* Check that the regulator is preset to the correct voltage */
+	rv  = rk805_regnode_get_voltage(regnode, &uvolt);
+	if (rv != 0)
+		return(rv);
+
+	if (uvolt >= param->min_uvolt && uvolt <= param->max_uvolt)
+		return(0);
 	/* 
-	 * Set the regulator at the correct voltage
+	 * Set the regulator at the correct voltage if it is not enabled.
 	 * Do not enable it, this is will be done either by a
 	 * consumer or by regnode_set_constraint if boot_on is true
 	 */
+	rv = rk805_regnode_status(regnode, &status);
+	if (rv != 0 || status == REGULATOR_STATUS_ENABLED)
+		return (rv);
+
 	rv = rk805_regnode_set_voltage(regnode, param->min_uvolt,
 	    param->max_uvolt, &udelay);
-	if (rv != 0)
+	if (udelay != 0)
 		DELAY(udelay);
 
 	return (rv);
@@ -613,6 +633,7 @@ rk805_attach(device_t dev)
 	struct rk805_softc *sc;
 	struct rk805_reg_sc *reg;
 	struct rk805_regdef *regdefs;
+	struct reg_list *regp;
 	phandle_t rnode, child;
 	int i;
 
@@ -639,8 +660,7 @@ rk805_attach(device_t dev)
 		return (ENXIO);
 	}
 
-	sc->regs = malloc(sizeof(struct rk805_reg_sc *) * sc->nregs,
-	    M_RK805_REG, M_WAITOK | M_ZERO);
+	TAILQ_INIT(&sc->regs);
 
 	rnode = ofw_bus_find_child(ofw_bus_get_node(dev), "regulators");
 	if (rnode > 0) {
@@ -649,6 +669,8 @@ rk805_attach(device_t dev)
 			    regdefs[i].name);
 			if (child == 0)
 				continue;
+			if (OF_hasprop(child, "regulator-name") != 1)
+				continue;
 			reg = rk805_reg_attach(dev, child, &regdefs[i]);
 			if (reg == NULL) {
 				device_printf(dev,
@@ -656,7 +678,9 @@ rk805_attach(device_t dev)
 				    regdefs[i].name);
 				continue;
 			}
-			sc->regs[i] = reg;
+			regp = malloc(sizeof(*regp), M_DEVBUF, M_WAITOK | M_ZERO);
+			regp->reg = reg;
+			TAILQ_INSERT_TAIL(&sc->regs, regp, next);
 			if (bootverbose)
 				device_printf(dev, "Regulator %s attached\n",
 				    regdefs[i].name);
@@ -679,13 +703,13 @@ rk805_map(device_t dev, phandle_t xref, int ncells,
     pcell_t *cells, intptr_t *id)
 {
 	struct rk805_softc *sc;
-	int i;
+	struct reg_list *regp;
 
 	sc = device_get_softc(dev);
 
-	for (i = 0; i < sc->nregs; i++) {
-		if (sc->regs[i]->xref == xref) {
-			*id = sc->regs[i]->def->id;
+	TAILQ_FOREACH(regp, &sc->regs, next) {
+		if (regp->reg->xref == xref) {
+			*id = regp->reg->def->id;
 			return (0);
 		}
 	}

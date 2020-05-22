@@ -299,7 +299,7 @@ static int
 vm_fault_soft_fast(struct faultstate *fs)
 {
 	vm_page_t m, m_map;
-#if (defined(__aarch64__) || defined(__amd64__) || (defined(__arm__) && \
+#if (defined(__aarch64__) || defined(__amd64__) || defined(__powerpc64__) || (defined(__arm__) && \
     __ARM_ARCH >= 6) || defined(__i386__) || defined(__riscv)) && \
     VM_NRESERVLEVEL > 0
 	vm_page_t m_super;
@@ -320,7 +320,7 @@ vm_fault_soft_fast(struct faultstate *fs)
 	}
 	m_map = m;
 	psind = 0;
-#if (defined(__aarch64__) || defined(__amd64__) || (defined(__arm__) && \
+#if (defined(__aarch64__) || defined(__amd64__) || defined(__powerpc64__) || (defined(__arm__) && \
     __ARM_ARCH >= 6) || defined(__i386__) || defined(__riscv)) && \
     VM_NRESERVLEVEL > 0
 	if ((m->flags & PG_FICTITIOUS) == 0 &&
@@ -377,7 +377,7 @@ vm_fault_restore_map_lock(struct faultstate *fs)
 {
 
 	VM_OBJECT_ASSERT_WLOCKED(fs->first_object);
-	MPASS(REFCOUNT_COUNT(fs->first_object->paging_in_progress) > 0);
+	MPASS(blockcount_read(&fs->first_object->paging_in_progress) > 0);
 
 	if (!vm_map_trylock_read(fs->map)) {
 		VM_OBJECT_WUNLOCK(fs->first_object);
@@ -428,7 +428,7 @@ vm_fault_populate(struct faultstate *fs)
 
 	MPASS(fs->object == fs->first_object);
 	VM_OBJECT_ASSERT_WLOCKED(fs->first_object);
-	MPASS(REFCOUNT_COUNT(fs->first_object->paging_in_progress) > 0);
+	MPASS(blockcount_read(&fs->first_object->paging_in_progress) > 0);
 	MPASS(fs->first_object->backing_object == NULL);
 	MPASS(fs->lookup_still_valid);
 
@@ -1073,12 +1073,14 @@ vm_fault_allocate(struct faultstate *fs)
 		    fs->oom < vm_pfault_oom_attempts) {
 			fs->oom++;
 			vm_waitpfault(dset, vm_pfault_oom_wait * hz);
+		} else 	{
+			if (bootverbose)
+				printf(
+		"proc %d (%s) failed to alloc page on fault, starting OOM\n",
+				    curproc->p_pid, curproc->p_comm);
+			vm_pageout_oom(VM_OOM_MEM_PF);
+			fs->oom = 0;
 		}
-		if (bootverbose)
-			printf(
-"proc %d (%s) failed to alloc page on fault, starting OOM\n",
-			    curproc->p_pid, curproc->p_comm);
-		vm_pageout_oom(VM_OOM_MEM_PF);
 		return (KERN_RESOURCE_SHORTAGE);
 	}
 	fs->oom = 0;
