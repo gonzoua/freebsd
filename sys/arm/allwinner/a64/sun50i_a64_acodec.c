@@ -252,6 +252,12 @@ a64codec_attach(device_t dev)
 	a64_acodec_pr_set_clear(sc, A64_HP_CTRL,
 	    A64_HPPA_EN, 0);
 
+	/* TODO: implement mixer control, for now just hardcode volume */
+	u_int val = a64_acodec_pr_read(sc, A64_HP_CTRL);
+	val &= ~(0x3f);
+	val |= 0x25;
+	a64_acodec_pr_write(sc, A64_HP_CTRL, val);
+
 	node = ofw_bus_get_node(dev);
 	OF_device_register_xref(OF_xref_from_node(node), dev);
 
