@@ -100,9 +100,11 @@ __FBSDID("$FreeBSD$");
 
 #define	AIF1_MXR_SRC		0x04c
 #define		AIF1L_MXR_SRC_MASK	(0xf << 12)
-#define		AIF1L_MXR_SRC_MASK_AIF1	(0x8 << 12)
+#define		AIF1L_MXR_SRC_AIF1	(0x8 << 12)
+#define		AIF1L_MXR_SRC_ADC	(0x2 << 12)
 #define		AIF1R_MXR_SRC_MASK	(0xf << 8)
-#define		AIF1R_MXR_SRC_MASK_AIF1	(0x8 << 8)
+#define		AIF1R_MXR_SRC_AIF1	(0x8 << 8)
+#define		AIF1R_MXR_SRC_ADC	(0x2 << 8)
 
 #define	ADC_DIG_CTRL		0x100
 #define	 ADC_DIG_CTRL_ENAD	(1 << 15)
@@ -264,9 +266,9 @@ sun8i_codec_attach(device_t dev)
 	/* ADC mixer source select */
 	val = CODEC_READ(sc, AIF1_MXR_SRC);
 	val &= ~AIF1L_MXR_SRC_MASK;
-	val |= ~AIF1L_MXR_SRC_MASK_AIF1;
+	val |= AIF1L_MXR_SRC_ADC;
 	val &= ~AIF1R_MXR_SRC_MASK;
-	val |= ~AIF1R_MXR_SRC_MASK_AIF1;
+	val |= AIF1R_MXR_SRC_ADC;
 	CODEC_WRITE(sc, AIF1_MXR_SRC, val);
 
 	/* Enable PA power */
