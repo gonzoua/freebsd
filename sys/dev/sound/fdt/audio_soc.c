@@ -232,9 +232,14 @@ audio_soc_chan_trigger(kobj_t obj, void *data, int go)
 {
 	struct audio_soc_softc *sc;
 	struct audio_soc_channel *ausoc_chan;
+	struct audio_soc_aux_node *aux_node;
 
 	ausoc_chan = (struct audio_soc_channel *)data;
 	sc = ausoc_chan->sc;
+	SLIST_FOREACH(aux_node, &sc->aux_devs, link) {
+		AUDIO_DAI_TRIGGER(aux_node->dev, go, ausoc_chan->dir);
+	}
+
 	return AUDIO_DAI_TRIGGER(sc->cpu_dev, go, ausoc_chan->dir);
 }
 
