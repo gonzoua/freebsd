@@ -780,7 +780,6 @@ aw_i2s_dai_set_sysclk(device_t dev, unsigned int rate, int dai_dir)
 static uint32_t
 aw_i2s_dai_set_chanspeed(device_t dev, uint32_t speed)
 {
-	struct aw_i2s_softc *sc;
 
 	return (speed);
 }
