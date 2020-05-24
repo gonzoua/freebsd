@@ -47,6 +47,7 @@ __FBSDID("$FreeBSD$");
 
 #include <dev/extres/clk/clk.h>
 #include <dev/extres/hwreset/hwreset.h>
+#include <dev/extres/regulator/regulator.h>
 
 #include "syscon_if.h"
 
@@ -218,6 +219,7 @@ a64codec_attach(device_t dev)
 	struct a64codec_softc *sc;
 	int error, rid;
 	phandle_t node;
+	regulator_t reg;
 
 	sc = device_get_softc(dev);
 	sc->dev = dev;
@@ -230,6 +232,14 @@ a64codec_attach(device_t dev)
 		device_printf(dev, "cannot allocate resource for device\n");
 		error = ENXIO;
 		goto fail;
+	}
+
+	if (regulator_get_by_ofw_property(dev, 0, "cpvdd-supply", &reg) == 0) {
+		error = regulator_enable(reg);
+		if (error != 0) {
+			device_printf(dev, "cannot enable PHY regulator\n");
+			goto fail;
+		}
 	}
 
 	/* Right & Left Headphone PA enable */
@@ -257,6 +267,19 @@ a64codec_attach(device_t dev)
 	val &= ~(0x3f);
 	val |= 0x25;
 	a64_acodec_pr_write(sc, A64_HP_CTRL, val);
+
+	a64_acodec_pr_set_clear(sc, A64_MIC2_CTRL,
+	    A64_MIC2AMPEN, 0);
+	a64_acodec_pr_write(sc, A64_L_ADCMIX_SRC,
+	    A64_ADCMIX_SRC_MIC2);
+	a64_acodec_pr_write(sc, A64_R_ADCMIX_SRC,
+	    A64_ADCMIX_SRC_MIC2);
+
+	/* Max out MIC2 gain */
+	val = a64_acodec_pr_read(sc, A64_MIC2_CTRL);
+	val &= ~(0x7);
+	val |= (0x7);
+	a64_acodec_pr_write(sc, A64_MIC2_CTRL, val);
 
 	node = ofw_bus_get_node(dev);
 	OF_device_register_xref(OF_xref_from_node(node), dev);

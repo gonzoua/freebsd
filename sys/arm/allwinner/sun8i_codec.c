@@ -90,9 +90,19 @@ __FBSDID("$FreeBSD$");
 #define	  AIF1_DATA_FMT_RJ	(2 << 2)
 #define	  AIF1_DATA_FMT_DSP	(3 << 2)
 
+#define	AIF1_ADCDAT_CTRL	0x044
+#define		AIF1_ADC0L_ENA		(1 << 15)
+#define		AIF1_ADC0R_ENA		(1 << 14)
+
 #define	AIF1_DACDAT_CTRL	0x048
 #define	 AIF1_DAC0L_ENA		(1 << 15)
 #define	 AIF1_DAC0R_ENA		(1 << 14)
+
+#define	AIF1_MXR_SRC		0x04c
+#define		AIF1L_MXR_SRC_MASK	(0xf << 12)
+#define		AIF1L_MXR_SRC_MASK_AIF1	(0x8 << 12)
+#define		AIF1R_MXR_SRC_MASK	(0xf << 8)
+#define		AIF1R_MXR_SRC_MASK_AIF1	(0x8 << 8)
 
 #define	ADC_DIG_CTRL		0x100
 #define	 ADC_DIG_CTRL_ENAD	(1 << 15)
@@ -237,6 +247,12 @@ sun8i_codec_attach(device_t dev)
 	val |= AIF1_DAC0R_ENA;
 	CODEC_WRITE(sc, AIF1_DACDAT_CTRL, val);
 
+	/* Enable AIF1 ADC timelot 0 */
+	val = CODEC_READ(sc, AIF1_ADCDAT_CTRL);
+	val |= AIF1_ADC0L_ENA;
+	val |= AIF1_ADC0R_ENA;
+	CODEC_WRITE(sc, AIF1_ADCDAT_CTRL, val);
+
 	/* DAC mixer source select */
 	val = CODEC_READ(sc, DAC_MXR_SRC);
 	val &= ~DACL_MXR_SRC_MASK;
@@ -244,6 +260,14 @@ sun8i_codec_attach(device_t dev)
 	val &= ~DACR_MXR_SRC_MASK;
 	val |= DACR_MXR_SRC_AIF1_DAC0R;
 	CODEC_WRITE(sc, DAC_MXR_SRC, val);
+
+	/* ADC mixer source select */
+	val = CODEC_READ(sc, AIF1_MXR_SRC);
+	val &= ~AIF1L_MXR_SRC_MASK;
+	val |= ~AIF1L_MXR_SRC_MASK_AIF1;
+	val &= ~AIF1R_MXR_SRC_MASK;
+	val |= ~AIF1R_MXR_SRC_MASK_AIF1;
+	CODEC_WRITE(sc, AIF1_MXR_SRC, val);
 
 	/* Enable PA power */
 	/* Unmute PA */
