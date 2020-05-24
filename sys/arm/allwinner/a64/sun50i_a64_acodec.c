@@ -111,6 +111,7 @@ __FBSDID("$FreeBSD$");
 #define	A64_JACK_MIC_CTRL	0x1d
 #define	 A64_JACKDETEN		(1 << 7)
 #define	 A64_INNERRESEN		(1 << 6)
+#define	 A64_HMICBIASEN		(1 << 5)
 #define	 A64_AUTOPLEN		(1 << 1)
 
 static struct ofw_compat_data compat_data[] = {
@@ -246,9 +247,15 @@ a64codec_attach(device_t dev)
 	a64_acodec_pr_set_clear(sc, A64_HP_CTRL,
 	    A64_HPPA_EN, 0);
 
+#if 0
 	/* Jack detect enable */
 	a64_acodec_pr_set_clear(sc, A64_JACK_MIC_CTRL,
 	    A64_JACKDETEN | A64_INNERRESEN | A64_AUTOPLEN, 0);
+#endif
+
+	/* Microphone BIAS enable */
+	a64_acodec_pr_set_clear(sc, A64_JACK_MIC_CTRL,
+	    A64_HMICBIASEN, 0);
 
 	/* Unmute DAC to output mixer */
 	a64_acodec_pr_set_clear(sc, A64_OL_MIX_CTRL,
@@ -269,7 +276,7 @@ a64codec_attach(device_t dev)
 	a64_acodec_pr_write(sc, A64_HP_CTRL, val);
 
 	a64_acodec_pr_set_clear(sc, A64_MIC2_CTRL,
-	    A64_MIC2AMPEN, 0);
+	    A64_MIC2AMPEN | A64_MIC2_SEL, 0);
 	a64_acodec_pr_write(sc, A64_L_ADCMIX_SRC,
 	    A64_ADCMIX_SRC_MIC2);
 	a64_acodec_pr_write(sc, A64_R_ADCMIX_SRC,
@@ -279,6 +286,8 @@ a64codec_attach(device_t dev)
 	val = a64_acodec_pr_read(sc, A64_MIC2_CTRL);
 	val &= ~(0x7);
 	val |= (0x7);
+	val &= ~(7 << 4);
+	val |= (7 << 4);
 	a64_acodec_pr_write(sc, A64_MIC2_CTRL, val);
 
 	node = ofw_bus_get_node(dev);
