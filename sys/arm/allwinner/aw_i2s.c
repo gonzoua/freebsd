@@ -55,8 +55,7 @@ __FBSDID("$FreeBSD$");
 #include <dev/sound/fdt/audio_dai.h>
 #include "audio_dai_if.h"
 
-#define	FIFO_SIZE	0x40
-#define	FIFO_LEVEL	0x20
+#define	FIFO_LEVEL	0x40
 
 #define	DA_CTL		0x00
 #define		DA_CTL_BCLK_OUT (1 << 18)	/* sun8i */
@@ -507,6 +506,9 @@ aw_i2s_dai_init(device_t dev, uint32_t format)
 		fat0 |= DA_FAT0_LRCK_PERIOD(32 - 1);
 	}
 
+	I2S_WRITE(sc, DA_CTL, ctl);
+	I2S_WRITE(sc, DA_FAT0, fat0);
+
 	return (0);
 }
 
@@ -527,7 +529,7 @@ aw_i2s_dai_intr(device_t dev, struct snd_dbuf *play_buf, struct snd_dbuf *rec_bu
 	// device_printf(sc->dev, "status: %08x\n", status);
 	I2S_WRITE(sc, DA_ISTA, status);
 
-	if (status & DA_ISTA_TXUI_INT) {
+	if (status & DA_ISTA_TXEI_INT) {
 		uint8_t *samples;
 		uint32_t count, size, readyptr, written, empty;
 
@@ -539,14 +541,12 @@ aw_i2s_dai_intr(device_t dev, struct snd_dbuf *play_buf, struct snd_dbuf *rec_bu
 
 		samples = (uint8_t*)sndbuf_getbuf(play_buf);
 		written = 0;
-		if (empty > count / 4)
-			empty = count / 4;
+		if (empty > count / 2)
+			empty = count / 2;
 		for (; empty > 0; empty--) {
-			val  = (samples[readyptr++ % size] << 0);
-			val |= (samples[readyptr++ % size] << 8);
-			val |= (samples[readyptr++ % size] << 16);
+			val = (samples[readyptr++ % size] << 16);
 			val |= (samples[readyptr++ % size] << 24);
-			written += 4;
+			written += 2;
 			I2S_WRITE(sc, DA_TXFIFO, val);
 		}
 		sc->play_ptr += written;
@@ -566,16 +566,14 @@ aw_i2s_dai_intr(device_t dev, struct snd_dbuf *play_buf, struct snd_dbuf *rec_bu
 		freeptr = sndbuf_getfreeptr(rec_buf);
 		samples = (uint8_t*)sndbuf_getbuf(rec_buf);
 		recorded = 0;
-		if (available > count / 4)
-			available = count / 4;
+		if (available > count / 2)
+			available = count / 2;
 
 		for (; available > 0; available--) {
 			val = I2S_READ(sc, DA_RXFIFO);
-			samples[freeptr++ % size] = val & 0xff;
-			samples[freeptr++ % size] = (val >> 8) & 0xff;
 			samples[freeptr++ % size] = (val >> 16) & 0xff;
 			samples[freeptr++ % size] = (val >> 24) & 0xff;
-			recorded += 4;
+			recorded += 2;
 		}
 		sc->rec_ptr += recorded;
 		sc->rec_ptr %= size;
@@ -619,7 +617,7 @@ aw_i2s_dai_trigger(device_t dev, int go, int pcm_dir)
 
 			/* Enable TX underrun interrupt */
 			val = I2S_READ(sc, DA_INT);
-			I2S_WRITE(sc, DA_INT, val | DA_INT_TXUI_EN);
+			I2S_WRITE(sc, DA_INT, val | DA_INT_TXEI_EN);
 		}
 
 		if (pcm_dir == PCMDIR_REC) {
@@ -653,7 +651,7 @@ aw_i2s_dai_trigger(device_t dev, int go, int pcm_dir)
 
 			/* Enable TX underrun interrupt */
 			val = I2S_READ(sc, DA_INT);
-			I2S_WRITE(sc, DA_INT, val & ~DA_INT_TXUI_EN);
+			I2S_WRITE(sc, DA_INT, val & ~DA_INT_TXEI_EN);
 
 			sc->play_ptr = 0;
 		} else {
