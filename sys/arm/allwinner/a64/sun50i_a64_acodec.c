@@ -255,7 +255,7 @@ a64codec_attach(device_t dev)
 
 	/* Microphone BIAS enable */
 	a64_acodec_pr_set_clear(sc, A64_JACK_MIC_CTRL,
-	    A64_HMICBIASEN, 0);
+	    A64_HMICBIASEN | A64_INNERRESEN, 0);
 
 	/* Unmute DAC to output mixer */
 	a64_acodec_pr_set_clear(sc, A64_OL_MIX_CTRL,
