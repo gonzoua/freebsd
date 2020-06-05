@@ -188,7 +188,7 @@ __FBSDID("$FreeBSD$");
 struct rt5640_softc {
 	device_t	dev;
 	device_t	busdev;
-	struct intr_config_hook 
+	struct intr_config_hook
 			init_hook;
 	clk_t		clk;
 };
@@ -205,10 +205,10 @@ static int	rt5640_probe(device_t dev);
 static int	rt5640_attach(device_t dev);
 static int	rt5640_detach(device_t dev);
 
-static int	rt5640_writeto(device_t slavedev, uint8_t regaddr, 
+static int	rt5640_writeto(device_t slavedev, uint8_t regaddr,
 		    void *buffer, uint16_t buflen, int waithow);
 
-static int 
+static int
 rt5640_writeto(device_t slavedev, uint8_t regaddr, void *buffer,
     uint16_t buflen, int waithow)
 {
@@ -232,7 +232,7 @@ rt5640_writeto(device_t slavedev, uint8_t regaddr, void *buffer,
 }
 
 static inline int
-rt5640_read2(struct rt5640_softc *sc, uint8_t reg, uint16_t *data) 
+rt5640_read2(struct rt5640_softc *sc, uint8_t reg, uint16_t *data)
 {
 	int res;
 	res = iicdev_readfrom(sc->dev, reg, data, 2, IIC_WAIT);
@@ -242,7 +242,7 @@ rt5640_read2(struct rt5640_softc *sc, uint8_t reg, uint16_t *data)
 }
 
 static inline int
-rt5640_write2(struct rt5640_softc *sc, uint8_t reg, uint16_t val) 
+rt5640_write2(struct rt5640_softc *sc, uint8_t reg, uint16_t val)
 {
 	val = htobe16(val);
 
@@ -250,7 +250,7 @@ rt5640_write2(struct rt5640_softc *sc, uint8_t reg, uint16_t val)
 }
 
 static inline int
-rt5640_pr_read2(struct rt5640_softc *sc, uint8_t reg, uint16_t *data) 
+rt5640_pr_read2(struct rt5640_softc *sc, uint8_t reg, uint16_t *data)
 {
 	int res;
 	res = rt5640_write2(sc, RT5640_PR_INDEX, reg);
@@ -261,7 +261,7 @@ rt5640_pr_read2(struct rt5640_softc *sc, uint8_t reg, uint16_t *data)
 }
 
 static inline int
-rt5640_pr_write2(struct rt5640_softc *sc, uint8_t reg, uint16_t val) 
+rt5640_pr_write2(struct rt5640_softc *sc, uint8_t reg, uint16_t val)
 {
 	int res;
 	res = rt5640_write2(sc, RT5640_PR_INDEX, reg);
