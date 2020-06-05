@@ -55,6 +55,7 @@ __FBSDID("$FreeBSD$");
 #include <dev/sound/pcm/sound.h>
 #include <dev/sound/fdt/audio_dai.h>
 #include "audio_dai_if.h"
+#include "mixer_if.h"
 
 #define	A64_PR_CFG		0x00
 #define	 A64_AC_PR_RST		(1 << 28)
@@ -67,7 +68,8 @@ __FBSDID("$FreeBSD$");
 
 #define	A64_HP_CTRL		0x00
 #define	 A64_HPPA_EN		(1 << 6)
-#define	 A64_HPVOL		__BITS(5,0)
+#define	 A64_HPVOL_MASK		0x3f
+#define	 A64_HPVOL(n)		((n) & 0x3f)
 #define	A64_OL_MIX_CTRL		0x01
 #define	 A64_LMIXMUTE_LDAC	(1 << 1)
 #define	A64_OR_MIX_CTRL		0x02
@@ -84,9 +86,11 @@ __FBSDID("$FreeBSD$");
 #define	 A64_MIC1BOOST		__BITS(2,0)
 #define	A64_MIC2_CTRL		0x08
 #define	 A64_MIC2_SEL		(1 << 7)
-#define	 A64_MIC2G		__BITS(6,4)
+#define	 A64_MIC2G_MASK		(7 << 4)
+#define	 A64_MIC2G(n)		(((n) & 7) << 4)
 #define	 A64_MIC2AMPEN		(1 << 3)
-#define	 A64_MIC2BOOST		__BITS(2,0)
+#define	 A64_MIC2BOOST_MASK	(7 << 0)
+#define	 A64_MIC2BOOST(n)	(((n) & 7) << 0)
 #define	A64_LINEIN_CTRL		0x09
 #define	 A64_LINEING		__BITS(6,4)
 #define	A64_MIX_DAC_CTRL	0x0a
@@ -114,6 +118,9 @@ __FBSDID("$FreeBSD$");
 #define	 A64_HMICBIASEN		(1 << 5)
 #define	 A64_AUTOPLEN		(1 << 1)
 
+#define	A64CODEC_MIXER_DEVS	((1 << SOUND_MIXER_VOLUME) | \
+	(1 << SOUND_MIXER_MIC))
+
 static struct ofw_compat_data compat_data[] = {
 	{ "allwinner,sun50i-a64-codec-analog",	1},
 	{ NULL,					0 }
@@ -123,6 +130,7 @@ struct a64codec_softc {
 	device_t	dev;
 	struct resource	*res;
 	struct mtx	mtx;
+	u_int	regaddr;	/* address for the sysctl */
 };
 
 #define	A64CODEC_LOCK(sc)		mtx_lock(&(sc)->mtx)
@@ -269,14 +277,15 @@ a64codec_attach(device_t dev)
 	a64_acodec_pr_set_clear(sc, A64_HP_CTRL,
 	    A64_HPPA_EN, 0);
 
-	/* TODO: implement mixer control, for now just hardcode volume */
 	u_int val = a64_acodec_pr_read(sc, A64_HP_CTRL);
 	val &= ~(0x3f);
 	val |= 0x25;
 	a64_acodec_pr_write(sc, A64_HP_CTRL, val);
 
 	a64_acodec_pr_set_clear(sc, A64_MIC2_CTRL,
-	    A64_MIC2AMPEN | A64_MIC2_SEL, 0);
+	    A64_MIC2AMPEN | A64_MIC2_SEL | A64_MIC2G(0x3) | A64_MIC2BOOST(0x4),
+	    A64_MIC2G_MASK | A64_MIC2BOOST_MASK);
+
 	a64_acodec_pr_write(sc, A64_L_ADCMIX_SRC,
 	    A64_ADCMIX_SRC_MIC2);
 	a64_acodec_pr_write(sc, A64_R_ADCMIX_SRC,
@@ -313,6 +322,94 @@ a64codec_detach(device_t dev)
 
 	return (0);
 }
+
+static int
+a64codec_mixer_init(struct snd_mixer *m)
+{
+
+	mix_setdevs(m, A64CODEC_MIXER_DEVS);
+
+	return (0);
+}
+
+static int
+a64codec_mixer_uninit(struct snd_mixer *m)
+{
+
+	return (0);
+}
+
+static int
+a64codec_mixer_reinit(struct snd_mixer *m)
+{
+
+	return (0);
+}
+
+static int
+a64codec_mixer_set(struct snd_mixer *m, unsigned dev, unsigned left, unsigned right)
+{
+	struct a64codec_softc *sc;
+	struct mtx *mixer_lock;
+	uint8_t do_unlock;
+	u_int val;
+
+	sc = device_get_softc(mix_getdevinfo(m));
+	mixer_lock = mixer_get_lock(m);
+
+	if (mtx_owned(mixer_lock)) {
+		do_unlock = 0;
+	} else {
+		do_unlock = 1;
+		mtx_lock(mixer_lock);
+	}
+
+	right = left;
+
+	A64CODEC_LOCK(sc);
+	switch(dev) {
+	case SOUND_MIXER_VOLUME:
+		val = a64_acodec_pr_read(sc, A64_HP_CTRL);
+		val &= ~(A64_HPVOL_MASK);
+		val |= A64_HPVOL(left * 63 / 100);
+		a64_acodec_pr_write(sc, A64_HP_CTRL, val);
+		break;
+
+	case SOUND_MIXER_MIC:
+		val = a64_acodec_pr_read(sc, A64_MIC2_CTRL);
+		val &= ~(A64_MIC2BOOST_MASK);
+		val |= A64_MIC2BOOST(left * 7 / 100);
+		a64_acodec_pr_write(sc, A64_MIC2_CTRL, val);
+		break;
+	default:
+		break;
+	}
+	A64CODEC_UNLOCK(sc);
+
+	if (do_unlock) {
+		mtx_unlock(mixer_lock);
+	}
+
+	return (left | (right << 8));
+}
+
+static unsigned
+a64codec_mixer_setrecsrc(struct snd_mixer *m, unsigned src)
+{
+
+	return (0);
+}
+
+static kobj_method_t a64codec_mixer_methods[] = {
+	KOBJMETHOD(mixer_init,		a64codec_mixer_init),
+	KOBJMETHOD(mixer_uninit,	a64codec_mixer_uninit),
+	KOBJMETHOD(mixer_reinit,	a64codec_mixer_reinit),
+	KOBJMETHOD(mixer_set,		a64codec_mixer_set),
+	KOBJMETHOD(mixer_setrecsrc,	a64codec_mixer_setrecsrc),
+	KOBJMETHOD_END
+};
+
+MIXER_DECLARE(a64codec_mixer);
 
 static int
 a64codec_dai_init(device_t dev, uint32_t format)
@@ -366,14 +463,11 @@ a64codec_dai_trigger(device_t dev, int go, int pcm_dir)
 static int
 a64codec_dai_setup_mixer(device_t dev, device_t pcmdev)
 {
-	struct a64codec_softc *sc;
 
-	sc = device_get_softc(dev);
-	device_printf(sc->dev, "TODO: implement me %s\n", __func__);
+	mixer_init(pcmdev, &a64codec_mixer_class, dev);
 
 	return (0);
 }
-
 
 static device_method_t a64codec_methods[] = {
 	/* Device interface */
