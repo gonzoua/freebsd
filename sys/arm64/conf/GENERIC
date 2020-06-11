@@ -205,6 +205,7 @@ device		rk_emmcphy
 
 # Serial (COM) ports
 device		uart		# Generic UART driver
+device		uart_imx	# iMX8 UART
 device		uart_msm	# Qualcomm MSM UART driver
 device		uart_mu		# RPI3 aux port
 device		uart_mvebu	# Armada 3700 UART driver

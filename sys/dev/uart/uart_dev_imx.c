@@ -40,7 +40,9 @@ __FBSDID("$FreeBSD$");
 #include <sys/conf.h>
 #include <sys/kdb.h>
 #include <machine/bus.h>
+#if 0
 #include <machine/fdt.h>
+#endif
 
 #include <dev/uart/uart.h>
 #include <dev/uart/uart_cpu.h>
@@ -107,6 +109,7 @@ imx_uart_probe(struct uart_bas *bas)
 static u_int
 imx_uart_getbaud(struct uart_bas *bas)
 {
+#if 0
 	uint32_t rate, ubir, ubmr;
 	u_int baud, blo, bhi, i;
 	static const u_int predivs[] = {6, 5, 4, 3, 2, 1, 7, 1};
@@ -141,13 +144,15 @@ imx_uart_getbaud(struct uart_bas *bas)
 	}
 
 	return (baud);
+#endif
+	return (115200);
 }
 
 static void
 imx_uart_init(struct uart_bas *bas, int baudrate, int databits, 
     int stopbits, int parity)
 {
-	uint32_t baseclk, reg;
+	uint32_t reg;
 
         /* Enable the device and the RX/TX channels. */
 	SET(bas, REG(UCR1), FLD(UCR1, UARTEN));
@@ -193,6 +198,7 @@ imx_uart_init(struct uart_bas *bas, int baudrate, int databits,
 	 * Note that a quirk of the hardware requires that both UBIR and UBMR be
 	 * set back to back in order for the change to take effect.
 	 */
+#if 0
 	if (baudrate > 0) {
 		baseclk = imx_ccm_uart_hz();
 		reg = GETREG(bas, REG(UFCR));
@@ -201,6 +207,7 @@ imx_uart_init(struct uart_bas *bas, int baudrate, int databits,
 		SETREG(bas, REG(UBIR), 15);
 		SETREG(bas, REG(UBMR), (baseclk / baudrate) - 1);
 	}
+#endif
 
 	/*
 	 * Program the tx lowater and rx hiwater levels at which fifo-service
