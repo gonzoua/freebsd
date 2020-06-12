@@ -53,7 +53,23 @@ struct imx_clk_sscg_pll_sc {
 #define	DEVICE_UNLOCK(_clk)						\
 	CLKDEV_DEVICE_UNLOCK(clknode_get_device(_clk))
 
-#define	CFG0	0
+#define	CFG0	0x00
+#define	  CFG0_PLL_LOCK	(1 << 31)
+#define	  CFG0_PD	(1 << 7)
+#define	  CFG0_BYPASS2	(1 << 5)
+#define	  CFG0_BYPASS1	(1 << 4)
+#define	CFG1	0x04
+#define	CFG2	0x08
+#define	 CFG2_DIVR1_MASK	(7 << 25)
+#define	 CFG2_DIVR1_SHIFT	25
+#define	 CFG2_DIVR2_MASK	(0x3f << 19)
+#define	 CFG2_DIVR2_SHIFT	19
+#define	 CFG2_DIVF1_MASK	(0x3f << 13)
+#define	 CFG2_DIVF1_SHIFT	13
+#define	 CFG2_DIVF2_MASK	(0x3f << 7)
+#define	 CFG2_DIVF2_SHIFT	7
+#define	 CFG2_DIV_MASK		(0x3f << 1)
+#define	 CFG2_DIV_SHIFT		1
 
 #if 0
 #define	dprintf(format, arg...)						\
@@ -66,16 +82,14 @@ static int
 imx_clk_sscg_pll_init(struct clknode *clk, device_t dev)
 {
 	struct imx_clk_sscg_pll_sc *sc;
-	uint32_t val, idx;
 
 	sc = clknode_get_softc(clk);
-
-	DEVICE_LOCK(clk);
-	READ4(clk, sc->offset + CFG0, &val);
-	DEVICE_UNLOCK(clk);
-	idx = 0; /* TODO */
-
-	clknode_init_parent_idx(clk, idx);
+	if (clknode_get_parents_num(clk) > 1) {
+		device_printf(clknode_get_device(clk),
+		   "error: SSCG PLL does not support more than one parent yet\n");
+		return (EINVAL);
+	}
+	clknode_init_parent_idx(clk, 0);
 
 	return (0);
 }
@@ -83,29 +97,67 @@ imx_clk_sscg_pll_init(struct clknode *clk, device_t dev)
 static int
 imx_clk_sscg_pll_set_gate(struct clknode *clk, bool enable)
 {
-	panic("[%s] %s:%d\n", __func__, __FILE__, __LINE__);
-	return (0);
-}
+	struct imx_clk_sscg_pll_sc *sc;
+	uint32_t cfg0;
+	int timeout;
 
-static int
-imx_clk_sscg_pll_set_mux(struct clknode *clk, int index)
-{
-	panic("[%s] %s:%d\n", __func__, __FILE__, __LINE__);
+	sc = clknode_get_softc(clk);
+
+	DEVICE_LOCK(clk);
+	READ4(clk, sc->offset + CFG0, &cfg0);
+	if (enable)
+		cfg0 &= ~(CFG0_PD);
+	else
+		cfg0 |= CFG0_PD;
+	WRITE4(clk, sc->offset + CFG0, cfg0);
+
+	/* Reading lock */
+	if (enable) {
+		for (timeout = 1000; timeout; timeout--) {
+			READ4(clk, sc->offset + CFG0, &cfg0);
+			if (cfg0 & CFG0_PLL_LOCK)
+				break;
+			DELAY(1);
+		}
+	}
+
+	DEVICE_UNLOCK(clk);
+
 	return (0);
 }
 
 static int
 imx_clk_sscg_pll_recalc(struct clknode *clk, uint64_t *freq)
 {
-	panic("[%s] %s:%d\n", __func__, __FILE__, __LINE__);
-	return (0);
-}
+	struct imx_clk_sscg_pll_sc *sc;
+	uint32_t cfg0, cfg2;
+	int divr1, divr2, divf1, divf2, div;
 
-static int
-imx_clk_sscg_pll_set_freq(struct clknode *clk, uint64_t fparent, uint64_t *fout,
-    int flags, int *stop)
-{
-	panic("[%s] %s:%d\n", __func__, __FILE__, __LINE__);
+	sc = clknode_get_softc(clk);
+
+	DEVICE_LOCK(clk);
+	READ4(clk, sc->offset + CFG0, &cfg0);
+	READ4(clk, sc->offset + CFG2, &cfg2);
+	DEVICE_UNLOCK(clk);
+
+	divr1 = (cfg2 & CFG2_DIVR1_MASK) >> CFG2_DIVR1_SHIFT;
+	divr2 = (cfg2 & CFG2_DIVR2_MASK) >> CFG2_DIVR2_SHIFT;
+	divf1 = (cfg2 & CFG2_DIVF1_MASK) >> CFG2_DIVF1_SHIFT;
+	divf2 = (cfg2 & CFG2_DIVF2_MASK) >> CFG2_DIVF2_SHIFT;
+	div = (cfg2 & CFG2_DIV_MASK) >> CFG2_DIV_SHIFT;
+
+	/* PLL is bypassed */
+	if (cfg0 & CFG0_BYPASS2)
+		return (0);
+
+	if (cfg0 & CFG0_BYPASS1) {
+		*freq = *freq / ((divr2 + 1) * (div + 1));
+		return (0);
+	}
+
+	*freq *= 2 * (divf1 + 1) * (divf2 + 1);
+	*freq /= (divr1 + 1) * (divr2 + 1) * (div + 1);
+
 	return (0);
 }
 
@@ -113,9 +165,7 @@ static clknode_method_t imx_clk_sscg_pll_clknode_methods[] = {
 	/* Device interface */
 	CLKNODEMETHOD(clknode_init,		imx_clk_sscg_pll_init),
 	CLKNODEMETHOD(clknode_set_gate,		imx_clk_sscg_pll_set_gate),
-	CLKNODEMETHOD(clknode_set_mux,		imx_clk_sscg_pll_set_mux),
 	CLKNODEMETHOD(clknode_recalc_freq,	imx_clk_sscg_pll_recalc),
-	CLKNODEMETHOD(clknode_set_freq,		imx_clk_sscg_pll_set_freq),
 	CLKNODEMETHOD_END
 };
 
