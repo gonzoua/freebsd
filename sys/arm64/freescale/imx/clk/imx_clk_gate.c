@@ -57,7 +57,6 @@ struct imx_clk_gate_sc {
 	uint32_t	shift;
 	uint32_t	mask;
 	int		gate_flags;
-	bool		ungated;
 };
 
 static clknode_method_t imx_clk_gate_methods[] = {
@@ -72,18 +71,7 @@ DEFINE_CLASS_1(imx_clk_gate, imx_clk_gate_class, imx_clk_gate_methods,
 static int
 imx_clk_gate_init(struct clknode *clk, device_t dev)
 {
-	uint32_t reg;
-	struct imx_clk_gate_sc *sc;
-	int rv;
 
-	sc = clknode_get_softc(clk);
-	DEVICE_LOCK(clk);
-	rv = RD4(clk, sc->offset, &reg);
-	DEVICE_UNLOCK(clk);
-	if (rv != 0)
-		return (rv);
-	reg = (reg >> sc->shift) & sc->mask;
-	sc->ungated = reg == sc->mask ? 0 : 1;
 	clknode_init_parent_idx(clk, 0);
 	return(0);
 }
@@ -96,10 +84,9 @@ imx_clk_gate_set_gate(struct clknode *clk, bool enable)
 	int rv;
 
 	sc = clknode_get_softc(clk);
-	sc->ungated = enable;
 	DEVICE_LOCK(clk);
 	rv = MD4(clk, sc->offset, sc->mask << sc->shift,
-	    (sc->ungated ? 0: sc->mask) << sc->shift);
+	    (enable ? sc->mask : 0) << sc->shift);
 	if (rv != 0) {
 		DEVICE_UNLOCK(clk);
 		return (rv);
