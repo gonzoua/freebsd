@@ -84,7 +84,7 @@ struct imx_clk {
 		.clkdef.parent_names = _pn,				\
 		.clkdef.parent_cnt = nitems(_pn),			\
 		.clkdef.flags = CLK_NODE_STATIC_STRINGS,		\
-		.offset = CRU_CLKSEL_CON(_mo),				\
+		.offset = _mo,						\
 		.shift = _ms,						\
 		.width = _mw,						\
 		.mux_flags = _f, 					\
@@ -168,7 +168,7 @@ struct imx_clk {
 /* SSCG PLL */
 #define SSCG_PLL(_id, _name, _pn, _o)					\
 {									\
-	.type = IMX_CLK_SSCG_PPL,					\
+	.type = IMX_CLK_SSCG_PLL,					\
 	.clk.composite = &(struct imx_clk_composite_def) {		\
 		.clkdef.id = _id,					\
 		.clkdef.name = _name,					\
@@ -182,7 +182,7 @@ struct imx_clk {
 /* Fractional PLL */
 #define FRAC_PLL(_id, _name, _pn, _o)					\
 {									\
-	.type = IMX_CLK_FRAC_PPL,					\
+	.type = IMX_CLK_FRAC_PLL,					\
 	.clk.composite = &(struct imx_clk_composite_def) {		\
 		.clkdef.id = _id,					\
 		.clkdef.name = _name,					\

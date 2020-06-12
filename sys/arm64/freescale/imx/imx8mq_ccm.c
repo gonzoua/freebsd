@@ -57,6 +57,12 @@ __FBSDID("$FreeBSD$");
 
 #include "clkdev_if.h"
 
+static const char *pll_ref_p[] = {
+	"osc_25m", "osc_27m", "dummy", "dummy"
+};
+static const char *sys3_pll_out_p[] = {
+	"sys3_pll1_ref_sel"
+};
 static const char *uart_p[] = {
 	"osc_25m", "sys1_pll_80m", "sys2_pll_200m", "sys2_pll_100m", "sys3_pll_out", "clk_ext2", "clk_ext4", "audio_pll2_out"
 };
@@ -99,6 +105,17 @@ static struct imx_clk imx_clks[] = {
 
 	FIXED(IMX8MQ_SYS1_PLL_OUT, "sys1_pll_out", 800000000),
 	FIXED(IMX8MQ_SYS2_PLL_OUT, "sys2_pll_out", 1000000000),
+	SSCG_PLL(IMX8MQ_SYS3_PLL_OUT, "sys3_pll_out", sys3_pll_out_p, 0x48),
+	
+        MUX(IMX8MQ_ARM_PLL_REF_SEL, "arm_pll_ref_sel", pll_ref_p, 0, 0x28, 16, 2),
+        MUX(IMX8MQ_GPU_PLL_REF_SEL, "gpu_pll_ref_sel", pll_ref_p, 0, 0x18, 16, 2),
+        MUX(IMX8MQ_VPU_PLL_REF_SEL, "vpu_pll_ref_sel", pll_ref_p, 0, 0x20, 16, 2),
+        MUX(IMX8MQ_AUDIO_PLL1_REF_SEL, "audio_pll1_ref_sel", pll_ref_p, 0, 0x0, 16, 2),
+        MUX(IMX8MQ_AUDIO_PLL2_REF_SEL, "audio_pll2_ref_sel", pll_ref_p, 0, 0x8, 16, 2),
+        MUX(IMX8MQ_VIDEO_PLL1_REF_SEL, "video_pll1_ref_sel", pll_ref_p, 0, 0x10, 16, 2),
+        MUX(IMX8MQ_SYS3_PLL1_REF_SEL, "sys3_pll1_ref_sel", pll_ref_p, 0, 0x48, 0, 2),
+        MUX(IMX8MQ_DRAM_PLL1_REF_SEL, "dram_pll1_ref_sel", pll_ref_p, 0, 0x60, 0, 2),
+        MUX(IMX8MQ_VIDEO2_PLL1_REF_SEL, "video2_pll1_ref_sel", pll_ref_p, 0, 0x54, 0, 2),
 
 	GATE(IMX8MQ_SYS1_PLL_40M_CG, "sys1_pll_40m_cg", "sys1_pll_out", 0x30, 9),
 	GATE(IMX8MQ_SYS1_PLL_80M_CG, "sys1_pll_80m_cg", "sys1_pll_out", 0x30, 11),
