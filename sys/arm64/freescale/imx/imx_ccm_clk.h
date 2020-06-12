@@ -46,6 +46,7 @@ enum imx_clk_type {
 	IMX_CLK_COMPOSITE,
 	IMX_CLK_SSCG_PLL,
 	IMX_CLK_FRAC_PLL,
+	IMX_CLK_DIV,
 };
 
 struct imx_clk {
@@ -58,6 +59,7 @@ struct imx_clk {
 		struct imx_clk_composite_def	*composite;
 		struct imx_clk_sscg_pll_def	*sscg_pll;
 		struct imx_clk_frac_pll_def	*frac_pll;
+		struct clk_div_def		*div;
 	} clk;
 };
 
@@ -180,16 +182,31 @@ struct imx_clk {
 }
 
 /* Fractional PLL */
-#define FRAC_PLL(_id, _name, _pn, _o)					\
+#define FRAC_PLL(_id, _name, _pname, _o)				\
 {									\
 	.type = IMX_CLK_FRAC_PLL,					\
-	.clk.composite = &(struct imx_clk_composite_def) {		\
+	.clk.frac_pll = &(struct imx_clk_frac_pll_def) {		\
 		.clkdef.id = _id,					\
 		.clkdef.name = _name,					\
-		.clkdef.parent_names = _pn,				\
-		.clkdef.parent_cnt = nitems(_pn),			\
+		.clkdef.parent_names = (const char *[]){_pname},	\
+		.clkdef.parent_cnt = 1,					\
 		.clkdef.flags = CLK_NODE_STATIC_STRINGS,		\
 		.offset = _o,						\
+	},								\
+}
+
+#define DIV(_id, _name, _pname, _o, _shift, _width)			\
+{									\
+	.type = IMX_CLK_DIV,						\
+	.clk.div = &(struct clk_div_def) {				\
+		.clkdef.id = _id,					\
+		.clkdef.name = _name,					\
+		.clkdef.parent_names = (const char *[]){_pname},	\
+		.clkdef.parent_cnt = 1,					\
+		.clkdef.flags = CLK_NODE_STATIC_STRINGS,		\
+		.offset = _o,						\
+		.i_shift = _shift,					\
+		.i_width = _width,					\
 	},								\
 }
 

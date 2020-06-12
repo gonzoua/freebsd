@@ -135,6 +135,19 @@ static struct imx_clk imx_clks[] = {
 	MUX(IMX8MQ_DRAM_PLL1_REF_SEL, "dram_pll1_ref_sel", pll_ref_p, 0, 0x60, 0, 2),
 	MUX(IMX8MQ_VIDEO2_PLL1_REF_SEL, "video2_pll1_ref_sel", pll_ref_p, 0, 0x54, 0, 2),
 
+        DIV(IMX8MQ_ARM_PLL_REF_DIV, "arm_pll_ref_div", "arm_pll_ref_sel", 0x28, 5, 6),
+        DIV(IMX8MQ_GPU_PLL_REF_DIV, "gpu_pll_ref_div", "gpu_pll_ref_sel", 0x18, 5, 6),
+        DIV(IMX8MQ_VPU_PLL_REF_DIV, "vpu_pll_ref_div", "vpu_pll_ref_sel", 0x20, 5, 6),
+        DIV(IMX8MQ_AUDIO_PLL1_REF_DIV, "audio_pll1_ref_div", "audio_pll1_ref_sel", 0x0, 5, 6),
+        DIV(IMX8MQ_AUDIO_PLL2_REF_DIV, "audio_pll2_ref_div", "audio_pll2_ref_sel", 0x8, 5, 6),
+        DIV(IMX8MQ_VIDEO_PLL1_REF_DIV, "video_pll1_ref_div", "video_pll1_ref_sel", 0x10, 5, 6),
+
+        FRAC_PLL(IMX8MQ_ARM_PLL, "arm_pll", "arm_pll_ref_div", 0x28),
+        FRAC_PLL(IMX8MQ_GPU_PLL, "gpu_pll", "gpu_pll_ref_div", 0x18),
+        FRAC_PLL(IMX8MQ_VPU_PLL, "vpu_pll", "vpu_pll_ref_div", 0x20),
+        FRAC_PLL(IMX8MQ_AUDIO_PLL1, "audio_pll1", "audio_pll1_ref_div", 0x0),
+        FRAC_PLL(IMX8MQ_AUDIO_PLL2, "audio_pll2", "audio_pll2_ref_div", 0x8),
+        FRAC_PLL(IMX8MQ_VIDEO_PLL1, "video_pll1", "video_pll1_ref_div", 0x10),
 
 	/* ARM_PLL needs SET_PARENT flag */
 	MUX(IMX8MQ_ARM_PLL_BYPASS, "arm_pll_bypass", arm_pll_bypass_p, 0, 0x28, 14, 1),
@@ -327,6 +340,9 @@ ccm_attach(device_t dev)
 			break;
 		case IMX_CLK_FRAC_PLL:
 			imx_clk_frac_pll_register(sc->clkdom, sc->clks[i].clk.frac_pll);
+			break;
+		case IMX_CLK_DIV:
+			clknode_div_register(sc->clkdom, sc->clks[i].clk.div);
 			break;
 		default:
 			device_printf(dev, "Unknown clock type %d\n", sc->clks[i].type);
