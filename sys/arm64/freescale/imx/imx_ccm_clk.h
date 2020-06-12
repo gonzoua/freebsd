@@ -44,6 +44,8 @@ enum imx_clk_type {
 	IMX_CLK_MUX,
 	IMX_CLK_GATE,
 	IMX_CLK_COMPOSITE,
+	IMX_CLK_SSCG_PLL,
+	IMX_CLK_FRAC_PLL,
 };
 
 struct imx_clk {
@@ -54,6 +56,8 @@ struct imx_clk {
 		struct imx_clk_mux_def		*mux;
 		struct imx_clk_gate_def		*gate;
 		struct imx_clk_composite_def	*composite;
+		struct imx_clk_sscg_pll_def	*sscg_pll;
+		struct imx_clk_frac_pll_def	*frac_pll;
 	} clk;
 };
 
@@ -158,6 +162,34 @@ struct imx_clk {
 		.clkdef.flags = CLK_NODE_STATIC_STRINGS,		\
 		.offset = _o,						\
 		.flags = _flags,					\
+	},								\
+}
+
+/* SSCG PLL */
+#define SSCG_PLL(_id, _name, _pn, _o)					\
+{									\
+	.type = IMX_CLK_SSCG_PPL,					\
+	.clk.composite = &(struct imx_clk_composite_def) {		\
+		.clkdef.id = _id,					\
+		.clkdef.name = _name,					\
+		.clkdef.parent_names = _pn,				\
+		.clkdef.parent_cnt = nitems(_pn),			\
+		.clkdef.flags = CLK_NODE_STATIC_STRINGS,		\
+		.offset = _o,						\
+	},								\
+}
+
+/* Fractional PLL */
+#define FRAC_PLL(_id, _name, _pn, _o)					\
+{									\
+	.type = IMX_CLK_FRAC_PPL,					\
+	.clk.composite = &(struct imx_clk_composite_def) {		\
+		.clkdef.id = _id,					\
+		.clkdef.name = _name,					\
+		.clkdef.parent_names = _pn,				\
+		.clkdef.parent_cnt = nitems(_pn),			\
+		.clkdef.flags = CLK_NODE_STATIC_STRINGS,		\
+		.offset = _o,						\
 	},								\
 }
 

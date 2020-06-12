@@ -50,6 +50,8 @@ __FBSDID("$FreeBSD$");
 #include <arm64/freescale/imx/clk/imx_clk_gate.h>
 #include <arm64/freescale/imx/clk/imx_clk_mux.h>
 #include <arm64/freescale/imx/clk/imx_clk_composite.h>
+#include <arm64/freescale/imx/clk/imx_clk_sscg_pll.h>
+#include <arm64/freescale/imx/clk/imx_clk_frac_pll.h>
 
 #include <gnu/dts/include/dt-bindings/clock/imx8mq-clock.h>
 
@@ -268,6 +270,12 @@ ccm_attach(device_t dev)
 			break;
 		case IMX_CLK_COMPOSITE:
 			imx_clk_composite_register(sc->clkdom, sc->clks[i].clk.composite);
+			break;
+		case IMX_CLK_SSCG_PLL:
+			imx_clk_sscg_pll_register(sc->clkdom, sc->clks[i].clk.sscg_pll);
+			break;
+		case IMX_CLK_FRAC_PLL:
+			imx_clk_frac_pll_register(sc->clkdom, sc->clks[i].clk.frac_pll);
 			break;
 		default:
 			device_printf(dev, "Unknown clock type %d\n", sc->clks[i].type);
