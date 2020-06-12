@@ -63,6 +63,24 @@ static const char *pll_ref_p[] = {
 static const char *sys3_pll_out_p[] = {
 	"sys3_pll1_ref_sel"
 };
+static const char * arm_pll_bypass_p[] = {
+	"arm_pll", "arm_pll_ref_sel"
+};
+static const char * gpu_pll_bypass_p[] = {
+	"gpu_pll", "gpu_pll_ref_sel"
+};
+static const char * vpu_pll_bypass_p[] = {
+	"vpu_pll", "vpu_pll_ref_sel"
+};
+static const char * audio_pll1_bypass_p[] = {
+	"audio_pll1", "audio_pll1_ref_sel"
+};
+static const char * audio_pll2_bypass_p[] = {
+	"audio_pll2", "audio_pll2_ref_sel"
+};
+static const char * video_pll1_bypass_p[] = {
+	"video_pll1", "video_pll1_ref_sel"
+};
 static const char *uart_p[] = {
 	"osc_25m", "sys1_pll_80m", "sys2_pll_200m", "sys2_pll_100m", "sys3_pll_out", "clk_ext2", "clk_ext4", "audio_pll2_out"
 };
@@ -96,26 +114,42 @@ static struct imx_clk imx_clks[] = {
 	FIXED(IMX8MQ_CLK_DUMMY, "dummy", 0),
 
 	LINK(IMX8MQ_CLK_32K, "ckil"),
-        LINK(IMX8MQ_CLK_25M, "osc_25m"),
-        LINK(IMX8MQ_CLK_27M, "osc_27m"),
-        LINK(IMX8MQ_CLK_EXT1, "clk_ext1"),
-        LINK(IMX8MQ_CLK_EXT2, "clk_ext2"),
-        LINK(IMX8MQ_CLK_EXT3, "clk_ext3"),
-        LINK(IMX8MQ_CLK_EXT4, "clk_ext4"),
+	LINK(IMX8MQ_CLK_25M, "osc_25m"),
+	LINK(IMX8MQ_CLK_27M, "osc_27m"),
+	LINK(IMX8MQ_CLK_EXT1, "clk_ext1"),
+	LINK(IMX8MQ_CLK_EXT2, "clk_ext2"),
+	LINK(IMX8MQ_CLK_EXT3, "clk_ext3"),
+	LINK(IMX8MQ_CLK_EXT4, "clk_ext4"),
 
 	FIXED(IMX8MQ_SYS1_PLL_OUT, "sys1_pll_out", 800000000),
 	FIXED(IMX8MQ_SYS2_PLL_OUT, "sys2_pll_out", 1000000000),
 	SSCG_PLL(IMX8MQ_SYS3_PLL_OUT, "sys3_pll_out", sys3_pll_out_p, 0x48),
 	
-        MUX(IMX8MQ_ARM_PLL_REF_SEL, "arm_pll_ref_sel", pll_ref_p, 0, 0x28, 16, 2),
-        MUX(IMX8MQ_GPU_PLL_REF_SEL, "gpu_pll_ref_sel", pll_ref_p, 0, 0x18, 16, 2),
-        MUX(IMX8MQ_VPU_PLL_REF_SEL, "vpu_pll_ref_sel", pll_ref_p, 0, 0x20, 16, 2),
-        MUX(IMX8MQ_AUDIO_PLL1_REF_SEL, "audio_pll1_ref_sel", pll_ref_p, 0, 0x0, 16, 2),
-        MUX(IMX8MQ_AUDIO_PLL2_REF_SEL, "audio_pll2_ref_sel", pll_ref_p, 0, 0x8, 16, 2),
-        MUX(IMX8MQ_VIDEO_PLL1_REF_SEL, "video_pll1_ref_sel", pll_ref_p, 0, 0x10, 16, 2),
-        MUX(IMX8MQ_SYS3_PLL1_REF_SEL, "sys3_pll1_ref_sel", pll_ref_p, 0, 0x48, 0, 2),
-        MUX(IMX8MQ_DRAM_PLL1_REF_SEL, "dram_pll1_ref_sel", pll_ref_p, 0, 0x60, 0, 2),
-        MUX(IMX8MQ_VIDEO2_PLL1_REF_SEL, "video2_pll1_ref_sel", pll_ref_p, 0, 0x54, 0, 2),
+	MUX(IMX8MQ_ARM_PLL_REF_SEL, "arm_pll_ref_sel", pll_ref_p, 0, 0x28, 16, 2),
+	MUX(IMX8MQ_GPU_PLL_REF_SEL, "gpu_pll_ref_sel", pll_ref_p, 0, 0x18, 16, 2),
+	MUX(IMX8MQ_VPU_PLL_REF_SEL, "vpu_pll_ref_sel", pll_ref_p, 0, 0x20, 16, 2),
+	MUX(IMX8MQ_AUDIO_PLL1_REF_SEL, "audio_pll1_ref_sel", pll_ref_p, 0, 0x0, 16, 2),
+	MUX(IMX8MQ_AUDIO_PLL2_REF_SEL, "audio_pll2_ref_sel", pll_ref_p, 0, 0x8, 16, 2),
+	MUX(IMX8MQ_VIDEO_PLL1_REF_SEL, "video_pll1_ref_sel", pll_ref_p, 0, 0x10, 16, 2),
+	MUX(IMX8MQ_SYS3_PLL1_REF_SEL, "sys3_pll1_ref_sel", pll_ref_p, 0, 0x48, 0, 2),
+	MUX(IMX8MQ_DRAM_PLL1_REF_SEL, "dram_pll1_ref_sel", pll_ref_p, 0, 0x60, 0, 2),
+	MUX(IMX8MQ_VIDEO2_PLL1_REF_SEL, "video2_pll1_ref_sel", pll_ref_p, 0, 0x54, 0, 2),
+
+
+	/* ARM_PLL needs SET_PARENT flag */
+	MUX(IMX8MQ_ARM_PLL_BYPASS, "arm_pll_bypass", arm_pll_bypass_p, 0, 0x28, 14, 1),
+	MUX(IMX8MQ_GPU_PLL_BYPASS, "gpu_pll_bypass", gpu_pll_bypass_p, 0, 0x18, 14, 1),
+	MUX(IMX8MQ_VPU_PLL_BYPASS, "vpu_pll_bypass", vpu_pll_bypass_p, 0, 0x20, 14, 1),
+	MUX(IMX8MQ_AUDIO_PLL1_BYPASS, "audio_pll1_bypass", audio_pll1_bypass_p, 0, 0x0, 14, 1),
+	MUX(IMX8MQ_AUDIO_PLL2_BYPASS, "audio_pll2_bypass", audio_pll2_bypass_p, 0, 0x8, 14, 1),
+	MUX(IMX8MQ_VIDEO_PLL1_BYPASS, "video_pll1_bypass", video_pll1_bypass_p, 0, 0x10, 14, 1),
+
+	GATE(IMX8MQ_ARM_PLL_OUT, "arm_pll_out", "arm_pll_bypass", 0x28, 21),
+	GATE(IMX8MQ_GPU_PLL_OUT, "gpu_pll_out", "gpu_pll_bypass", 0x18, 21),
+	GATE(IMX8MQ_VPU_PLL_OUT, "vpu_pll_out", "vpu_pll_bypass", 0x20, 21),
+	GATE(IMX8MQ_AUDIO_PLL1_OUT, "audio_pll1_out", "audio_pll1_bypass", 0x0, 21),
+	GATE(IMX8MQ_AUDIO_PLL2_OUT, "audio_pll2_out", "audio_pll2_bypass", 0x8, 21),
+	GATE(IMX8MQ_VIDEO_PLL1_OUT, "video_pll1_out", "video_pll1_bypass", 0x10, 21),
 
 	GATE(IMX8MQ_SYS1_PLL_40M_CG, "sys1_pll_40m_cg", "sys1_pll_out", 0x30, 9),
 	GATE(IMX8MQ_SYS1_PLL_80M_CG, "sys1_pll_80m_cg", "sys1_pll_out", 0x30, 11),
@@ -331,7 +365,7 @@ ccm_probe(device_t dev)
 	if (!ofw_bus_status_okay(dev))
 		return (ENXIO);
 
-        if (ofw_bus_is_compatible(dev, "fsl,imx8mq-ccm") == 0)
+	if (ofw_bus_is_compatible(dev, "fsl,imx8mq-ccm") == 0)
 		return (ENXIO);
 
 	device_set_desc(dev, "Freescale i.MX8 Clock Control Module");
