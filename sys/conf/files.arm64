@@ -400,3 +400,4 @@ arm64/freescale/imx/clk/imx_clk_frac_pll.c	optional fdt soc_freescale_imx8mq
 # iMX drivers
 dev/ffec/if_ffec.c			optional ffec
 arm64/freescale/imx/imx7gpc.c		optional fdt soc_freescale_imx8mq
+arm/freescale/imx/imx_i2c.c		optional fsliic

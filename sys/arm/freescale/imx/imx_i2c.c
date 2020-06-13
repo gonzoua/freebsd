@@ -73,6 +73,10 @@ __FBSDID("$FreeBSD$");
 #include <dev/fdt/fdt_pinctrl.h>
 #include <dev/gpio/gpiobusvar.h>
 
+#ifdef EXT_RESOURCES
+#include <dev/extres/clk/clk.h>
+#endif
+
 #define I2C_ADDR_REG		0x00 /* I2C slave address register */
 #define I2C_FDR_REG		0x04 /* I2C frequency divider register */
 #define I2C_CONTROL_REG		0x08 /* I2C control register */
@@ -125,6 +129,7 @@ static struct clkdiv clkdiv_table[] = {
 };
 
 static struct ofw_compat_data compat_data[] = {
+	{"fsl,imx21-i2c",  1},
 	{"fsl,imx6q-i2c",  1},
 	{"fsl,imx-i2c",	   1},
 	{NULL,             0}
@@ -141,6 +146,9 @@ struct i2c_softc {
 	gpio_pin_t 		rb_sdapin;
 	u_int			debug;
 	u_int			slave;
+#ifdef EXT_RESOURCES
+	clk_t			ipgclk;
+#endif
 };
 
 #define DEVICE_DEBUGF(sc, lvl, fmt, args...) \
@@ -385,6 +393,19 @@ i2c_attach(device_t dev)
 	sc->dev = dev;
 	sc->rid = 0;
 
+#ifdef EXT_RESOURCES
+	if (clk_get_by_ofw_index(sc->dev, 0, 0, &sc->ipgclk) != 0) {
+		device_printf(dev, "could not get ipg clock");
+		return (ENOENT);
+	}
+
+	err = clk_enable(sc->ipgclk);
+	if (err != 0) {
+		device_printf(sc->dev, "could not enable ipg clock\n");
+		return (err);
+	}
+#endif
+
 	sc->res = bus_alloc_resource_any(dev, SYS_RES_MEMORY, &sc->rid,
 	    RF_ACTIVE);
 	if (sc->res == NULL) {
@@ -571,6 +592,10 @@ i2c_reset(device_t dev, u_char speed, u_char addr, u_char *oldadr)
 {
 	struct i2c_softc *sc;
 	u_int busfreq, div, i, ipgfreq;
+#ifdef EXT_RESOURCES
+	int err;
+	uint64_t freq;
+#endif
 
 	sc = device_get_softc(dev);
 
@@ -580,7 +605,16 @@ i2c_reset(device_t dev, u_char speed, u_char addr, u_char *oldadr)
 	 * Look up the divisor that gives the nearest speed that doesn't exceed
 	 * the configured value for the bus.
 	 */
+#ifdef EXT_RESOURCES
+	err = clk_get_freq(sc->ipgclk, &freq);
+	if (err != 0) {
+		device_printf(sc->dev, "cannot get frequency\n");
+		return (err);
+	}
+	ipgfreq = (int32_t)freq;
+#else
 	ipgfreq = imx_ccm_ipg_hz();
+#endif
 	busfreq = IICBUS_GET_FREQUENCY(sc->iicbus, speed);
 	div = howmany(ipgfreq, busfreq);
 	for (i = 0; i < nitems(clkdiv_table); i++) {
