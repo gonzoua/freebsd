@@ -52,7 +52,6 @@ __FBSDID("$FreeBSD$");
 
 #ifdef EXT_RESOURCES
 #include <dev/extres/clk/clk.h>
-#include <dev/extres/hwreset/hwreset.h>
 #endif
 
 #include "uart_if.h"
