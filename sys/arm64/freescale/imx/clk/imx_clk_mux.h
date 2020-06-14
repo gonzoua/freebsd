@@ -40,8 +40,6 @@ struct imx_clk_mux_def {
 	int			mux_flags;
 };
 
-#define	IMX_CLK_MUX_MASK		0xFFFF0000
-
 int imx_clk_mux_register(struct clkdom *clkdom, struct imx_clk_mux_def *clkdef);
 
 #endif /* _IMX_CLK_MUX_H_ */
