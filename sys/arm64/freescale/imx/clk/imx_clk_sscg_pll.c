@@ -54,10 +54,10 @@ struct imx_clk_sscg_pll_sc {
 	CLKDEV_DEVICE_UNLOCK(clknode_get_device(_clk))
 
 #define	CFG0	0x00
-#define	  CFG0_PLL_LOCK	(1 << 31)
-#define	  CFG0_PD	(1 << 7)
-#define	  CFG0_BYPASS2	(1 << 5)
-#define	  CFG0_BYPASS1	(1 << 4)
+#define	 CFG0_PLL_LOCK	(1 << 31)
+#define	 CFG0_PD	(1 << 7)
+#define	 CFG0_BYPASS2	(1 << 5)
+#define	 CFG0_BYPASS1	(1 << 4)
 #define	CFG1	0x04
 #define	CFG2	0x08
 #define	 CFG2_DIVR1_MASK	(7 << 25)
