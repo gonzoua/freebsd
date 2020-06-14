@@ -82,33 +82,45 @@ static const char * video_pll1_bypass_p[] = {
 	"video_pll1", "video_pll1_ref_sel"
 };
 static const char *uart_p[] = {
-	"osc_25m", "sys1_pll_80m", "sys2_pll_200m", "sys2_pll_100m", "sys3_pll_out", "clk_ext2", "clk_ext4", "audio_pll2_out"
+	"osc_25m", "sys1_pll_80m", "sys2_pll_200m", "sys2_pll_100m", "sys3_pll_out",
+	"clk_ext2", "clk_ext4", "audio_pll2_out"
 };
 static const char *usdhc_p[] = {
-	"osc_25m", "sys1_pll_400m", "sys1_pll_800m", "sys2_pll_500m", "audio_pll2_out", "sys1_pll_266m", "sys3_pll_out", "sys1_pll_100m"
+	"osc_25m", "sys1_pll_400m", "sys1_pll_800m", "sys2_pll_500m", "audio_pll2_out",
+	"sys1_pll_266m", "sys3_pll_out", "sys1_pll_100m"
 };
 static const char *enet_axi_p[] = {
-	"osc_25m", "sys1_pll_266m", "sys1_pll_800m", "sys2_pll_250m", "sys2_pll_200m", "audio_pll1_out", "video_pll1_out", "sys3_pll_out"
+	"osc_25m", "sys1_pll_266m", "sys1_pll_800m", "sys2_pll_250m", "sys2_pll_200m",
+	"audio_pll1_out", "video_pll1_out", "sys3_pll_out"
 };
 static const char *enet_ref_p[] = {
-	"osc_25m", "sys2_pll_125m", "sys2_pll_500m", "sys2_pll_100m", "sys1_pll_160m", "audio_pll1_out", "video_pll1_out", "clk_ext4"
+	"osc_25m", "sys2_pll_125m", "sys2_pll_500m", "sys2_pll_100m", "sys1_pll_160m",
+	"audio_pll1_out", "video_pll1_out", "clk_ext4"
 };
 static const char *enet_timer_p[] = {
-	"osc_25m", "sys2_pll_100m", "audio_pll1_out", "clk_ext1", "clk_ext2", "clk_ext3", "clk_ext4", "video_pll1_out"
+	"osc_25m", "sys2_pll_100m", "audio_pll1_out", "clk_ext1", "clk_ext2", "clk_ext3",
+	"clk_ext4", "video_pll1_out"
 };
 static const char *enet_phy_ref_p[] = {
-	"osc_25m", "sys2_pll_50m", "sys2_pll_125m", "sys2_pll_500m", "audio_pll1_out", "video_pll1_out", "audio_pll2_out"
+	"osc_25m", "sys2_pll_50m", "sys2_pll_125m", "sys2_pll_500m", "audio_pll1_out",
+	"video_pll1_out", "audio_pll2_out"
 };
 static const char *usb_bus_p[] = {
-	"osc_25m", "sys2_pll_500m", "sys1_pll_800m", "sys2_pll_100m", "sys2_pll_200m", "clk_ext2", "clk_ext4", "audio_pll2_out"
+	"osc_25m", "sys2_pll_500m", "sys1_pll_800m", "sys2_pll_100m", "sys2_pll_200m",
+	"clk_ext2", "clk_ext4", "audio_pll2_out"
 };
 static const char *usb_core_phy_p[] = {
-	"osc_25m", "sys1_pll_100m", "sys1_pll_40m", "sys2_pll_100m", "sys2_pll_200m", "clk_ext2", "clk_ext3", "audio_pll2_out"
+	"osc_25m", "sys1_pll_100m", "sys1_pll_40m", "sys2_pll_100m", "sys2_pll_200m",
+	"clk_ext2", "clk_ext3", "audio_pll2_out"
 };
 static const char *i2c_p[] = {
-	"osc_25m", "sys1_pll_160m", "sys2_pll_50m", "sys3_pll_out", "audio_pll1_out", "video_pll1_out", "audio_pll2_out", "sys1_pll_133m"
+	"osc_25m", "sys1_pll_160m", "sys2_pll_50m", "sys3_pll_out", "audio_pll1_out",
+	"video_pll1_out", "audio_pll2_out", "sys1_pll_133m"
 };
-
+static const char *ahb_p[] = {
+	"osc_25m", "sys1_pll_133m", "sys1_pll_800m", "sys1_pll_400m", "sys2_pll_125m",
+	"sys3_pll_out", "audio_pll1_out", "video_pll1_out"
+};
 
 static struct imx_clk imx_clks[] = {
 	FIXED(IMX8MQ_CLK_DUMMY, "dummy", 0),
@@ -204,6 +216,9 @@ static struct imx_clk imx_clks[] = {
 	FFACT(IMX8MQ_SYS2_PLL_500M, "sys2_pll_500m", "sys2_pll_500m_cg", 1, 2),
 	FFACT(IMX8MQ_SYS2_PLL_1000M, "sys2_pll_1000m", "sys2_pll_1000m_cg", 1, 1),
 
+	COMPOSITE(IMX8MQ_CLK_AHB, "ahb", ahb_p, 0x9000, 0),
+	DIV(IMX8MQ_CLK_IPG_ROOT, "ipg_root", "ahb", 0x9080, 0, 1),
+
 	COMPOSITE(IMX8MQ_CLK_UART1, "uart1", uart_p, 0xaf00, 0),
 	COMPOSITE(IMX8MQ_CLK_UART2, "uart2", uart_p, 0xaf80, 0),
 	COMPOSITE(IMX8MQ_CLK_UART3, "uart3", uart_p, 0xb000, 0),
@@ -245,15 +260,19 @@ static struct imx_clk imx_clks[] = {
 	ROOT_GATE(IMX8MQ_CLK_I2C2_ROOT, "i2c2_root_clk", "i2c2", 0x4180),
 	ROOT_GATE(IMX8MQ_CLK_I2C3_ROOT, "i2c3_root_clk", "i2c3", 0x4190),
 	ROOT_GATE(IMX8MQ_CLK_I2C4_ROOT, "i2c4_root_clk", "i2c4", 0x41a0),
+
+        ROOT_GATE(IMX8MQ_CLK_GPIO1_ROOT, "gpio1_root_clk", "ipg_root", 0x40b0),
+        ROOT_GATE(IMX8MQ_CLK_GPIO2_ROOT, "gpio2_root_clk", "ipg_root", 0x40c0),
+        ROOT_GATE(IMX8MQ_CLK_GPIO3_ROOT, "gpio3_root_clk", "ipg_root", 0x40d0),
+        ROOT_GATE(IMX8MQ_CLK_GPIO4_ROOT, "gpio4_root_clk", "ipg_root", 0x40e0),
+        ROOT_GATE(IMX8MQ_CLK_GPIO5_ROOT, "gpio5_root_clk", "ipg_root", 0x40f0),
 };
 
 struct ccm_softc {
-	device_t	dev;
-	struct resource	*mem_res;
+	device_t		dev;
+	struct resource		*mem_res;
 	struct clkdom		*clkdom;
 	struct mtx		mtx;
-	// struct imx_ccm_gate	*gates;
-	// int			ngates;
 	struct imx_clk		*clks;
 	int			nclks;
 };
@@ -443,7 +462,6 @@ imx_ccm_device_unlock(device_t dev)
 	sc = device_get_softc(dev);
 	mtx_unlock(&sc->mtx);
 }
-
 
 static device_method_t ccm_methods[] = {
 	/* Device interface */
