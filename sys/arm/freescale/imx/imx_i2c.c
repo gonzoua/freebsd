@@ -480,6 +480,14 @@ i2c_detach(device_t dev)
 
 	sc = device_get_softc(dev);
 
+#ifdef EXT_RESOURCES
+	error = clk_disable(sc->ipgclk);
+	if (error != 0) {
+		device_printf(sc->dev, "could not disable ipg clock\n");
+		return (error);
+	}
+#endif
+
 	if ((error = bus_generic_detach(sc->dev)) != 0) {
 		device_printf(sc->dev, "cannot detach child devices\n");
 		return (error);
