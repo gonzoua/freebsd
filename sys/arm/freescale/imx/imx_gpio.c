@@ -57,6 +57,10 @@ __FBSDID("$FreeBSD$");
 #include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/ofw_bus_subr.h>
 
+#ifdef EXT_RESOURCES
+#include <dev/extres/clk/clk.h>
+#endif
+
 #include "gpio_if.h"
 
 #ifdef INTRNG
@@ -118,6 +122,9 @@ struct imx51_gpio_softc {
 	struct gpio_pin		gpio_pins[NGPIO];
 #ifdef INTRNG
 	struct gpio_irqsrc 	gpio_pic_irqsrc[NGPIO];
+#endif
+#ifdef EXT_RESOURCES
+	clk_t			clk;
 #endif
 };
 
@@ -788,13 +795,26 @@ static int
 imx51_gpio_attach(device_t dev)
 {
 	struct imx51_gpio_softc *sc;
-	int i, irq, unit;
+	int i, irq, unit, err;
 
 	sc = device_get_softc(dev);
 	sc->dev = dev;
 	sc->gpio_npins = NGPIO;
 
 	mtx_init(&sc->sc_mtx, device_get_nameunit(sc->dev), NULL, MTX_SPIN);
+
+#ifdef EXT_RESOURCES
+	if (clk_get_by_ofw_index(sc->dev, 0, 0, &sc->clk) != 0) {
+		device_printf(dev, "could not get clock");
+		return (ENOENT);
+	}
+
+	err = clk_enable(sc->clk);
+	if (err != 0) {
+		device_printf(sc->dev, "could not enable ipg clock\n");
+		return (err);
+	}
+#endif
 
 	if (bus_alloc_resources(dev, imx_gpio_spec, sc->sc_res)) {
 		device_printf(dev, "could not allocate resources\n");
@@ -849,10 +869,18 @@ imx51_gpio_attach(device_t dev)
 static int
 imx51_gpio_detach(device_t dev)
 {
-	int irq;
+	int irq, error;
 	struct imx51_gpio_softc *sc;
 
 	sc = device_get_softc(dev);
+
+#ifdef EXT_RESOURCES
+	error = clk_disable(sc->clk);
+	if (error != 0) {
+		device_printf(sc->dev, "could not disable ipg clock\n");
+		return (error);
+	}
+#endif
 
 	gpiobus_detach_bus(dev);
 	for (irq = 0; irq < NUM_IRQRES; irq++) {
