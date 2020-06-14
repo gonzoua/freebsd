@@ -73,7 +73,11 @@ __FBSDID("$FreeBSD$");
 #include <dev/fdt/fdt_pinctrl.h>
 #include <dev/gpio/gpiobusvar.h>
 
-#ifdef EXT_RESOURCES
+#if defined(EXT_RESOURCES) && defined(__aarch64__)
+#define	IMX_ENABLE_CLOCKS
+#endif
+
+#ifdef IMX_ENABLE_CLOCKS
 #include <dev/extres/clk/clk.h>
 #endif
 
@@ -146,7 +150,7 @@ struct i2c_softc {
 	gpio_pin_t 		rb_sdapin;
 	u_int			debug;
 	u_int			slave;
-#ifdef EXT_RESOURCES
+#ifdef IMX_ENABLE_CLOCKS
 	clk_t			ipgclk;
 #endif
 };
@@ -393,7 +397,7 @@ i2c_attach(device_t dev)
 	sc->dev = dev;
 	sc->rid = 0;
 
-#ifdef EXT_RESOURCES
+#ifdef IMX_ENABLE_CLOCKS
 	if (clk_get_by_ofw_index(sc->dev, 0, 0, &sc->ipgclk) != 0) {
 		device_printf(dev, "could not get ipg clock");
 		return (ENOENT);
@@ -480,7 +484,7 @@ i2c_detach(device_t dev)
 
 	sc = device_get_softc(dev);
 
-#ifdef EXT_RESOURCES
+#ifdef IMX_ENABLE_CLOCKS
 	error = clk_disable(sc->ipgclk);
 	if (error != 0) {
 		device_printf(sc->dev, "could not disable ipg clock\n");
@@ -600,7 +604,7 @@ i2c_reset(device_t dev, u_char speed, u_char addr, u_char *oldadr)
 {
 	struct i2c_softc *sc;
 	u_int busfreq, div, i, ipgfreq;
-#ifdef EXT_RESOURCES
+#ifdef IMX_ENABLE_CLOCKS
 	int err;
 	uint64_t freq;
 #endif
@@ -613,7 +617,7 @@ i2c_reset(device_t dev, u_char speed, u_char addr, u_char *oldadr)
 	 * Look up the divisor that gives the nearest speed that doesn't exceed
 	 * the configured value for the bus.
 	 */
-#ifdef EXT_RESOURCES
+#ifdef IMX_ENABLE_CLOCKS
 	err = clk_get_freq(sc->ipgclk, &freq);
 	if (err != 0) {
 		device_printf(sc->dev, "cannot get frequency\n");

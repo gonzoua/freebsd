@@ -50,7 +50,11 @@ __FBSDID("$FreeBSD$");
 #include <dev/uart/uart_bus.h>
 #include <dev/uart/uart_dev_imx.h>
 
-#ifdef EXT_RESOURCES
+#if defined(EXT_RESOURCES) && defined(__aarch64__)
+#define	IMX_ENABLE_CLOCKS
+#endif
+
+#ifdef IMX_ENABLE_CLOCKS
 #include <dev/extres/clk/clk.h>
 #endif
 
@@ -330,7 +334,7 @@ UART_FDT_CLASS_AND_DEVICE(compat_data);
 		i = (i & s) ? (i & ~s) | d : i;		\
 	}
 
-#ifdef EXT_RESOURCES
+#ifdef IMX_ENABLE_CLOCKS
 static int
 imx_uart_setup_clocks(struct uart_softc *sc)
 {
@@ -374,7 +378,7 @@ imx_uart_bus_attach(struct uart_softc *sc)
 
 	bas = &sc->sc_bas;
 
-#ifdef EXT_RESOURCES
+#ifdef IMX_ENABLE_CLOCKS
 	int error = imx_uart_setup_clocks(sc);
 	if (error)
 		return (error);
