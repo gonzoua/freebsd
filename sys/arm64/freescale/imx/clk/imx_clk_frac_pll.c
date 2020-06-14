@@ -1,7 +1,7 @@
 /*-
  * SPDX-License-Identifier: BSD-2-Clause-FreeBSD
  *
- * Copyright (c) 2018 Emmanuel Vadot <manu@freebsd.org>
+ * Copyright (c) 2020 Oleksandr Tymoshenko <gonzo@FreeBSD.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -143,20 +143,11 @@ imx_clk_frac_pll_recalc(struct clknode *clk, uint64_t *freq)
 	return (0);
 }
 
-static int
-imx_clk_frac_pll_set_freq(struct clknode *clk, uint64_t fparent, uint64_t *fout,
-    int flags, int *stop)
-{
-	panic("[%s] %s:%d\n", __func__, __FILE__, __LINE__);
-	return (0);
-}
-
 static clknode_method_t imx_clk_frac_pll_clknode_methods[] = {
 	/* Device interface */
 	CLKNODEMETHOD(clknode_init,		imx_clk_frac_pll_init),
 	CLKNODEMETHOD(clknode_set_gate,		imx_clk_frac_pll_set_gate),
 	CLKNODEMETHOD(clknode_recalc_freq,	imx_clk_frac_pll_recalc),
-	CLKNODEMETHOD(clknode_set_freq,		imx_clk_frac_pll_set_freq),
 	CLKNODEMETHOD_END
 };
 
