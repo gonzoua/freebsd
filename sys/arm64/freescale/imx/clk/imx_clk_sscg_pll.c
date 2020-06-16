@@ -140,15 +140,15 @@ imx_clk_sscg_pll_recalc(struct clknode *clk, uint64_t *freq)
 	READ4(clk, sc->offset + CFG2, &cfg2);
 	DEVICE_UNLOCK(clk);
 
+	/* PLL is bypassed */
+	if (cfg0 & CFG0_BYPASS2)
+		return (0);
+
 	divr1 = (cfg2 & CFG2_DIVR1_MASK) >> CFG2_DIVR1_SHIFT;
 	divr2 = (cfg2 & CFG2_DIVR2_MASK) >> CFG2_DIVR2_SHIFT;
 	divf1 = (cfg2 & CFG2_DIVF1_MASK) >> CFG2_DIVF1_SHIFT;
 	divf2 = (cfg2 & CFG2_DIVF2_MASK) >> CFG2_DIVF2_SHIFT;
 	div = (cfg2 & CFG2_DIV_MASK) >> CFG2_DIV_SHIFT;
-
-	/* PLL is bypassed */
-	if (cfg0 & CFG0_BYPASS2)
-		return (0);
 
 	if (cfg0 & CFG0_BYPASS1) {
 		*freq = *freq / ((divr2 + 1) * (div + 1));
