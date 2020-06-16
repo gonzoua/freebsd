@@ -285,7 +285,6 @@ device		mv_rtc		# Marvell Real-time Clock
 
 # Watchdog controllers
 device		aw_wdog		# Allwinner Watchdog
-device		imxwdt		# i.MX8 Watchdog
 
 # Power management controllers
 device		axp81x		# X-Powers AXP81x PMIC
