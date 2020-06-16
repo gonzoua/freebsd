@@ -153,7 +153,6 @@ static int
 imx_wdog_intr(void *arg)
 {
 	struct imx_wdog_softc *sc = arg;
-	vm_offset_t physaddr;
 
 	/*
 	 * When configured for external reset, the actual reset is supposed to
@@ -166,8 +165,7 @@ imx_wdog_intr(void *arg)
 	 * configured, and it will wait for 1 second for it to take effect, then
 	 * it will do a software reset as a fallback.
 	 */
-	physaddr = rman_get_start(sc->sc_res[MEMRES]) + WDOG_CR_REG;
-	imx_wdog_cpu_reset(physaddr);
+	imx_wdog_cpu_reset(BUS_SPACE_PHYSADDR(sc->sc_res[MEMRES], WDOG_CR_REG));
 
 	return (FILTER_HANDLED); /* unreached */
 }
