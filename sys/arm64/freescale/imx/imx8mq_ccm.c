@@ -1,8 +1,7 @@
 /*-
  * SPDX-License-Identifier: BSD-2-Clause-FreeBSD
  *
- * Copyright (c) 2013 Ian Lepore <ian@freebsd.org>
- * All rights reserved.
+ * Copyright (c) 2020 Oleksandr Tymoshenko <gonzo@FreeBSD.org>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,7 +29,7 @@
 __FBSDID("$FreeBSD$");
 
 /*
- * Clocks and power control driver for Freescale i.MX6 family of SoCs.
+ * Clocks driver for Freescale i.MX8MQ SoC
  */
 
 #include <sys/param.h>
@@ -47,13 +46,12 @@ __FBSDID("$FreeBSD$");
 #include <machine/bus.h>
 
 #include <arm64/freescale/imx/imx_ccm_clk.h>
+#include <arm64/freescale/imx/imx8mq_ccm.h>
 #include <arm64/freescale/imx/clk/imx_clk_gate.h>
 #include <arm64/freescale/imx/clk/imx_clk_mux.h>
 #include <arm64/freescale/imx/clk/imx_clk_composite.h>
 #include <arm64/freescale/imx/clk/imx_clk_sscg_pll.h>
 #include <arm64/freescale/imx/clk/imx_clk_frac_pll.h>
-
-#include <gnu/dts/include/dt-bindings/clock/imx8mq-clock.h>
 
 #include "clkdev_if.h"
 
