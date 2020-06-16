@@ -2,10 +2,6 @@
  * SPDX-License-Identifier: BSD-2-Clause-FreeBSD
  *
  * Copyright (c) 2020 Oleksandr Tymoshenko <gonzo@FreeBSD.org>
- * All rights reserved.
- *
- * This software was developed by Oleksandr Rybalko under sponsorship
- * from the FreeBSD Foundation.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
