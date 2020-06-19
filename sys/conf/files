@@ -1780,6 +1780,7 @@ dev/iicbus/ds1307.c		optional ds1307
 dev/iicbus/ds13rtc.c		optional ds13rtc | ds133x | ds1374
 dev/iicbus/ds1672.c		optional ds1672
 dev/iicbus/ds3231.c		optional ds3231
+dev/iicbus/es8316.c		optional es8316codec
 dev/iicbus/syr827.c		optional syr827 ext_resources fdt
 dev/iicbus/icee.c		optional icee
 dev/iicbus/if_ic.c		optional ic

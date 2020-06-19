@@ -233,9 +233,10 @@ device		smcphy
 device		smsc
 
 # Sound support
-device sound
-device a10_codec
-device rt5640codec
+device		sound
+device		a10_codec
+device		es8316codec
+device		rt5640codec
 
 # DMA controller
 device		a31_dmac
