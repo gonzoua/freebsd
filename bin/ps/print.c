@@ -89,11 +89,11 @@ printheader(void)
 		v = vent->var;
 		if (v->flag & LJUST) {
 			if (STAILQ_NEXT(vent, next_ve) == NULL)	/* last one */
-				xo_emit("{T:/%s}", vent->header);
+				xo_emit("{T:/%hs}", vent->header);
 			else
-				xo_emit("{T:/%-*s}", v->width, vent->header);
+				xo_emit("{T:/%-*hs}", v->width, vent->header);
 		} else
-			xo_emit("{T:/%*s}", v->width, vent->header);
+			xo_emit("{T:/%*hs}", v->width, vent->header);
 		if (STAILQ_NEXT(vent, next_ve) != NULL)
 			xo_emit("{P: }");
 	}
@@ -704,17 +704,17 @@ priorityr(KINFO *k, VARENT *ve __unused)
 	class = lpri->pri_class;
 	level = lpri->pri_level;
 	switch (class) {
-	case PRI_ITHD:
-		asprintf(&str, "intr:%u", level);
+	case RTP_PRIO_REALTIME:
+	/* alias for PRI_REALTIME */
+		asprintf(&str, "real:%u", level - PRI_MIN_REALTIME);
 		break;
-	case PRI_REALTIME:
-		asprintf(&str, "real:%u", level);
+	case RTP_PRIO_NORMAL:
+	/* alias for PRI_TIMESHARE */
+		asprintf(&str, "normal:%u", level - PRI_MIN_TIMESHARE);
 		break;
-	case PRI_TIMESHARE:
-		asprintf(&str, "normal");
-		break;
-	case PRI_IDLE:
-		asprintf(&str, "idle:%u", level);
+	case RTP_PRIO_IDLE:
+	/* alias for PRI_IDLE */
+		asprintf(&str, "idle:%u", level - PRI_MIN_IDLE);
 		break;
 	default:
 		asprintf(&str, "%u:%u", class, level);

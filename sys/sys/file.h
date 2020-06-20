@@ -163,7 +163,7 @@ struct fileops {
  * Below is the list of locks that protects members in struct file.
  *
  * (a) f_vnode lock required (shared allows both reads and writes)
- * (f) protected with mtx_lock(mtx_pool_find(fp))
+ * (f) updated with atomics and blocking on sleepq
  * (d) cdevpriv_mtx
  * none	not locked
  */
@@ -200,10 +200,6 @@ struct file {
 	 *  DFLAG_SEEKABLE specific fields
 	 */
 	off_t		f_offset;
-	/*
-	 * Mandatory Access control information.
-	 */
-	void		*f_label;	/* Place-holder for MAC label. */
 };
 
 #define	f_cdevpriv	f_vnun.fvn_cdevpriv
