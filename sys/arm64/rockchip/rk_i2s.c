@@ -135,6 +135,7 @@ __FBSDID("$FreeBSD$");
 #define	FIFO_SIZE	32
 
 static struct ofw_compat_data compat_data[] = {
+	{ "rockchip,rk3066-i2s",		1 },
 	{ "rockchip,rk3399-i2s",		1 },
 	{ NULL,					0 }
 };
