@@ -71,6 +71,7 @@ __FBSDID("$FreeBSD$");
 #define	PCLK_USB3PHY_OTG	224
 #define	PCLK_USB3PHY_PIPE	225
 #define	PCLK_USB3_GRF		226
+#define	PCLK_ACODECPHY		235
 #define	HCLK_I2S0_8CH		311
 #define	HCLK_I2S1_8CH		312
 #define	HCLK_I2S2_2CH		313
@@ -117,6 +118,7 @@ static struct rk_cru_gate rk3328_gates[] = {
 
 	/* CRU_CLKGATE_CON17 */
 	CRU_GATE(PCLK_USB3_GRF, "pclk_usb3_grf", "pclk_phy_pre", 0x244, 2)
+	CRU_GATE(PCLK_ACODECPHY, "pclk_acodecphy", "pclk_phy_pre", 0x244, 5)
 
 	/* CRU_CLKGATE_CON19 */
 	CRU_GATE(HCLK_SDMMC, "hclk_sdmmc", "hclk_peri", 0x24C, 0)
