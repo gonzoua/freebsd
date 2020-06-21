@@ -181,6 +181,8 @@ rk_i2s_init(struct rk_i2s_softc *sc)
 	uint32_t val;
 	int error;
 
+	clk_set_freq(sc->clk, RK_I2S_SAMPLING_RATE * 256,
+	    CLK_SET_ROUND_DOWN);
 	error = clk_enable(sc->clk);
 	if (error != 0) {
 		device_printf(sc->dev, "cannot enable i2s_clk clock\n");
@@ -562,16 +564,24 @@ static int
 rk_i2s_dai_set_sysclk(device_t dev, unsigned int rate, int dai_dir)
 {
 	struct rk_i2s_softc *sc;
-	clk_t parent;
 	int error;
 
 	sc = device_get_softc(dev);
+	error = clk_disable(sc->clk);
+	if (error != 0) {
+		device_printf(sc->dev, "could not disable i2s_clk clock\n");
+		return (error);
+	}
 
-	// to trigger re-parenting
-	clk_set_freq(sc->clk, rate, 0);
+	error = clk_set_freq(sc->clk, rate, CLK_SET_ROUND_DOWN);
+	if (error != 0)
+		device_printf(sc->dev, "could not set i2s_clk freq\n");
 
-	if (clk_get_parent(sc->clk, &parent) == 0)
-		error = clk_set_freq(parent, rate, CLK_SET_ROUND_DOWN);
+	error = clk_enable(sc->clk);
+	if (error != 0) {
+		device_printf(sc->dev, "could not enable i2s_clk clock\n");
+		return (error);
+	}
 
 	return (0);
 }
