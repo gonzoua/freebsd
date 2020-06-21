@@ -209,32 +209,6 @@ rk_clk_composite_set_freq(struct clknode *clk, uint64_t fparent, uint64_t *fout,
 	uint32_t div, div_reg, best_div, best_div_reg, val;
 	int p_idx, best_parent;
 
-	if (strcmp(clknode_get_name(clk), "clk_i2s0") == 0) {
-		printf("setting clock in clk_i2s0 to parent #1\n");
-		clknode_set_parent_by_idx(clk, 1);
-	}
-
-	if (strcmp(clknode_get_name(clk), "clk_i2s1") == 0) {
-		printf("setting clock in clk_i2s0 to parent #1\n");
-		clknode_set_parent_by_idx(clk, 1);
-	}
-
-	if (strcmp(clknode_get_name(clk), "clk_i2s2") == 0) {
-		printf("setting clock in clk_i2s2 to parent #1\n");
-		clknode_set_parent_by_idx(clk, 1);
-	}
-
-
-	if (strcmp(clknode_get_name(clk), "clk_i2sout") == 0) {
-		printf("setting clock in clk_i2sout to parent #0\n");
-		clknode_set_parent_by_idx(clk, 0);
-	}
-
-	if (strcmp(clknode_get_name(clk), "clk_i2sout_src") == 0) {
-		printf("setting clock in clk_i2sout_src to parent #1\n");
-		clknode_set_parent_by_idx(clk, 1);
-	}
-
 	sc = clknode_get_softc(clk);
 	dprintf("Finding best parent/div for target freq of %ju\n", *fout);
 	p_names = clknode_get_parent_names(clk);
