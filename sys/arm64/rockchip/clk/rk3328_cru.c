@@ -1213,7 +1213,7 @@ static struct rk_clk_composite_def i2s1 = {
 	.gate_offset = 0x204,
 	.gate_shift = 6,
 
-	.flags = RK_CLK_COMPOSITE_HAVE_GATE,
+	.flags = RK_CLK_COMPOSITE_HAVE_GATE | RK_CLK_COMPOSITE_HAVE_MUX,
 };
 
 static struct clk_fixed_def clkin_i2s1 = {
