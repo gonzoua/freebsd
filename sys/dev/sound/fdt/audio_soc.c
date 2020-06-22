@@ -236,6 +236,7 @@ audio_soc_chan_trigger(kobj_t obj, void *data, int go)
 
 	ausoc_chan = (struct audio_soc_channel *)data;
 	sc = ausoc_chan->sc;
+	AUDIO_DAI_TRIGGER(sc->codec_dev, go, ausoc_chan->dir);
 	SLIST_FOREACH(aux_node, &sc->aux_devs, link) {
 		AUDIO_DAI_TRIGGER(aux_node->dev, go, ausoc_chan->dir);
 	}
