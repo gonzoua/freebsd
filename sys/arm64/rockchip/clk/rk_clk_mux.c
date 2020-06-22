@@ -156,6 +156,7 @@ rk_clk_mux_set_freq(struct clknode *clk, uint64_t fparent, uint64_t *fout,
 		if (rv == 0) {
 			best_parent = p_idx;
 			p_best_clk = p_clk;
+			*stop = 1;
 		}
 	}
 
@@ -170,9 +171,9 @@ rk_clk_mux_set_freq(struct clknode *clk, uint64_t fparent, uint64_t *fout,
 		dprintf("Switching parent index from %d to %d\n", p_idx,
 		    best_parent);
 		clknode_set_parent_by_idx(clk, best_parent);
-		clknode_set_freq(p_best_clk, *fout, flags, 0);
 	}
 
+	clknode_set_freq(p_best_clk, *fout, flags, 0);
 	clknode_get_freq(p_best_clk, fout);
 
 	return (0);
