@@ -192,7 +192,7 @@ rkcodec_set_mute(struct rkcodec_softc *sc, bool muted)
 {
 	uint32_t val;
 	val = SOC_CON10_GPIOMUT_MASK;
-	if (muted)
+	if (!muted)
 		val |= SOC_CON10_GPIOMUT;
 	SYSCON_WRITE_4(sc->grf, GRF_SOC_CON10, val);
 }
@@ -346,10 +346,10 @@ rkcodec_attach(device_t dev)
 	val |= HPOUT_CTRL_HPOUTL_UNMUTE | HPOUT_CTRL_HPOUTR_UNMUTE;
 	RKCODEC_WRITE(sc, CODEC_HPOUT_CTRL, val);
 
-	RKCODEC_WRITE(sc, CODEC_HPOUTL_GAIN_CTRL, 0x10);
-	RKCODEC_WRITE(sc, CODEC_HPOUTR_GAIN_CTRL, 0x10);
+	RKCODEC_WRITE(sc, CODEC_HPOUTL_GAIN_CTRL, 0x1f);
+	RKCODEC_WRITE(sc, CODEC_HPOUTR_GAIN_CTRL, 0x1f);
 
-	rkcodec_set_mute(sc, true);
+	rkcodec_set_mute(sc, false);
 
 	node = ofw_bus_get_node(dev);
 	OF_device_register_xref(OF_xref_from_node(node), dev);
@@ -485,14 +485,14 @@ rkcodec_dai_init(device_t dev, uint32_t format)
 		return (EINVAL);
 	}
 
-	ctrl1 &= (DAC_INIT_CTRL1_MODE_MASK);
+	ctrl1 &= ~(DAC_INIT_CTRL1_MODE_MASK);
 	switch (clk) {
 	case AUDIO_DAI_CLOCK_CBM_CFM:
-		ctrl1 = DAC_INIT_CTRL1_DIRECTION_OUT |
+		ctrl1 |= DAC_INIT_CTRL1_DIRECTION_OUT |
 		    DAC_INIT_CTRL1_DAC_I2S_MODE_SLAVE;
 		break;
 	case AUDIO_DAI_CLOCK_CBS_CFS:
-		ctrl2 = DAC_INIT_CTRL1_DIRECTION_IN |
+		ctrl1 |= DAC_INIT_CTRL1_DIRECTION_IN |
 		    DAC_INIT_CTRL1_DAC_I2S_MODE_SLAVE;
 		break;
 	default:
@@ -501,7 +501,7 @@ rkcodec_dai_init(device_t dev, uint32_t format)
 
 	ctrl2 &= ~(DAC_INIT_CTRL2_DAC_VDL_MASK | DAC_INIT_CTRL2_DAC_MODE_MASK);
 	ctrl2 |= DAC_INIT_CTRL2_DAC_VDL_16BITS;
-	ctrl3 &= DAC_INIT_CTRL3_WL_MASK;
+	ctrl3 &= ~(DAC_INIT_CTRL3_WL_MASK);
 	ctrl3 |= DAC_INIT_CTRL3_WL_32BITS;
 	switch (fmt) {
 	case AUDIO_DAI_FORMAT_I2S:
