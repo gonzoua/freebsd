@@ -61,6 +61,66 @@ __FBSDID("$FreeBSD$");
 
 #define	MAX_BUFFER	16
 
+#define	ESCODEC_RESET_REG		0x00
+#define	 RESET_ALL				0x3f
+#define	 RESET_CSM_ON				(1 << 7)
+#define	ESCODEC_CLKMAN1_REG		0x01
+#define	 CLKMAN1_MCLK_ON			(1 << 6)
+#define	 CLKMAN1_BCLK_ON			(1 << 5)
+#define	 CLKMAN1_CLK_CP_ON			(1 << 4)
+#define	 CLKMAN1_CLK_DAC_ON			(1 << 2)
+#define	 CLKMAN1_ANACLK_DAC_ON			(1 << 0)
+#define	ESCODEC_ADC_OSR_REG		0x03
+#define	ESCODEC_SD_CLK_REG		0x09
+#define	 SD_CLK_MSC				(1 << 7)
+#define	 SD_CLK_BCLK_INV			(1 << 5)
+#define	ESCODEC_SD_ADC_REG		0x0a
+#define	ESCODEC_SD_DAC_REG		0x0b
+#define	 SD_FMT_LRP				(1 << 5)
+#define	 SD_FMT_WL_MASK				(7 << 2)
+#define	 SD_FMT_WL_SHIFT			2
+#define	  SD_FMT_WL_16				3
+#define	 SD_FMT_MASK				(3 << 0)
+#define	 SD_FMT_SHIFT				0
+#define	  SD_FMT_I2S				0
+#define	ESCODEC_VMID_REG		0x0c
+#define	ESCODEC_PDN_REG			0x0d
+#define	ESCODEC_HPSEL_REG		0x13
+#define	ESCODEC_HPMIXRT_REG		0x14
+#define	 HPMIXRT_LD2LHPMIX			(1 << 7)
+#define	 HPMIXRT_RD2RHPMIX			(1 << 3)
+#define	ESCODEC_HPMIX_REG		0x15
+#define	 HPMIX_LHPMIX_MUTE			(1 << 5)
+#define	 HPMIX_PDN_LHP_MIX			(1 << 4)
+#define	 HPMIX_RHPMIX_MUTE			(1 << 1)
+#define	 HPMIX_PDN_RHP_MIX			(1 << 0)
+#define	ESCODEC_HPMIXVOL_REG		0x16
+#define	 HPMIXVOL_LHPMIXVOL			__BITS(7,4)
+#define	 HPMIXVOL_RHPMIXVOL			__BITS(3,0)
+#define	ESCODEC_HPOUTEN_REG		0x17
+#define	 HPOUTEN_EN_HPL				(1 << 6)
+#define	 HPOUTEN_HPL_OUTEN			(1 << 5)
+#define	 HPOUTEN_EN_HPR				(1 << 2)
+#define	 HPOUTEN_HPR_OUTEN			(1 << 1)
+#define	ESCODEC_HPVOL_REG		0x18
+#define	 HPVOL_PDN_LICAL			(1 << 7)
+#define	 HPVOL_HPLVOL				__BITS(5,4)
+#define	 HPVOL_PDN_RICAL			(1 << 3)
+#define	 HPVOL_HPRVOL				__BITS(1,0)
+#define	ESCODEC_HPPWR_REG		0x19
+#define	 HPPWR_PDN_CPHP				(1 << 2)
+#define	ESCODEC_CPPWR_REG		0x1a
+#define	 CPPWR_PDN_CP				(1 << 5)
+#define	ESCODEC_DACPWR_REG		0x2f
+#define	 DACPWR_PDN_DAC_L			(1 << 4)
+#define	 DACPWR_PDN_DAC_R			(1 << 0)
+#define	ESCODEC_DACCTL1_REG		0x30
+#define	 DACCTL1_MUTE				(1 << 5)
+#define	ESCODEC_DACVOL_L_REG		0x33
+#define	 DACVOL_L_DACVOLUME_MASK		0xff
+#define	ESCODEC_DACVOL_R_REG		0x34
+#define	 DACVOL_R_DACVOLUME_MASK		0xff
+
 #define	ES8316_MIXER_DEVS (1 << SOUND_MIXER_VOLUME)
 
 struct es8316_softc {
@@ -205,6 +265,7 @@ es8316_attach(device_t dev)
 	struct es8316_softc	*sc;
 	int error;
 	phandle_t node;
+	uint8_t val;
 
 	sc = device_get_softc(dev);
 	sc->dev = dev;
@@ -230,6 +291,71 @@ es8316_attach(device_t dev)
 	node = ofw_bus_get_node(dev);
 	OF_device_register_xref(OF_xref_from_node(node), dev);
 
+	es8316_write(sc, ESCODEC_RESET_REG, RESET_ALL);
+	DELAY(5);
+	es8316_write(sc, ESCODEC_RESET_REG, RESET_CSM_ON);
+	DELAY(30);
+
+	es8316_write(sc, ESCODEC_VMID_REG, 0xff);
+	es8316_write(sc, ESCODEC_ADC_OSR_REG, 0x32);
+
+	es8316_read(sc, ESCODEC_SD_ADC_REG, &val);
+	val &= ~SD_FMT_WL_MASK;
+	val |= (SD_FMT_WL_16 << SD_FMT_WL_SHIFT);
+	es8316_write(sc, ESCODEC_SD_ADC_REG, val);
+
+	es8316_read(sc, ESCODEC_SD_DAC_REG, &val);
+	val &= ~SD_FMT_WL_MASK;
+	val |= (SD_FMT_WL_16 << SD_FMT_WL_SHIFT);
+	es8316_write(sc, ESCODEC_SD_DAC_REG, val);
+
+	/* Power up */
+	es8316_write(sc, ESCODEC_PDN_REG, 0);
+
+	/* Route DAC signal to HP mixer */
+	val = HPMIXRT_LD2LHPMIX | HPMIXRT_RD2RHPMIX;
+	es8316_write(sc, ESCODEC_HPMIXRT_REG, val);
+
+	/* Power up DAC */
+	es8316_write(sc, ESCODEC_DACPWR_REG, 0);
+
+	/* Power up HP mixer and unmute */
+	es8316_write(sc, ESCODEC_HPMIX_REG, 0);
+
+	/* Power up HP output driver */
+	es8316_read(sc, ESCODEC_HPPWR_REG, &val);
+	val &= ~HPPWR_PDN_CPHP;
+	es8316_write(sc, ESCODEC_HPPWR_REG, val);
+
+	/* Power up HP charge pump circuits */
+	es8316_read(sc, ESCODEC_CPPWR_REG, &val);
+	val &= ~CPPWR_PDN_CP;
+	es8316_write(sc, ESCODEC_CPPWR_REG, val);
+
+	/* Set LIN1/RIN1 as inputs for HP mixer */
+	es8316_write(sc, ESCODEC_HPSEL_REG, 0);
+
+	/* Power up HP output driver calibration */
+	es8316_read(sc, ESCODEC_HPVOL_REG, &val);
+	val &= ~HPVOL_PDN_LICAL;
+	val &= ~HPVOL_PDN_RICAL;
+	es8316_write(sc, ESCODEC_HPVOL_REG, val);
+
+	/* Set headphone mixer to -6dB */
+	es8316_write(sc, ESCODEC_HPMIXVOL_REG, 0x44);
+
+	/* Set charge pump headphone to -48dB */
+	es8316_write(sc, ESCODEC_HPVOL_REG, 0x33);
+
+	/* Set DAC to 0dB */
+	es8316_write(sc, ESCODEC_DACVOL_L_REG, 0);
+	es8316_write(sc, ESCODEC_DACVOL_R_REG, 0);
+
+	/* Enable HP output */
+	val = HPOUTEN_EN_HPL | HPOUTEN_EN_HPR |
+	    HPOUTEN_HPL_OUTEN | HPOUTEN_HPR_OUTEN;
+	es8316_write(sc, ESCODEC_HPOUTEN_REG, val);
+
 	return (0);
 }
 
@@ -244,6 +370,7 @@ static int
 es8316_dai_init(device_t dev, uint32_t format)
 {
 	struct es8316_softc* sc;
+	uint8_t sd_clk, sd_fmt, val;
 	int fmt, pol, clk;
 
 	sc = (struct es8316_softc*)device_get_softc(dev);
@@ -251,6 +378,59 @@ es8316_dai_init(device_t dev, uint32_t format)
 	fmt = AUDIO_DAI_FORMAT_FORMAT(format);
 	pol = AUDIO_DAI_FORMAT_POLARITY(format);
 	clk = AUDIO_DAI_FORMAT_CLOCK(format);
+
+	if (fmt != AUDIO_DAI_FORMAT_I2S)
+		return EINVAL;
+
+	if (clk != AUDIO_DAI_CLOCK_CBS_CFS)
+		return EINVAL;
+
+	switch (pol) {
+	case AUDIO_DAI_POLARITY_NB_NF:
+		sd_clk = 0;
+		sd_fmt = 0;
+		break;
+	case AUDIO_DAI_POLARITY_NB_IF:
+		sd_clk = 0;
+		sd_fmt = SD_FMT_LRP;
+		break;
+	case AUDIO_DAI_POLARITY_IB_NF:
+		sd_clk = SD_CLK_BCLK_INV;
+		sd_fmt = 0;
+		break;
+	case AUDIO_DAI_POLARITY_IB_IF:
+		sd_clk = SD_CLK_BCLK_INV;
+		sd_fmt = SD_FMT_LRP;
+		break;
+	}
+
+	es8316_read(sc, ESCODEC_SD_CLK_REG, &val);
+	val &= ~(SD_CLK_MSC|SD_CLK_BCLK_INV);
+	val |= sd_clk;
+	es8316_write(sc, ESCODEC_SD_CLK_REG, val);
+
+	es8316_read(sc, ESCODEC_SD_ADC_REG, &val);
+	val &= ~SD_FMT_MASK;
+	val |= (SD_FMT_I2S << SD_FMT_SHIFT);
+	val &= ~SD_FMT_LRP;
+	val |= sd_fmt;
+	es8316_write(sc, ESCODEC_SD_ADC_REG, val);
+
+	es8316_read(sc, ESCODEC_SD_DAC_REG, &val);
+	val &= ~SD_FMT_MASK;
+	val |= (SD_FMT_I2S << SD_FMT_SHIFT);
+	val &= ~SD_FMT_LRP;
+	val |= sd_fmt;
+	es8316_write(sc, ESCODEC_SD_DAC_REG, val);
+
+	es8316_read(sc, ESCODEC_CLKMAN1_REG, &val);
+	val |= CLKMAN1_MCLK_ON;
+	val |= CLKMAN1_BCLK_ON;
+	val |= CLKMAN1_CLK_CP_ON;
+	val |= CLKMAN1_CLK_DAC_ON;
+	val |= CLKMAN1_ANACLK_DAC_ON;
+	es8316_write(sc, ESCODEC_CLKMAN1_REG, val);
+
 
 	return (0);
 }
