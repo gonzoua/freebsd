@@ -198,10 +198,12 @@ rk_i2s_init(struct rk_i2s_softc *sc)
 		val |= (I2S_IO_DIRECTION_MASK << 11) << 16;
 		SYSCON_WRITE_4(sc->grf, 0xe220, val);
 
+		#if 0
 		// HACK: enable IO domain
 		val = (1 << 1);
 		val |= (1 << 1) << 16;
 		SYSCON_WRITE_4(sc->grf, 0xe640, val);
+		#endif
 	}
 
 	RK_I2S_WRITE_4(sc, I2S_XFER, 0);
