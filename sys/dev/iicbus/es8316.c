@@ -68,7 +68,9 @@ __FBSDID("$FreeBSD$");
 #define	 CLKMAN1_MCLK_ON			(1 << 6)
 #define	 CLKMAN1_BCLK_ON			(1 << 5)
 #define	 CLKMAN1_CLK_CP_ON			(1 << 4)
+#define	 CLKMAN1_CLK_ADC_ON			(1 << 3)
 #define	 CLKMAN1_CLK_DAC_ON			(1 << 2)
+#define	 CLKMAN1_ANACLK_ADC_ON			(1 << 1)
 #define	 CLKMAN1_ANACLK_DAC_ON			(1 << 0)
 #define	ESCODEC_ADC_OSR_REG		0x03
 #define	ESCODEC_SD_CLK_REG		0x09
@@ -85,6 +87,8 @@ __FBSDID("$FreeBSD$");
 #define	  SD_FMT_I2S				0
 #define	ESCODEC_VMID_REG		0x0c
 #define	ESCODEC_PDN_REG			0x0d
+#define	ESCODEC_LP1_REG			0x0e
+#define	ESCODEC_LP2_REG			0x0f
 #define	ESCODEC_HPSEL_REG		0x13
 #define	ESCODEC_HPMIXRT_REG		0x14
 #define	 HPMIXRT_LD2LHPMIX			(1 << 7)
@@ -95,8 +99,10 @@ __FBSDID("$FreeBSD$");
 #define	 HPMIX_RHPMIX_MUTE			(1 << 1)
 #define	 HPMIX_PDN_RHP_MIX			(1 << 0)
 #define	ESCODEC_HPMIXVOL_REG		0x16
-#define	 HPMIXVOL_LHPMIXVOL			__BITS(7,4)
-#define	 HPMIXVOL_RHPMIXVOL			__BITS(3,0)
+#define	 HPMIXVOL_LHPMIXVOL_MASK		(0xf << 4)
+#define	 HPMIXVOL_LHPMIXVOL(v)			(((v) & 0xf) << 4)
+#define	 HPMIXVOL_RHPMIXVOL_MASK		(0xf << 0)
+#define	 HPMIXVOL_RHPMIXVOL(v)			(((v) & 0xf) << 0)
 #define	ESCODEC_HPOUTEN_REG		0x17
 #define	 HPOUTEN_EN_HPL				(1 << 6)
 #define	 HPOUTEN_HPL_OUTEN			(1 << 5)
@@ -111,6 +117,17 @@ __FBSDID("$FreeBSD$");
 #define	 HPPWR_PDN_CPHP				(1 << 2)
 #define	ESCODEC_CPPWR_REG		0x1a
 #define	 CPPWR_PDN_CP				(1 << 5)
+#define	 CPPWR_CI_HIPWR				(1 << 4)
+#define	ESCODEC_LDOCTL_REG		0x1b
+#define	  LDOCTL_LDOLVL_1_45			(3 << 4)
+#define	ESCODEC_ADCSEL_REG		0x22
+#define	  ADCSEL_PDN_AINL			(1 << 7)
+#define	  ADCSEL_PDN_MODL			(1 << 6)
+#define	  ADCSEL_LINSEL_MASK			(3 << 4)
+#define	  ADCSEL_LINSEL_LIN1			(0 << 4)
+#define	  ADCSEL_LINSEL_LIN2			(1 << 4)
+#define	ESCODEC_ADC_VOLUME		0x27
+#define	 ADC_VOLUME_ADCVOLUMEL_MAX		0xc0
 #define	ESCODEC_DACPWR_REG		0x2f
 #define	 DACPWR_PDN_DAC_L			(1 << 4)
 #define	 DACPWR_PDN_DAC_R			(1 << 0)
@@ -118,10 +135,15 @@ __FBSDID("$FreeBSD$");
 #define	 DACCTL1_MUTE				(1 << 5)
 #define	ESCODEC_DACVOL_L_REG		0x33
 #define	 DACVOL_L_DACVOLUME_MASK		0xff
+#define	 DACVOL_L_DACVOLUME_MAX			0xc0
 #define	ESCODEC_DACVOL_R_REG		0x34
 #define	 DACVOL_R_DACVOLUME_MASK		0xff
+#define	 DACVOL_R_DACVOLUME_MAX			0xc0
 
-#define	ES8316_MIXER_DEVS (1 << SOUND_MIXER_VOLUME)
+#define	ES8316_MIXER_DEVS (SOUND_MASK_VOLUME | SOUND_MASK_MIC)
+
+#define	ADC_SRC_LIN1_RIN1	1
+#define	ADC_SRC_LIN2_RIN2	2
 
 struct es8316_softc {
 	device_t	dev;
@@ -129,6 +151,7 @@ struct es8316_softc {
 	struct intr_config_hook
 			init_hook;
 	clk_t		clk;
+	int		adc_src;
 };
 
 #ifdef FDT
@@ -197,6 +220,7 @@ es8316_mixer_set(struct snd_mixer *m, unsigned dev, unsigned left, unsigned righ
 	struct es8316_softc *sc;
 	struct mtx *mixer_lock;
 	int locked;
+	uint8_t val;
 
 	sc = device_get_softc(mix_getdevinfo(m));
 	mixer_lock = mixer_get_lock(m);
@@ -212,7 +236,20 @@ es8316_mixer_set(struct snd_mixer *m, unsigned dev, unsigned left, unsigned righ
 		mtx_unlock(mixer_lock);
 	switch (dev) {
 	case SOUND_MIXER_VOLUME:
-		printf("[%s] %s:%d\n", __func__, __FILE__, __LINE__);
+		val = DACVOL_L_DACVOLUME_MAX - (left * DACVOL_L_DACVOLUME_MAX / 100);
+		es8316_write(sc, ESCODEC_DACVOL_L_REG, val);
+		val = DACVOL_R_DACVOLUME_MAX - (right * DACVOL_R_DACVOLUME_MAX / 100);
+		es8316_write(sc, ESCODEC_DACVOL_R_REG, val);
+		return (left | (right << 8));
+	case SOUND_MIXER_MIC:
+		/*
+		 * Force 100% for now. Without boost microphone level declines prety rapidly
+		 * and at 85% it's mostly silence. For demonstration purposes just keep at 100%
+		 * for now.
+		 */
+		left = right = 100;
+		val = ADC_VOLUME_ADCVOLUMEL_MAX - (left * ADC_VOLUME_ADCVOLUMEL_MAX / 100);
+		es8316_write(sc, ESCODEC_ADC_VOLUME, val);
 		return (left | (right << 8));
 	default:
 		break;
@@ -231,7 +268,6 @@ es8316_mixer_setrecsrc(struct snd_mixer *m, u_int32_t src)
 	return (0);
 }
 
-
 static kobj_method_t es8316_mixer_methods[] = {
 	KOBJMETHOD(mixer_init, 		es8316_mixer_init),
 	KOBJMETHOD(mixer_uninit, 	es8316_mixer_uninit),
@@ -242,6 +278,41 @@ static kobj_method_t es8316_mixer_methods[] = {
 };
 
 MIXER_DECLARE(es8316_mixer);
+
+static int
+es8316_set_rec_src(struct es8316_softc *sc, int lin)
+{
+	uint8_t val;
+
+	es8316_read(sc, ESCODEC_ADCSEL_REG, &val);
+	val &= ~(ADCSEL_LINSEL_MASK);
+	if (lin == ADC_SRC_LIN1_RIN1)
+		val |= ADCSEL_LINSEL_LIN1;
+	else if (lin == ADC_SRC_LIN2_RIN2)
+		val |= ADCSEL_LINSEL_LIN2;
+	else
+		return (EINVAL);
+
+	sc->adc_src = lin;
+	es8316_write(sc, ESCODEC_ADCSEL_REG, val);
+
+	return (0);
+}
+
+static int
+es8316_sysctl_audio_src(SYSCTL_HANDLER_ARGS)
+{
+	struct es8316_softc *sc = arg1;
+	int val;
+	int err;
+
+	val = sc->adc_src;
+	err = sysctl_handle_int(oidp, &val, 0, req);
+	if (err || !req->newptr) /* error || read request */
+		return (err);
+
+	return es8316_set_rec_src(sc, val);
+}
 
 static int
 es8316_probe(device_t dev)
@@ -266,6 +337,9 @@ es8316_attach(device_t dev)
 	int error;
 	phandle_t node;
 	uint8_t val;
+	struct sysctl_ctx_list *ctx;
+	struct sysctl_oid *tree_node;
+	struct sysctl_oid_list *tree;
 
 	sc = device_get_softc(dev);
 	sc->dev = dev;
@@ -276,7 +350,6 @@ es8316_attach(device_t dev)
 		device_printf(dev, "cannot get mclk clock\n");
 		return (ENXIO);
 	}
-	clk_set_freq(sc->clk, 12288000, 0);
 
 	clk_enable(sc->clk);
 
@@ -320,7 +393,7 @@ es8316_attach(device_t dev)
 	es8316_write(sc, ESCODEC_DACPWR_REG, 0);
 
 	/* Power up HP mixer and unmute */
-	es8316_write(sc, ESCODEC_HPMIX_REG, 0);
+	es8316_write(sc, ESCODEC_HPMIX_REG, (1 << 3) | (1<<7));
 
 	/* Power up HP output driver */
 	es8316_read(sc, ESCODEC_HPPWR_REG, &val);
@@ -330,10 +403,25 @@ es8316_attach(device_t dev)
 	/* Power up HP charge pump circuits */
 	es8316_read(sc, ESCODEC_CPPWR_REG, &val);
 	val &= ~CPPWR_PDN_CP;
+	val |= CPPWR_CI_HIPWR;
 	es8316_write(sc, ESCODEC_CPPWR_REG, val);
+
+	/* Power up CP negative regulator */
+	es8316_write(sc, ESCODEC_LDOCTL_REG, LDOCTL_LDOLVL_1_45);
+
+	/* Enable low power mode */
+	es8316_write(sc, ESCODEC_LP1_REG, 0x3f);
+	es8316_write(sc, ESCODEC_LP2_REG, 0x1f);
 
 	/* Set LIN1/RIN1 as inputs for HP mixer */
 	es8316_write(sc, ESCODEC_HPSEL_REG, 0);
+
+	/* Set LIN2/RIN2 as inputs for ADC and power up ADC/PGA */
+	es8316_read(sc, ESCODEC_ADCSEL_REG, &val);
+	val &= ~(ADCSEL_PDN_AINL | ADCSEL_PDN_MODL);
+	es8316_write(sc, ESCODEC_ADCSEL_REG, val);
+
+	es8316_set_rec_src(sc, ADC_SRC_LIN2_RIN2);
 
 	/* Power up HP output driver calibration */
 	es8316_read(sc, ESCODEC_HPVOL_REG, &val);
@@ -341,11 +429,11 @@ es8316_attach(device_t dev)
 	val &= ~HPVOL_PDN_RICAL;
 	es8316_write(sc, ESCODEC_HPVOL_REG, val);
 
-	/* Set headphone mixer to -6dB */
-	es8316_write(sc, ESCODEC_HPMIXVOL_REG, 0x44);
+	/* Set headphone mixer to 0dB */
+	es8316_write(sc, ESCODEC_HPMIXVOL_REG, 0xbb);
 
-	/* Set charge pump headphone to -48dB */
-	es8316_write(sc, ESCODEC_HPVOL_REG, 0x33);
+	/* Set charge pump headphone to 0dB */
+	es8316_write(sc, ESCODEC_HPVOL_REG, 0x00);
 
 	/* Set DAC to 0dB */
 	es8316_write(sc, ESCODEC_DACVOL_L_REG, 0);
@@ -355,6 +443,17 @@ es8316_attach(device_t dev)
 	val = HPOUTEN_EN_HPL | HPOUTEN_EN_HPR |
 	    HPOUTEN_HPL_OUTEN | HPOUTEN_HPR_OUTEN;
 	es8316_write(sc, ESCODEC_HPOUTEN_REG, val);
+
+	/*
+	 * Add system sysctl tree/handlers.
+	 */
+	ctx = device_get_sysctl_ctx(sc->dev);
+	tree_node = device_get_sysctl_tree(sc->dev);
+	tree = SYSCTL_CHILDREN(tree_node);
+	SYSCTL_ADD_PROC(ctx, tree, OID_AUTO, "recsrc",
+	    CTLFLAG_RW | CTLTYPE_UINT | CTLFLAG_NEEDGIANT, sc, sizeof(*sc),
+	    es8316_sysctl_audio_src, "IU", "ADC source, "
+	    "1 - LIN1/RIN1, 2 - LIN2/RIN2");
 
 	return (0);
 }
@@ -429,8 +528,9 @@ es8316_dai_init(device_t dev, uint32_t format)
 	val |= CLKMAN1_CLK_CP_ON;
 	val |= CLKMAN1_CLK_DAC_ON;
 	val |= CLKMAN1_ANACLK_DAC_ON;
+	val |= CLKMAN1_CLK_ADC_ON;
+	val |= CLKMAN1_ANACLK_ADC_ON;
 	es8316_write(sc, ESCODEC_CLKMAN1_REG, val);
-
 
 	return (0);
 }
@@ -447,16 +547,55 @@ es8316_dai_setup_mixer(device_t dev, device_t pcmdev)
 static int
 es8316_dai_trigger(device_t dev, int go, int pcm_dir)
 {
+	struct es8316_softc *sc;
+	sc = device_get_softc(dev);
 
+	if ((pcm_dir != PCMDIR_PLAY) && (pcm_dir != PCMDIR_REC))
+		return (EINVAL);
+
+	/* TODO: may be move amps/clocks enable/disable here */
 	switch (go) {
 	case PCMTRIG_START:
-		/* TODO: power up amps */
+		if (pcm_dir == PCMDIR_PLAY) {
+		}
+		else if (pcm_dir == PCMDIR_REC) {
+		}
 		break;
 
 	case PCMTRIG_STOP:
 	case PCMTRIG_ABORT:
-		/* TODO: power down amps */
+		if (pcm_dir == PCMDIR_PLAY) {
+		}
+		else if (pcm_dir == PCMDIR_REC) {
+		}
 		break;
+	}
+
+	return (0);
+}
+
+static int
+es8316_dai_set_sysclk(device_t dev, unsigned int rate, int dai_dir)
+{
+	struct es8316_softc *sc;
+	int error;
+
+	sc = device_get_softc(dev);
+
+	error = clk_disable(sc->clk);
+	if (error != 0) {
+		device_printf(sc->dev, "could not disable mclk clock\n");
+		return (error);
+	}
+
+	error = clk_set_freq(sc->clk, rate, CLK_SET_ROUND_DOWN);
+	if (error != 0)
+		device_printf(sc->dev, "could not set mclk freq\n");
+
+	error = clk_enable(sc->clk);
+	if (error != 0) {
+		device_printf(sc->dev, "could not enable mclk clock\n");
+		return (error);
 	}
 
 	return (0);
@@ -471,6 +610,7 @@ static device_method_t es8316_methods[] = {
 	DEVMETHOD(audio_dai_init,	es8316_dai_init),
 	DEVMETHOD(audio_dai_setup_mixer,	es8316_dai_setup_mixer),
 	DEVMETHOD(audio_dai_trigger,	es8316_dai_trigger),
+	DEVMETHOD(audio_dai_set_sysclk,	es8316_dai_set_sysclk),
 
 	DEVMETHOD_END,
 };
