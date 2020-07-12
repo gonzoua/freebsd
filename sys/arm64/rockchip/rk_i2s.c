@@ -123,11 +123,13 @@ __FBSDID("$FreeBSD$");
 #define		RXFIFO0LR_MASK		0x3f
 
 /* syscon */
-#define	I2S_IO_DIRECTION_MASK		(7)
-#define	I2S_IO_8CH_OUT_2CH_IN		(0)
-#define	I2S_IO_6CH_OUT_4CH_IN		(4)
-#define	I2S_IO_4CH_OUT_6CH_IN		(6)
-#define	I2S_IO_2CH_OUT_8CH_IN		(7)
+#define	GRF_SOC_CON8			0xe220
+#define	I2S_IO_DIRECTION_MASK		7
+#define	I2S_IO_DIRECTION_SHIFT		11
+#define	I2S_IO_8CH_OUT_2CH_IN		0
+#define	I2S_IO_6CH_OUT_4CH_IN		4
+#define	I2S_IO_4CH_OUT_6CH_IN		6
+#define	I2S_IO_2CH_OUT_8CH_IN		7
 
 #define DIV_ROUND_CLOSEST(n,d)  (((n) + (d) / 2) / (d))
 
@@ -194,9 +196,9 @@ rk_i2s_init(struct rk_i2s_softc *sc)
 	RK_I2S_WRITE_4(sc, I2S_INTCR, val);
 
 	if (sc->grf) {
-		val = (0 << 11);
-		val |= (I2S_IO_DIRECTION_MASK << 11) << 16;
-		SYSCON_WRITE_4(sc->grf, 0xe220, val);
+		val = (I2S_IO_2CH_OUT_8CH_IN << I2S_IO_DIRECTION_SHIFT);
+		val |= (I2S_IO_DIRECTION_MASK << I2S_IO_DIRECTION_SHIFT) << 16;
+		SYSCON_WRITE_4(sc->grf, GRF_SOC_CON8, val);
 
 		#if 0
 		// HACK: enable IO domain
