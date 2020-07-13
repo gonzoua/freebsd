@@ -795,7 +795,7 @@ kern_fcntl(struct thread *td, int fd, int cmd, intptr_t arg)
 		if (arg >= 0) {
 			bsize = fp->f_vnode->v_mount->mnt_stat.f_iosize;
 			arg = MIN(arg, INT_MAX - bsize + 1);
-			fp->f_seqcount = MIN(IO_SEQMAX,
+			fp->f_seqcount[UIO_READ] = MIN(IO_SEQMAX,
 			    (arg + bsize - 1) / bsize);
 			atomic_set_int(&fp->f_flag, FRDAHEAD);
 		} else {
@@ -3347,13 +3347,17 @@ pwd_hold(struct thread *td)
 	fdp = td->td_proc->p_fd;
 
 	smr_enter(pwd_smr);
-	for (;;) {
-		pwd = smr_entered_load(&fdp->fd_pwd, pwd_smr);
-		MPASS(pwd != NULL);
-		if (refcount_acquire_if_not_zero(&pwd->pwd_refcount))
-			break;
+	pwd = smr_entered_load(&fdp->fd_pwd, pwd_smr);
+	MPASS(pwd != NULL);
+	if (__predict_true(refcount_acquire_if_not_zero(&pwd->pwd_refcount))) {
+		smr_exit(pwd_smr);
+		return (pwd);
 	}
 	smr_exit(pwd_smr);
+	FILEDESC_SLOCK(fdp);
+	pwd = pwd_hold_filedesc(fdp);
+	MPASS(pwd != NULL);
+	FILEDESC_SUNLOCK(fdp);
 	return (pwd);
 }
 

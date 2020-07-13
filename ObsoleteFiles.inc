@@ -36,6 +36,12 @@
 #   xargs -n1 | sort | uniq -d;
 # done
 
+# 20200706: update of sglist(9), r360574
+OLD_FILES+=usr/share/man/man9/sglist_append_ext_pgs.9.gz
+OLD_FILES+=usr/share/man/man9/sglist_append_mb_ext_pgs.9.gz
+OLD_FILES+=usr/share/man/man9/sglist_count_ext_pgs.9.gz
+OLD_FILES+=usr/share/man/man9/sglist_count_mb_ext_pgs.9.gz
+
 # 20200617: update opencsd to 0.14.2
 OLD_FILES+=usr/include/opencsd/etmv4/trc_pkt_elem_etmv4d.h
 
@@ -6763,7 +6769,6 @@ OLD_FILES+=usr/include/clang/3.3/x86intrin.h
 OLD_FILES+=usr/include/clang/3.3/xmmintrin.h
 OLD_FILES+=usr/include/clang/3.3/xopintrin.h
 OLD_FILES+=usr/share/man/man1/llvm-prof.1.gz
-OLD_FILES+=usr/share/man/man1/llvm-ranlib.1.gz
 OLD_DIRS+=usr/include/clang/3.3
 # 20140216: nve(4) removed
 OLD_FILES+=usr/share/man/man4/if_nve.4.gz
