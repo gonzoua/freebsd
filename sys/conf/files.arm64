@@ -328,6 +328,7 @@ dev/psci/smccc.c		standard
 dev/sdhci/sdhci_xenon.c		optional	sdhci_xenon sdhci fdt
 dev/sound/fdt/audio_soc.c	optional	sound fdt
 dev/sound/fdt/audio_dai_if.m	optional	sound fdt
+dev/sound/fdt/dummy_codec.c	optional	sound fdt
 dev/uart/uart_cpu_arm64.c	optional	uart
 dev/uart/uart_dev_mu.c		optional	uart uart_mu
 dev/uart/uart_dev_pl011.c	optional	uart pl011
