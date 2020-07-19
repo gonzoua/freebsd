@@ -1327,6 +1327,8 @@ dwc_attach(device_t dev)
 	struct ifnet *ifp;
 	int error, i;
 	uint32_t reg;
+	char *phy_mode;
+	phandle_t node;
 
 	sc = device_get_softc(dev);
 	sc->dev = dev;
@@ -1334,6 +1336,15 @@ dwc_attach(device_t dev)
 	sc->txcount = TX_DESC_COUNT;
 	sc->mii_clk = IF_DWC_MII_CLK(dev);
 	sc->mactype = IF_DWC_MAC_TYPE(dev);
+
+	node = ofw_bus_get_node(dev);
+	if (OF_getprop_alloc(node, "phy-mode", (void **)&phy_mode)) {
+		if (strcmp(phy_mode, "rgmii") == 0)
+			sc->phy_mode = PHY_MODE_RGMII;
+		if (strcmp(phy_mode, "rmii") == 0)
+			sc->phy_mode = PHY_MODE_RMII;
+		OF_prop_free(phy_mode);
+	}
 
 	if (IF_DWC_INIT(dev) != 0)
 		return (ENXIO);

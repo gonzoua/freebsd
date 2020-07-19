@@ -67,6 +67,17 @@ __FBSDID("$FreeBSD$");
 #define	 RK3328_GRF_MAC_CON1_GMII_CLK_SEL_125	(0 << 11)
 #define	 RK3328_GRF_MAC_CON1_GMII_CLK_SEL_25	(3 << 11)
 #define	 RK3328_GRF_MAC_CON1_GMII_CLK_SEL_2_5	(2 << 11)
+#define	 RK3328_GRF_MAC_CON1_RMII_MODE_MASK	(1 << 9)
+#define	 RK3328_GRF_MAC_CON1_RMII_MODE		(1 << 9)
+#define	 RK3328_GRF_MAC_CON1_INT_SEL_MASK	(7 << 4)
+#define	 RK3328_GRF_MAC_CON1_INT_RMII		(4 << 4)
+#define	 RK3328_GRF_MAC_CON1_INT_RGMII		(1 << 4)
+#define	 RK3328_GRF_MAC_CON1_RGMII_CLK_SEL_MASK	(1 << 7)
+#define	 RK3328_GRF_MAC_CON1_RGMII_CLK_SEL_25	(1 << 7)
+#define	 RK3328_GRF_MAC_CON1_RGMII_CLK_SEL_2_5	(0 << 7)
+#define	 RK3328_GRF_MAC_CON1_RGMII_SPEED_MASK	(1 << 2)
+#define	 RK3328_GRF_MAC_CON1_RGMII_SPEED_100	(1 << 2)
+#define	 RK3328_GRF_MAC_CON1_RGMII_SPEED_10	(0 << 1)
 #define	RK3328_GRF_MAC_CON2		0x0908
 #define	RK3328_GRF_MACPHY_CON0		0x0B00
 #define	RK3328_GRF_MACPHY_CON1		0x0B04
@@ -91,10 +102,12 @@ struct if_dwc_rk_softc;
 
 typedef void (*if_dwc_rk_set_delaysfn_t)(struct if_dwc_rk_softc *);
 typedef int (*if_dwc_rk_set_speedfn_t)(struct if_dwc_rk_softc *, int);
+typedef int (*if_dwc_rk_set_phy_modefn_t)(struct if_dwc_rk_softc *);
 
 struct if_dwc_rk_ops {
 	if_dwc_rk_set_delaysfn_t	set_delays;
 	if_dwc_rk_set_speedfn_t		set_speed;
+	if_dwc_rk_set_phy_modefn_t	set_phy_mode;
 };
 
 struct if_dwc_rk_softc {
@@ -107,6 +120,7 @@ struct if_dwc_rk_softc {
 
 static void rk3328_set_delays(struct if_dwc_rk_softc *sc);
 static int rk3328_set_speed(struct if_dwc_rk_softc *sc, int speed);
+static int rk3328_set_phy_mode(struct if_dwc_rk_softc *sc);
 static void rk3399_set_delays(struct if_dwc_rk_softc *sc);
 static int rk3399_set_speed(struct if_dwc_rk_softc *sc, int speed);
 
@@ -116,6 +130,7 @@ static struct if_dwc_rk_ops rk3288_ops = {
 static struct if_dwc_rk_ops rk3328_ops = {
 	.set_delays = rk3328_set_delays,
 	.set_speed = rk3328_set_speed,
+	.set_phy_mode = rk3328_set_phy_mode,
 };
 
 static struct if_dwc_rk_ops rk3399_ops = {
@@ -135,6 +150,9 @@ rk3328_set_delays(struct if_dwc_rk_softc *sc)
 {
 	uint32_t reg;
 	uint32_t tx, rx;
+
+	if (sc->base.phy_mode != PHY_MODE_RGMII)
+		return;
 
 	reg = SYSCON_READ_4(sc->grf, RK3328_GRF_MAC_CON0);
 	tx = ((reg >> RK3328_GRF_MAC_CON0_TX_SHIFT) & RK3328_GRF_MAC_CON0_TX_MASK);
@@ -161,18 +179,8 @@ rk3328_set_delays(struct if_dwc_rk_softc *sc)
 	SYSCON_WRITE_4(sc->grf, RK3328_GRF_MAC_CON0, reg);
 
 	reg = SYSCON_READ_4(sc->grf, RK3328_GRF_MAC_CON1);
-	device_printf(sc->base.dev, ">>> RK3328_GRF_MAC_CON1 (%08x):\n", reg);
-	device_printf(sc->base.dev, ">>>     gmac2io_gmii_clk_sel: 0x%x\n", (reg >> 11) & 3);
-	device_printf(sc->base.dev, ">>>     gmac2io_rmii_extclk_sel: 0x%x\n", (reg >> 10) & 1);
-	device_printf(sc->base.dev, ">>>     gmac2io_rmii_mode: 0x%x\n", (reg >> 9) & 1);
-	device_printf(sc->base.dev, ">>>     gmac2io_rmii_clk_sel: 0x%x\n", (reg >> 7) & 1);
-	device_printf(sc->base.dev, ">>>     gmac2io_phy_intf_sel: 0x%x\n", (reg >> 4) & 7);
-	device_printf(sc->base.dev, ">>>     gmac2io_flowctrl: 0x%x\n", (reg >> 3) & 1);
-	device_printf(sc->base.dev, ">>>     gmac2io_rxclk_dly_ena: 0x%x\n", (reg >> 1) & 1);
-	device_printf(sc->base.dev, ">>>     gmac2io_txclk_dly_ena: 0x%x\n", (reg >> 0) & 1);
 
 	reg = SYSCON_READ_4(sc->grf, RK3328_GRF_MAC_CON0);
-	device_printf(sc->base.dev, ">>> RK3328_GRF_MAC_CON0 (%08x):\n", reg);
 }
 
 static int
@@ -180,32 +188,77 @@ rk3328_set_speed(struct if_dwc_rk_softc *sc, int speed)
 {
 	uint32_t reg;
 
-	switch (speed) {
-	case IFM_1000_T:
-	case IFM_1000_SX:
-		reg = RK3328_GRF_MAC_CON1_GMII_CLK_SEL_125;
+	switch (sc->base.phy_mode) {
+	case PHY_MODE_RGMII:
+		switch (speed) {
+		case IFM_1000_T:
+		case IFM_1000_SX:
+			reg = RK3328_GRF_MAC_CON1_GMII_CLK_SEL_125;
+			break;
+		case IFM_100_TX:
+			reg = RK3328_GRF_MAC_CON1_GMII_CLK_SEL_25;
+			break;
+		case IFM_10_T:
+			reg = RK3328_GRF_MAC_CON1_GMII_CLK_SEL_2_5;
+			break;
+		default:
+			device_printf(sc->base.dev, "unsupported RGMII media %u\n", speed);
+			return (-1);
+		}
+
+		SYSCON_WRITE_4(sc->grf, RK3328_GRF_MAC_CON1,
+		    ((RK3328_GRF_MAC_CON1_GMII_CLK_SEL_MASK << 16) | reg));
 		break;
-	case IFM_100_TX:
-		reg = RK3328_GRF_MAC_CON1_GMII_CLK_SEL_25;
+	case PHY_MODE_RMII:
+		switch (speed) {
+		case IFM_100_TX:
+			reg = RK3328_GRF_MAC_CON1_RGMII_CLK_SEL_25 |
+			    RK3328_GRF_MAC_CON1_RGMII_SPEED_100;
+			break;
+		case IFM_10_T:
+			reg = RK3328_GRF_MAC_CON1_RGMII_CLK_SEL_2_5 |
+			    RK3328_GRF_MAC_CON1_RGMII_SPEED_10;
+			break;
+		default:
+			device_printf(sc->base.dev, "unsupported RMII media %u\n", speed);
+			return (-1);
+		}
+
+		SYSCON_WRITE_4(sc->grf, RK3328_GRF_MAC_CON1, reg |
+		    ((RK3328_GRF_MAC_CON1_RGMII_CLK_SEL_MASK | RK3328_GRF_MAC_CON1_RGMII_SPEED_MASK) << 16));
 		break;
-	case IFM_10_T:
-		reg = RK3328_GRF_MAC_CON1_GMII_CLK_SEL_2_5;
-		break;
-	default:
-		device_printf(sc->base.dev, "unsupported media %u\n", speed);
-		return (-1);
 	}
 
-	SYSCON_WRITE_4(sc->grf, RK3328_GRF_MAC_CON1,
-	    ((RK3328_GRF_MAC_CON1_GMII_CLK_SEL_MASK << 16) | reg));
 	return (0);
 }
 
+static int
+rk3328_set_phy_mode(struct if_dwc_rk_softc *sc)
+{
+
+	switch (sc->base.phy_mode) {
+	case PHY_MODE_RGMII:
+		SYSCON_WRITE_4(sc->grf, RK3328_GRF_MAC_CON1,
+		    ((RK3328_GRF_MAC_CON1_INT_SEL_MASK | RK3328_GRF_MAC_CON1_RMII_MODE_MASK) << 16) |
+		    RK3328_GRF_MAC_CON1_INT_RGMII);
+		break;
+	case PHY_MODE_RMII:
+		SYSCON_WRITE_4(sc->grf, RK3328_GRF_MAC_CON1,
+		    ((RK3328_GRF_MAC_CON1_INT_SEL_MASK | RK3328_GRF_MAC_CON1_RMII_MODE_MASK) << 16) |
+		    RK3328_GRF_MAC_CON1_INT_RMII | RK3328_GRF_MAC_CON1_RMII_MODE);
+		break;
+	}
+
+	return (0);
+}
 
 static void
 rk3399_set_delays(struct if_dwc_rk_softc *sc)
 {
 	uint32_t reg, tx, rx;
+
+	if (sc->base.phy_mode != PHY_MODE_RGMII)
+		return;
 
 	reg = SYSCON_READ_4(sc->grf, RK3399_GRF_SOC_CON6);
 	tx = ((reg >> RK3399_GRF_SOC_CON6_TX_SHIFT) & RK3399_GRF_SOC_CON6_TX_MASK);
@@ -329,6 +382,9 @@ if_dwc_rk_init(device_t dev)
 		rx = 0x10;
 	sc->tx_delay = tx;
 	sc->rx_delay = rx;
+
+	if (sc->ops->set_phy_mode)
+	    sc->ops->set_phy_mode(sc);
 
 	if (sc->ops->set_delays)
 	    sc->ops->set_delays(sc);
