@@ -6,7 +6,8 @@ DTS=	\
 	rockchip/rk3399-khadas-edge-v.dts \
 	rockchip/rk3328-rock64.dts \
 	rockchip/rk3399-firefly.dts \
-	rockchip/rk3399-rockpro64.dts
+	rockchip/rk3399-rockpro64.dts \
+	rockchip/rk3328-rock-pi-e.dts
 
 DTSO=	rk3328-dwc3.dtso
 
