@@ -927,9 +927,11 @@ MLINKS+=crypto_driver.9 crypto_copyback.9 \
 	crypto_driver.9 CRYPTODEV_PROCESS.9 \
 	crypto_driver.9 hmac_init_ipad.9 \
 	crypto_driver.9 hmac_init_opad.9
-MLINKS+=crypto_request.9 crypto_dispatch.9 \
+MLINKS+=crypto_request.9 crypto_destroyreq.9 \
+	crypto_request.9 crypto_dispatch.9 \
 	crypto_request.9 crypto_freereq.9 \
 	crypto_request.9 crypto_getreq.9 \
+	crypto_request.9 crypto_initreq.9 \
 	crypto_request.9 crypto_use_buf.9 \
 	crypto_request.9 crypto_use_mbuf.9 \
 	crypto_request.9 crypto_use_output_buf.9 \
@@ -966,10 +968,12 @@ MLINKS+=device_set_desc.9 device_get_desc.9 \
 	device_set_desc.9 device_set_desc_copy.9
 MLINKS+=device_set_flags.9 device_get_flags.9
 MLINKS+=devstat.9 devicestat.9 \
-	devstat.9 devstat_add_entry.9 \
+	devstat.9 devstat_new_entry.9 \
 	devstat.9 devstat_end_transaction.9 \
+	devstat.9 devstat_end_transaction_bio.9 \
 	devstat.9 devstat_remove_entry.9 \
-	devstat.9 devstat_start_transaction.9
+	devstat.9 devstat_start_transaction.9 \
+	devstat.9 devstat_start_transaction_bio.9
 MLINKS+=disk.9 disk_add_alias.9 \
 	disk.9 disk_alloc.9 \
 	disk.9 disk_create.9 \
@@ -1902,9 +1906,8 @@ MLINKS+=sf_buf.9 sf_buf_alloc.9 \
 MLINKS+=sglist.9 sglist_alloc.9 \
 	sglist.9 sglist_append.9 \
 	sglist.9 sglist_append_bio.9 \
-	sglist.9 sglist_append_ext_pgs.9 \
-	sglist.9 sglist_append_mb_ext_pgs.9 \
 	sglist.9 sglist_append_mbuf.9 \
+	sglist.9 sglist_append_mbuf_epg.9 \
 	sglist.9 sglist_append_phys.9 \
 	sglist.9 sglist_append_sglist.9 \
 	sglist.9 sglist_append_uio.9 \
@@ -1914,8 +1917,7 @@ MLINKS+=sglist.9 sglist_alloc.9 \
 	sglist.9 sglist_clone.9 \
 	sglist.9 sglist_consume_uio.9 \
 	sglist.9 sglist_count.9 \
-	sglist.9 sglist_count_ext_pgs.9 \
-	sglist.9 sglist_count_mb_ext_pgs.9 \
+	sglist.9 sglist_count_mbuf_epg.9 \
 	sglist.9 sglist_count_vmpages.9 \
 	sglist.9 sglist_free.9 \
 	sglist.9 sglist_hold.9 \

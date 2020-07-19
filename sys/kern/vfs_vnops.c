@@ -192,7 +192,7 @@ vn_open(struct nameidata *ndp, int *flagp, int cmode, struct file *fp)
  * Common code for vnode open operations via a name lookup.
  * Lookup the vnode and invoke VOP_CREATE if needed.
  * Check permissions, and call the VOP_OPEN or VOP_CREATE routine.
- * 
+ *
  * Note that this does NOT free nameidata for the successful case,
  * due to the NDINIT being done elsewhere.
  */
@@ -1552,16 +1552,16 @@ vn_stat(struct vnode *vp, struct stat *sb, struct ucred *active_cred,
 	sb->st_birthtim.tv_sec = vap->va_birthtime.tv_sec;
 	sb->st_birthtim.tv_nsec = vap->va_birthtime.tv_nsec;
 
-        /*
+	/*
 	 * According to www.opengroup.org, the meaning of st_blksize is 
 	 *   "a filesystem-specific preferred I/O block size for this 
 	 *    object.  In some filesystem types, this may vary from file
 	 *    to file"
-	 * Use miminum/default of PAGE_SIZE (e.g. for VCHR).
+	 * Use minimum/default of PAGE_SIZE (e.g. for VCHR).
 	 */
 
 	sb->st_blksize = max(PAGE_SIZE, vap->va_blocksize);
-	
+
 	sb->st_flags = vap->va_flags;
 	if (priv_check_cred_vfs_generation(td->td_ucred))
 		sb->st_gen = 0;
@@ -1635,14 +1635,16 @@ vn_poll(struct file *fp, int events, struct ucred *active_cred,
 	int error;
 
 	vp = fp->f_vnode;
-#ifdef MAC
-	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
-	AUDIT_ARG_VNODE1(vp);
-	error = mac_vnode_check_poll(active_cred, fp->f_cred, vp);
-	VOP_UNLOCK(vp);
-	if (!error)
+#if defined(MAC) || defined(AUDIT)
+	if (AUDITING_TD(td) || mac_vnode_check_poll_enabled()) {
+		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
+		AUDIT_ARG_VNODE1(vp);
+		error = mac_vnode_check_poll(active_cred, fp->f_cred, vp);
+		VOP_UNLOCK(vp);
+		if (error != 0)
+			return (error);
+	}
 #endif
-
 	error = VOP_POLL(vp, events, fp->f_cred, td);
 	return (error);
 }
