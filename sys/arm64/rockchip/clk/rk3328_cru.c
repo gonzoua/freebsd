@@ -71,6 +71,9 @@ __FBSDID("$FreeBSD$");
 #define	SCLK_MAC2PHY		101
 #define	SCLK_MAC2IO_EXT		102
 #define	ACLK_USB3OTG		132
+#define ACLK_GMAC		146
+#define ACLK_MAC2PHY		149
+#define ACLK_MAC2IO		150
 #define	ACLK_PERI		153
 #define	PCLK_GPIO0		200
 #define	PCLK_GPIO1		201
@@ -81,6 +84,9 @@ __FBSDID("$FreeBSD$");
 #define	PCLK_I2C2		207
 #define	PCLK_I2C3		208
 #define	PCLK_TSADC		213
+#define PCLK_GMAC		220
+#define PCLK_MAC2PHY		222
+#define PCLK_MAC2IO		223
 #define	PCLK_USB3PHY_OTG	224
 #define	PCLK_USB3PHY_PIPE	225
 #define	PCLK_USB3_GRF		226
@@ -141,6 +147,12 @@ static struct rk_cru_gate rk3328_gates[] = {
 	CRU_GATE(0, "pclk_peri_niu", "hclk_peri", 0x24C, 13)
 	CRU_GATE(ACLK_USB3OTG, "aclk_usb3otg", "aclk_peri", 0x24C, 14)
 	CRU_GATE(HCLK_SDMMC_EXT, "hclk_sdmmc_ext", "hclk_peri", 0x24C, 15)
+
+	/* CRU_CLKGATE_CON26 */
+	CRU_GATE(ACLK_MAC2PHY, "aclk_mac2phy", "aclk_gmac", 0x268, 0)
+	CRU_GATE(PCLK_MAC2PHY, "pclk_mac2phy", "pclk_gmac", 0x268, 1)
+	CRU_GATE(ACLK_MAC2IO, "aclk_mac2io", "aclk_gmac", 0x268, 2)
+	CRU_GATE(PCLK_MAC2IO, "pclk_mac2io", "pclk_gmac", 0x268, 3)
 
 	/* CRU_CLKGATE_CON28 */
 	CRU_GATE(PCLK_USB3PHY_OTG, "pclk_usb3phy_otg", "pclk_phy_pre", 0x270, 1)
@@ -1260,6 +1272,53 @@ static struct clk_link_def gmac_clkin = {
 	.clkdef.name = "gmac_clkin",
 };
 
+static const char *aclk_gmac_parents[] = { "cpll", "gpll" };
+
+static struct rk_clk_composite_def aclk_gmac = {
+	.clkdef = {
+		.id = ACLK_GMAC,
+		.name = "aclk_gmac",
+		.parent_names = aclk_gmac_parents,
+		.parent_cnt = nitems(aclk_gmac_parents),
+	},
+	/* CRU_CLKSEL_CON35 */
+	.muxdiv_offset = 0x18c,
+
+	.mux_shift = 6,
+	.mux_width = 2,
+
+	.div_shift = 0,
+	.div_width = 5,
+
+	/* CRU_CLKGATE_CON3 */
+	.gate_offset = 0x20c,
+	.gate_shift = 2,
+
+	.flags = RK_CLK_COMPOSITE_HAVE_GATE | RK_CLK_COMPOSITE_HAVE_MUX,
+};
+
+static const char *pclk_gmac_parents[] = { "aclk_gmac" };
+
+static struct rk_clk_composite_def pclk_gmac = {
+	.clkdef = {
+		.id = PCLK_GMAC,
+		.name = "pclk_gmac",
+		.parent_names = pclk_gmac_parents,
+		.parent_cnt = nitems(pclk_gmac_parents),
+	},
+	/* CRU_CLKSEL_CON25 */
+	.muxdiv_offset = 0x164,
+
+	.div_shift = 8,
+	.div_width = 3,
+
+	/* CRU_CLKGATE_CON9 */
+	.gate_offset = 0x224,
+	.gate_shift = 0,
+
+	.flags = RK_CLK_COMPOSITE_HAVE_GATE
+};
+
 static struct rk_clk rk3328_clks[] = {
 	{
 		.type = RK3328_CLK_PLL,
@@ -1393,6 +1452,14 @@ static struct rk_clk rk3328_clks[] = {
 	{
 		.type = RK_CLK_LINK,
 		.clk.link = &gmac_clkin
+	},
+	{
+		.type = RK_CLK_COMPOSITE,
+		.clk.composite = &aclk_gmac
+	},
+	{
+		.type = RK_CLK_COMPOSITE,
+		.clk.composite = &pclk_gmac
 	},
 };
 
