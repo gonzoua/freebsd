@@ -45,14 +45,14 @@ __FBSDID("$FreeBSD$");
 #include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/ofw_bus_subr.h>
 
-#include <dev/extres/clk/clk.h>
-#include <dev/extres/regulator/regulator.h>
 
+#include <dev/extres/clk/clk.h>
+#include <dev/extres/hwreset/hwreset.h>
+#include <dev/extres/regulator/regulator.h>
 #include <dev/extres/syscon/syscon.h>
 
-#include "syscon_if.h"
-
 #include "if_dwc_if.h"
+#include "syscon_if.h"
 
 #define	RK3328_GRF_MAC_CON0		0x0900
 #define	 RK3328_GRF_MAC_CON0_TX_MASK	0x7F
@@ -80,7 +80,13 @@ __FBSDID("$FreeBSD$");
 #define	 RK3328_GRF_MAC_CON1_RGMII_SPEED_10	(0 << 1)
 #define	RK3328_GRF_MAC_CON2		0x0908
 #define	RK3328_GRF_MACPHY_CON0		0x0B00
+#define	 RK3328_GRF_MACPHY_CON0_CLK_50M_MASK	(1 << 14)
+#define	 RK3328_GRF_MACPHY_CON0_CLK_50M		(1 << 14)
+#define	 RK3328_GRF_MACPHY_CON0_RMII_MODE_MASK	(3 << 6)
+#define	 RK3328_GRF_MACPHY_CON0_RMII_MODE	(1 << 6)
 #define	RK3328_GRF_MACPHY_CON1		0x0B04
+#define	 RK3328_GRF_MACPHY_CON1_RMII_MODE_MASK	(1 << 9)
+#define	 RK3328_GRF_MACPHY_CON1_RMII_MODE	(1 << 9)
 #define	RK3328_GRF_MACPHY_CON2		0x0B08
 #define	RK3328_GRF_MACPHY_CON3		0x0B0C
 #define	RK3328_GRF_MACPHY_STATUS	0x0B10
@@ -114,8 +120,22 @@ struct if_dwc_rk_softc {
 	struct dwc_softc	base;
 	uint32_t		tx_delay;
 	uint32_t		rx_delay;
+	bool			integrated_phy;
+	bool			clock_in;
+	phandle_t		phy_node;
 	struct syscon		*grf;
 	struct if_dwc_rk_ops	*ops;
+	/* Common clocks */
+	clk_t			mac_clk_rx;
+	clk_t			mac_clk_tx;
+	clk_t			aclk_mac;
+	clk_t			pclk_mac;
+	clk_t			clk_stmmaceth;
+	/* RMII clocks */
+	clk_t			clk_mac_ref;
+	clk_t			clk_mac_refout;
+	/* PHY clock */
+	clk_t			clk_phy;
 };
 
 static void rk3328_set_delays(struct if_dwc_rk_softc *sc);
@@ -224,7 +244,9 @@ rk3328_set_speed(struct if_dwc_rk_softc *sc, int speed)
 			return (-1);
 		}
 
-		SYSCON_WRITE_4(sc->grf, RK3328_GRF_MAC_CON1, reg |
+		SYSCON_WRITE_4(sc->grf,
+		    sc->integrated_phy ? RK3328_GRF_MAC_CON2 : RK3328_GRF_MAC_CON1,
+		    reg |
 		    ((RK3328_GRF_MAC_CON1_RGMII_CLK_SEL_MASK | RK3328_GRF_MAC_CON1_RGMII_SPEED_MASK) << 16));
 		break;
 	}
@@ -243,7 +265,7 @@ rk3328_set_phy_mode(struct if_dwc_rk_softc *sc)
 		    RK3328_GRF_MAC_CON1_INT_RGMII);
 		break;
 	case PHY_MODE_RMII:
-		SYSCON_WRITE_4(sc->grf, RK3328_GRF_MAC_CON1,
+		SYSCON_WRITE_4(sc->grf, sc->integrated_phy ? RK3328_GRF_MAC_CON2 : RK3328_GRF_MAC_CON1,
 		    ((RK3328_GRF_MAC_CON1_INT_SEL_MASK | RK3328_GRF_MAC_CON1_RMII_MODE_MASK) << 16) |
 		    RK3328_GRF_MAC_CON1_INT_RMII | RK3328_GRF_MAC_CON1_RMII_MODE);
 		break;
@@ -359,12 +381,103 @@ if_dwc_rk_probe(device_t dev)
 }
 
 static int
+if_dwc_rk_init_clocks(device_t dev)
+{
+	struct if_dwc_rk_softc *sc;
+	int error;
+
+	sc = device_get_softc(dev);
+	error = clk_set_assigned(dev, ofw_bus_get_node(dev));
+	if (error != 0) {
+		device_printf(dev, "clk_set_assigned failed\n");
+		return (error);
+	}
+
+	/* Enable clocks */
+	error = clk_get_by_ofw_name(dev, 0, "stmmaceth", &sc->clk_stmmaceth);
+	if (error != 0) {
+		device_printf(dev, "could not find clock stmmaceth\n");
+		return (error);
+	}
+
+	if (clk_get_by_ofw_name(dev, 0, "mac_clk_rx", &sc->mac_clk_rx) != 0) {
+		device_printf(sc->base.dev, "could not get mac_clk_rx clock\n");
+		sc->mac_clk_rx = NULL;
+	}
+
+	if (clk_get_by_ofw_name(dev, 0, "mac_clk_tx", &sc->mac_clk_tx) != 0) {
+		device_printf(sc->base.dev, "could not get mac_clk_tx clock\n");
+		sc->mac_clk_tx = NULL;
+	}
+
+	if (clk_get_by_ofw_name(dev, 0, "aclk_mac", &sc->aclk_mac) != 0) {
+		device_printf(sc->base.dev, "could not get aclk_mac clock\n");
+		sc->aclk_mac = NULL;
+	}
+
+	if (clk_get_by_ofw_name(dev, 0, "pclk_mac", &sc->pclk_mac) != 0) {
+		device_printf(sc->base.dev, "could not get pclk_mac clock\n");
+		sc->pclk_mac = NULL;
+	}
+
+	if (sc->base.phy_mode == PHY_MODE_RGMII) {
+		if (clk_get_by_ofw_name(dev, 0, "clk_mac_ref", &sc->clk_mac_ref) != 0) {
+			device_printf(sc->base.dev, "could not get clk_mac_ref clock\n");
+			sc->clk_mac_ref = NULL;
+		}
+
+		if (!sc->clock_in) {
+			if (clk_get_by_ofw_name(dev, 0, "clk_mac_refout", &sc->clk_mac_refout) != 0) {
+				device_printf(sc->base.dev, "could not get clk_mac_refout clock\n");
+				sc->clk_mac_refout = NULL;
+			}
+
+			clk_set_freq(sc->clk_stmmaceth, 50000000, 0);
+		}
+	}
+
+	if ((sc->phy_node != 0) && sc->integrated_phy) {
+		if (clk_get_by_ofw_index(dev, sc->phy_node, 0, &sc->clk_phy) != 0) {
+			device_printf(sc->base.dev, "could not get PHY clock\n");
+			sc->clk_phy = NULL;
+		}
+
+		if (sc->clk_phy) {
+			clk_set_freq(sc->clk_phy, 50000000, 0);
+		}
+	}
+
+	if (sc->mac_clk_rx)
+		clk_enable(sc->mac_clk_rx);
+	if (sc->clk_mac_ref)
+		clk_enable(sc->clk_mac_ref);
+	if (sc->clk_mac_refout)
+		clk_enable(sc->clk_mac_refout);
+	if (sc->clk_phy)
+		clk_enable(sc->clk_phy);
+	if (sc->aclk_mac)
+		clk_enable(sc->aclk_mac);
+	if (sc->pclk_mac)
+		clk_enable(sc->pclk_mac);
+	if (sc->mac_clk_tx)
+		clk_enable(sc->mac_clk_tx);
+
+	DELAY(50);
+
+	return (0);
+}
+
+static int
 if_dwc_rk_init(device_t dev)
 {
 	struct if_dwc_rk_softc *sc;
 	phandle_t node;
 	uint32_t rx, tx;
 	int err;
+	pcell_t phy_handle;
+	char *clock_in_out;
+	hwreset_t phy_reset;
+	regulator_t phy_supply;
 
 	sc = device_get_softc(dev);
 	node = ofw_bus_get_node(dev);
@@ -383,6 +496,27 @@ if_dwc_rk_init(device_t dev)
 	sc->tx_delay = tx;
 	sc->rx_delay = rx;
 
+	sc->clock_in = true;
+	if (OF_getprop_alloc(node, "clock_in_out", (void **)&clock_in_out)) {
+		if (strcmp(clock_in_out, "input") == 0)
+			sc->clock_in = true;
+		else
+			sc->clock_in = false;
+		OF_prop_free(clock_in_out);
+	}
+
+	if (OF_getencprop(node, "phy-handle", (void *)&phy_handle,
+	    sizeof(phy_handle)) > 0)
+		sc->phy_node = OF_node_from_xref(phy_handle);
+
+	if (sc->phy_node)
+		sc->integrated_phy = OF_hasprop(sc->phy_node, "phy-is-integrated");
+
+	if (sc->integrated_phy)
+		device_printf(sc->base.dev, "PHY is integrated\n");
+
+	if_dwc_rk_init_clocks(dev);
+
 	if (sc->ops->set_phy_mode)
 	    sc->ops->set_phy_mode(sc);
 
@@ -396,7 +530,40 @@ if_dwc_rk_init(device_t dev)
 	if (err != 0)
 		return (err);
 
-	/* Mode should be set according to dtb property */
+	if (regulator_get_by_ofw_property(sc->base.dev, 0,
+		            "phy-supply", &phy_supply)) {
+		if (regulator_enable(phy_supply)) {
+			device_printf(sc->base.dev,
+			    "cannot enable 'phy' regulator\n");
+		}
+	}
+	else
+		device_printf(sc->base.dev, "no phy-supply property\n");
+
+	/* Power up */
+	if (sc->integrated_phy) {
+		/* XXX: RK3328 specific */
+		SYSCON_WRITE_4(sc->grf, RK3328_GRF_MACPHY_CON1,
+		    (RK3328_GRF_MACPHY_CON1_RMII_MODE_MASK << 16) |
+		    RK3328_GRF_MACPHY_CON1_RMII_MODE);
+
+		/* Common */
+		SYSCON_WRITE_4(sc->grf, RK3328_GRF_MACPHY_CON0,
+		    (RK3328_GRF_MACPHY_CON0_CLK_50M_MASK << 16) |
+		    RK3328_GRF_MACPHY_CON0_CLK_50M);
+		SYSCON_WRITE_4(sc->grf, RK3328_GRF_MACPHY_CON0,
+		    (RK3328_GRF_MACPHY_CON0_RMII_MODE_MASK << 16) |
+		    RK3328_GRF_MACPHY_CON0_RMII_MODE);
+		SYSCON_WRITE_4(sc->grf, RK3328_GRF_MACPHY_CON2, 0xffff1234);
+		SYSCON_WRITE_4(sc->grf, RK3328_GRF_MACPHY_CON3, 0x003f0035);
+
+		if (hwreset_get_by_ofw_idx(dev, sc->phy_node, 0, &phy_reset)  == 0) {
+			hwreset_assert(phy_reset);
+			DELAY(20);
+			hwreset_deassert(phy_reset);
+			DELAY(20);
+		}
+	}
 
 	return (0);
 }

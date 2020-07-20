@@ -1211,12 +1211,6 @@ dwc_clock_init(device_t dev)
 	int error;
 	int64_t freq;
 
-	error = clk_set_assigned(dev, ofw_bus_get_node(dev));
-	if (error != 0) {
-		device_printf(dev, "clk_set_assigned failed\n");
-		return (error);
-	}
-
 	/* Enable clocks */
 	if (clk_get_by_ofw_name(dev, 0, "stmmaceth", &clk) == 0) {
 		error = clk_enable(clk);
@@ -1229,67 +1223,6 @@ dwc_clock_init(device_t dev)
 	}
 	else {
 		device_printf(dev, "could not find clock stmmaceth\n");
-	}
-
-
-	if (clk_get_by_ofw_name(dev, 0, "aclk_mac", &clk) == 0) {
-		error = clk_enable(clk);
-		if (error != 0) {
-			device_printf(dev, "could not enable clock %s\n", clk_get_name(clk));
-		}
-		clk_get_freq(clk, &freq);
-		device_printf(dev, "MAC clock(%s) freq: %ld\n",  clk_get_name(clk), freq);
-	}
-	else {
-		device_printf(dev, "could not find clock aclk_mac\n");
-	}
-
-	if (clk_get_by_ofw_name(dev, 0, "pclk_mac", &clk) == 0) {
-		error = clk_enable(clk);
-		if (error != 0) {
-			device_printf(dev, "could not enable clock %s\n", clk_get_name(clk));
-		}
-		clk_get_freq(clk, &freq);
-		device_printf(dev, "MAC clock(%s) freq: %ld\n",  clk_get_name(clk), freq);
-	}
-	else {
-		device_printf(dev, "could not find clock pclk_mac\n");
-	}
-
-	if (clk_get_by_ofw_name(dev, 0, "mac_clk_tx", &clk) == 0) {
-		error = clk_enable(clk);
-		if (error != 0) {
-			device_printf(dev, "could not enable clock %s\n", clk_get_name(clk));
-		}
-		clk_get_freq(clk, &freq);
-		device_printf(dev, "MAC clock(%s) freq: %ld\n",  clk_get_name(clk), freq);
-	}
-	else {
-		device_printf(dev, "could not find clock mac_clk_tx\n");
-	}
-
-	if (clk_get_by_ofw_name(dev, 0, "clk_mac_speed", &clk) == 0) {
-		error = clk_enable(clk);
-		if (error != 0) {
-			device_printf(dev, "could not enable clock %s\n", clk_get_name(clk));
-		}
-		clk_get_freq(clk, &freq);
-		device_printf(dev, "MAC clock(%s) freq: %ld\n",  clk_get_name(clk), freq);
-	}
-	else {
-		device_printf(dev, "could not find clock clk_mac_speed\n");
-	}
-
-	if (clk_get_by_ofw_name(dev, 0, "clk_mac_speed", &clk) == 0) {
-		error = clk_enable(clk);
-		if (error != 0) {
-			device_printf(dev, "could not enable clock %s\n", clk_get_name(clk));
-		}
-		clk_get_freq(clk, &freq);
-		device_printf(dev, "MAC clock(%s) freq: %ld\n",  clk_get_name(clk), freq);
-	}
-	else {
-		device_printf(dev, "could not find clock clk_mac_speed\n");
 	}
 
 	/* De-assert reset */
