@@ -96,9 +96,10 @@ rk_clk_composite_write_4(struct clknode *clk, bus_addr_t addr, uint32_t val)
 	struct rk_clk_composite_sc *sc;
 
 	sc = clknode_get_softc(clk);
-	if (sc->grf)
+	if (sc->grf) {
+		val |= (0xffff << 16);
 		SYSCON_WRITE_4(sc->grf, addr, val);
-	else
+	} else
 		CLKDEV_WRITE_4(clknode_get_device(clk), addr, val);
 }
 
