@@ -441,7 +441,8 @@ typedef enum {
 extern char *zpool_vdev_name(libzfs_handle_t *, zpool_handle_t *, nvlist_t *,
     int name_flags);
 extern int zpool_upgrade(zpool_handle_t *, uint64_t);
-extern int zpool_get_history(zpool_handle_t *, nvlist_t **);
+extern int zpool_get_history(zpool_handle_t *, nvlist_t **, uint64_t *,
+    boolean_t *);
 extern int zpool_history_unpack(char *, uint64_t, uint64_t *,
     nvlist_t ***, uint_t *);
 extern void zpool_obj_to_path(zpool_handle_t *, uint64_t, uint64_t, char *,
@@ -836,6 +837,8 @@ extern int zpool_in_use(libzfs_handle_t *, int, pool_state_t *, char **,
 extern int zpool_read_label(int, nvlist_t **);
 extern int zpool_read_all_labels(int, nvlist_t **);
 extern int zpool_clear_label(int);
+extern int zpool_set_bootenv(zpool_handle_t *, const char *);
+extern int zpool_get_bootenv(zpool_handle_t *, char *, size_t, off_t);
 
 /* is this zvol valid for use as a dump device? */
 extern int zvol_check_dump_config(char *);

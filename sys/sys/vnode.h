@@ -45,6 +45,7 @@
 #include <sys/uio.h>
 #include <sys/acl.h>
 #include <sys/ktr.h>
+#include <sys/_seqc.h>
 
 /*
  * The vnode is the focus of all file activity in UNIX.  There is a
@@ -105,6 +106,8 @@ struct vnode {
 	 */
 	enum	vtype v_type:8;			/* u vnode type */
 	short	v_irflag;			/* i frequently read flags */
+	seqc_t	v_seqc;				/* i modification count */
+	uint32_t v_nchash;			/* u namecache hash */
 	struct	vop_vector *v_op;		/* u vnode operations vector */
 	void	*v_data;			/* u private data for fs */
 
@@ -169,12 +172,13 @@ struct vnode {
 
 	u_int	v_holdcnt;			/* I prevents recycling. */
 	u_int	v_usecount;			/* I ref count of users */
-	u_int	v_iflag;			/* i vnode flags (see below) */
-	u_int	v_vflag;			/* v vnode flags */
+	u_short	v_iflag;			/* i vnode flags (see below) */
+	u_short	v_vflag;			/* v vnode flags */
 	u_short	v_mflag;			/* l mnt-specific vnode flags */
 	short	v_dbatchcpu;			/* i LRU requeue deferral batch */
 	int	v_writecount;			/* I ref count of writers or
 						   (negative) text users */
+	int	v_seqc_users;			/* i modifications pending */
 	u_int	v_hash;
 };
 
@@ -242,10 +246,10 @@ struct xvnode {
 #define	VIRF_DOOMED	0x0001	/* This vnode is being recycled */
 
 #define	VI_TEXT_REF	0x0001	/* Text ref grabbed use ref */
-#define	VI_MOUNT	0x0020	/* Mount in progress */
-#define	VI_DOINGINACT	0x0800	/* VOP_INACTIVE is in progress */
-#define	VI_OWEINACT	0x1000	/* Need to call inactive */
-#define	VI_DEFINACT	0x2000	/* deferred inactive */
+#define	VI_MOUNT	0x0002	/* Mount in progress */
+#define	VI_DOINGINACT	0x0004	/* VOP_INACTIVE is in progress */
+#define	VI_OWEINACT	0x0008	/* Need to call inactive */
+#define	VI_DEFINACT	0x0010	/* deferred inactive */
 
 #define	VV_ROOT		0x0001	/* root of its filesystem */
 #define	VV_ISTTY	0x0002	/* vnode represents a tty */
@@ -539,6 +543,18 @@ void	assert_vop_unlocked(struct vnode *vp, const char *str);
 #define	ASSERT_VOP_LOCKED(vp, str)	assert_vop_locked((vp), (str))
 #define	ASSERT_VOP_UNLOCKED(vp, str)	assert_vop_unlocked((vp), (str))
 
+#define ASSERT_VOP_IN_SEQC(vp)	do {				\
+	struct vnode *_vp = (vp);				\
+								\
+	VNPASS(seqc_in_modify(_vp->v_seqc), _vp);		\
+} while (0)
+
+#define ASSERT_VOP_NOT_IN_SEQC(vp)	do {			\
+	struct vnode *_vp = (vp);				\
+								\
+	VNPASS(!seqc_in_modify(_vp->v_seqc), _vp);		\
+} while (0)
+
 #else /* !DEBUG_VFS_LOCKS */
 
 #define	ASSERT_VI_LOCKED(vp, str)	((void)0)
@@ -546,6 +562,10 @@ void	assert_vop_unlocked(struct vnode *vp, const char *str);
 #define	ASSERT_VOP_ELOCKED(vp, str)	((void)0)
 #define	ASSERT_VOP_LOCKED(vp, str)	((void)0)
 #define	ASSERT_VOP_UNLOCKED(vp, str)	((void)0)
+
+#define ASSERT_VOP_IN_SEQC(vp)		((void)0)
+#define ASSERT_VOP_NOT_IN_SEQC(vp)	((void)0)
+
 #endif /* DEBUG_VFS_LOCKS */
 
 
@@ -616,7 +636,9 @@ void	cache_enter_time(struct vnode *dvp, struct vnode *vp,
 	    struct timespec *dtsp);
 int	cache_lookup(struct vnode *dvp, struct vnode **vpp,
 	    struct componentname *cnp, struct timespec *tsp, int *ticksp);
+void	cache_vnode_init(struct vnode *vp);
 void	cache_purge(struct vnode *vp);
+void	cache_purge_vgone(struct vnode *vp);
 void	cache_purge_negative(struct vnode *vp);
 void	cache_purgevfs(struct mount *mp, bool force);
 int	change_dir(struct vnode *vp, struct thread *td);
@@ -645,14 +667,14 @@ int	vn_commname(struct vnode *vn, char *buf, u_int buflen);
 int	vn_path_to_global_path(struct thread *td, struct vnode *vp,
 	    char *path, u_int pathlen);
 int	vaccess(enum vtype type, mode_t file_mode, uid_t file_uid,
-	    gid_t file_gid, accmode_t accmode, struct ucred *cred,
-	    int *privused);
+	    gid_t file_gid, accmode_t accmode, struct ucred *cred);
+int	vaccess_vexec_smr(mode_t file_mode, uid_t file_uid, gid_t file_gid,
+	    struct ucred *cred);
 int	vaccess_acl_nfs4(enum vtype type, uid_t file_uid, gid_t file_gid,
-	    struct acl *aclp, accmode_t accmode, struct ucred *cred,
-	    int *privused);
+	    struct acl *aclp, accmode_t accmode, struct ucred *cred);
 int	vaccess_acl_posix1e(enum vtype type, uid_t file_uid,
 	    gid_t file_gid, struct acl *acl, accmode_t accmode,
-	    struct ucred *cred, int *privused);
+	    struct ucred *cred);
 void	vattr_null(struct vattr *vap);
 int	vcount(struct vnode *vp);
 void	vlazy(struct vnode *);
@@ -663,6 +685,8 @@ int	vget(struct vnode *vp, int flags, struct thread *td);
 enum vgetstate	vget_prep_smr(struct vnode *vp);
 enum vgetstate	vget_prep(struct vnode *vp);
 int	vget_finish(struct vnode *vp, int flags, enum vgetstate vs);
+void	vget_finish_ref(struct vnode *vp, enum vgetstate vs);
+void	vget_abort(struct vnode *vp, enum vgetstate vs);
 void	vgone(struct vnode *vp);
 void	vhold(struct vnode *);
 void	vholdl(struct vnode *);
@@ -738,6 +762,15 @@ int	vn_io_fault_uiomove(char *data, int xfersize, struct uio *uio);
 int	vn_io_fault_pgmove(vm_page_t ma[], vm_offset_t offset, int xfersize,
 	    struct uio *uio);
 
+void	vn_seqc_write_begin_unheld_locked(struct vnode *vp);
+void	vn_seqc_write_begin_unheld(struct vnode *vp);
+void	vn_seqc_write_begin_locked(struct vnode *vp);
+void	vn_seqc_write_begin(struct vnode *vp);
+void	vn_seqc_write_end_locked(struct vnode *vp);
+void	vn_seqc_write_end(struct vnode *vp);
+#define	vn_seqc_read_any(vp)		seqc_read_any(&(vp)->v_seqc)
+#define	vn_seqc_consistent(vp, seq)	seqc_consistent(&(vp)->v_seqc, seq)
+
 #define	vn_rangelock_unlock(vp, cookie)					\
 	rangelock_unlock(&(vp)->v_rl, (cookie), VI_MTX(vp))
 #define	vn_rangelock_unlock_range(vp, cookie, start, end)		\
@@ -804,40 +837,58 @@ int	dead_write(struct vop_write_args *ap);
 
 /* These are called from within the actual VOPS. */
 void	vop_close_post(void *a, int rc);
+void	vop_create_pre(void *a);
 void	vop_create_post(void *a, int rc);
+void	vop_whiteout_pre(void *a);
+void	vop_whiteout_post(void *a, int rc);
+void	vop_deleteextattr_pre(void *a);
 void	vop_deleteextattr_post(void *a, int rc);
+void	vop_link_pre(void *a);
 void	vop_link_post(void *a, int rc);
 void	vop_lookup_post(void *a, int rc);
 void	vop_lookup_pre(void *a);
+void	vop_mkdir_pre(void *a);
 void	vop_mkdir_post(void *a, int rc);
+void	vop_mknod_pre(void *a);
 void	vop_mknod_post(void *a, int rc);
 void	vop_open_post(void *a, int rc);
 void	vop_read_post(void *a, int rc);
 void	vop_readdir_post(void *a, int rc);
 void	vop_reclaim_post(void *a, int rc);
+void	vop_remove_pre(void *a);
 void	vop_remove_post(void *a, int rc);
 void	vop_rename_post(void *a, int rc);
 void	vop_rename_pre(void *a);
+void	vop_rmdir_pre(void *a);
 void	vop_rmdir_post(void *a, int rc);
+void	vop_setattr_pre(void *a);
 void	vop_setattr_post(void *a, int rc);
+void	vop_setacl_pre(void *a);
+void	vop_setacl_post(void *a, int rc);
+void	vop_setextattr_pre(void *a);
 void	vop_setextattr_post(void *a, int rc);
+void	vop_symlink_pre(void *a);
 void	vop_symlink_post(void *a, int rc);
 int	vop_sigdefer(struct vop_vector *vop, struct vop_generic_args *a);
 
 #ifdef DEBUG_VFS_LOCKS
-void	vop_strategy_pre(void *a);
-void	vop_lock_pre(void *a);
-void	vop_lock_post(void *a, int rc);
-void	vop_unlock_pre(void *a);
-void	vop_need_inactive_pre(void *a);
-void	vop_need_inactive_post(void *a, int rc);
+void	vop_fplookup_vexec_debugpre(void *a);
+void	vop_fplookup_vexec_debugpost(void *a, int rc);
+void	vop_strategy_debugpre(void *a);
+void	vop_lock_debugpre(void *a);
+void	vop_lock_debugpost(void *a, int rc);
+void	vop_unlock_debugpre(void *a);
+void	vop_need_inactive_debugpre(void *a);
+void	vop_need_inactive_debugpost(void *a, int rc);
 #else
-#define	vop_strategy_pre(x)	do { } while (0)
-#define	vop_lock_pre(x)		do { } while (0)
-#define	vop_lock_post(x, y)	do { } while (0)
-#define	vop_unlock_pre(x)	do { } while (0)
-#define	vop_need_inactive_pre(x)	do { } while (0)
-#define	vop_need_inactive_post(x, y)	do { } while (0)
+#define	vop_fplookup_vexec_debugpre(x)		do { } while (0)
+#define	vop_fplookup_vexec_debugpost(x, y)	do { } while (0)
+#define	vop_strategy_debugpre(x)		do { } while (0)
+#define	vop_lock_debugpre(x)			do { } while (0)
+#define	vop_lock_debugpost(x, y)		do { } while (0)
+#define	vop_unlock_debugpre(x)			do { } while (0)
+#define	vop_need_inactive_debugpre(x)		do { } while (0)
+#define	vop_need_inactive_debugpost(x, y)	do { } while (0)
 #endif
 
 void	vop_rename_fail(struct vop_rename_args *ap);
@@ -985,9 +1036,17 @@ int vn_dir_check_exec(struct vnode *vp, struct componentname *cnp);
 #define VFS_SMR()	vfs_smr
 #define vfs_smr_enter()	smr_enter(VFS_SMR())
 #define vfs_smr_exit()	smr_exit(VFS_SMR())
+#define vfs_smr_entered_load(ptr)	smr_entered_load((ptr), VFS_SMR())
 #define VFS_SMR_ASSERT_ENTERED()	SMR_ASSERT_ENTERED(VFS_SMR())
 #define VFS_SMR_ASSERT_NOT_ENTERED()	SMR_ASSERT_NOT_ENTERED(VFS_SMR())
 #define VFS_SMR_ZONE_SET(zone)	uma_zone_set_smr((zone), VFS_SMR())
+
+#define vn_load_v_data_smr(vp)	({		\
+	struct vnode *_vp = (vp);		\
+						\
+	VFS_SMR_ASSERT_ENTERED();		\
+	atomic_load_ptr(&(_vp)->v_data);	\
+})
 
 #endif /* _KERNEL */
 

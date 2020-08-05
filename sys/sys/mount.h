@@ -420,6 +420,7 @@ void          __mnt_vnode_markerfree_lazy(struct vnode **mvp, struct mount *mp);
 #define	MNTK_TEXT_REFS		0x00008000 /* Keep use ref for text */
 #define	MNTK_VMSETSIZE_BUG	0x00010000
 #define	MNTK_UNIONFS	0x00020000	/* A hack for F_ISUNIONSTACK */
+#define	MNTK_FPLOOKUP	0x00040000	/* fast path lookup is supported */
 #define MNTK_NOASYNC	0x00800000	/* disable async */
 #define MNTK_UNMOUNT	0x01000000	/* unmount in progress */
 #define	MNTK_MWAIT	0x02000000	/* waiting for unmount to finish */
@@ -1022,23 +1023,36 @@ int	vfs_mount_fetch_counter(struct mount *, enum mount_counter);
 	*zpcpu_get(mp->mnt_thread_in_ops_pcpu) == 1;		\
 })
 
-#define vfs_op_thread_enter(mp) ({				\
-	bool _retval = true;					\
-	critical_enter();					\
+#define vfs_op_thread_enter_crit(mp) ({				\
+	bool _retval_crit = true;				\
+	MPASS(curthread->td_critnest > 0);			\
 	MPASS(!vfs_op_thread_entered(mp));			\
 	zpcpu_set_protected(mp->mnt_thread_in_ops_pcpu, 1);	\
 	__compiler_membar();					\
 	if (__predict_false(mp->mnt_vfs_ops > 0)) {		\
-		vfs_op_thread_exit(mp);				\
-		_retval = false;				\
+		vfs_op_thread_exit_crit(mp);			\
+		_retval_crit = false;				\
 	}							\
+	_retval_crit;						\
+})
+
+#define vfs_op_thread_enter(mp) ({				\
+	bool _retval;						\
+	critical_enter();					\
+	_retval = vfs_op_thread_enter_crit(mp);			\
+	if (__predict_false(!_retval))				\
+		critical_exit();				\
 	_retval;						\
 })
 
-#define vfs_op_thread_exit(mp) do {				\
+#define vfs_op_thread_exit_crit(mp) do {			\
 	MPASS(vfs_op_thread_entered(mp));			\
 	__compiler_membar();					\
 	zpcpu_set_protected(mp->mnt_thread_in_ops_pcpu, 0);	\
+} while (0)
+
+#define vfs_op_thread_exit(mp) do {				\
+	vfs_op_thread_exit_crit(mp);				\
 	critical_exit();					\
 } while (0)
 

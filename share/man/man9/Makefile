@@ -607,13 +607,19 @@ MLINKS+=bitset.9 BITSET_DEFINE.9 \
 	bitset.9 BIT_EMPTY.9 \
 	bitset.9 BIT_ISFULLSET.9 \
 	bitset.9 BIT_FFS.9 \
+	bitset.9 BIT_FLS.9 \
 	bitset.9 BIT_COUNT.9 \
 	bitset.9 BIT_SUBSET.9 \
 	bitset.9 BIT_OVERLAP.9 \
 	bitset.9 BIT_CMP.9 \
 	bitset.9 BIT_OR.9 \
+	bitset.9 BIT_OR2.9 \
 	bitset.9 BIT_AND.9 \
+	bitset.9 BIT_AND2.9 \
 	bitset.9 BIT_ANDNOT.9 \
+	bitset.9 BIT_ANDNOT2.9 \
+	bitset.9 BIT_XOR.9 \
+	bitset.9 BIT_XOR2.9 \
 	bitset.9 BIT_CLR_ATOMIC.9 \
 	bitset.9 BIT_SET_ATOMIC.9 \
 	bitset.9 BIT_SET_ATOMIC_ACQ.9 \
@@ -1372,7 +1378,6 @@ MLINKS+=make_dev.9 destroy_dev.9 \
 	make_dev.9 make_dev_s.9
 MLINKS+=malloc.9 free.9 \
 	malloc.9 malloc_domainset.9 \
-	malloc.9 free_domain.9 \
 	malloc.9 mallocarray.9 \
 	malloc.9 MALLOC_DECLARE.9 \
 	malloc.9 MALLOC_DEFINE.9 \
@@ -2337,7 +2342,6 @@ MLINKS+=zone.9 uma.9 \
 	zone.9 uma_zdestroy.9 \
 	zone.9 uma_zfree.9 \
 	zone.9 uma_zfree_arg.9 \
-	zone.9 uma_zfree_domain.9 \
 	zone.9 uma_zfree_pcpu.9 \
 	zone.9 uma_zfree_pcpu_arg.9 \
 	zone.9 uma_zone_get_cur.9 \
