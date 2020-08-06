@@ -45,7 +45,6 @@ __FBSDID("$FreeBSD$");
 #include <dev/ofw/ofw_bus.h>
 #include <dev/ofw/ofw_bus_subr.h>
 
-
 #include <dev/extres/clk/clk.h>
 #include <dev/extres/hwreset/hwreset.h>
 #include <dev/extres/regulator/regulator.h>
@@ -108,12 +107,15 @@ struct if_dwc_rk_softc;
 
 typedef void (*if_dwc_rk_set_delaysfn_t)(struct if_dwc_rk_softc *);
 typedef int (*if_dwc_rk_set_speedfn_t)(struct if_dwc_rk_softc *, int);
-typedef int (*if_dwc_rk_set_phy_modefn_t)(struct if_dwc_rk_softc *);
+typedef void (*if_dwc_rk_set_phy_modefn_t)(struct if_dwc_rk_softc *);
+typedef void (*if_dwc_rk_phy_powerupfn_t)(struct if_dwc_rk_softc *);
+
 
 struct if_dwc_rk_ops {
 	if_dwc_rk_set_delaysfn_t	set_delays;
 	if_dwc_rk_set_speedfn_t		set_speed;
 	if_dwc_rk_set_phy_modefn_t	set_phy_mode;
+	if_dwc_rk_phy_powerupfn_t	phy_powerup;
 };
 
 struct if_dwc_rk_softc {
@@ -140,7 +142,9 @@ struct if_dwc_rk_softc {
 
 static void rk3328_set_delays(struct if_dwc_rk_softc *sc);
 static int rk3328_set_speed(struct if_dwc_rk_softc *sc, int speed);
-static int rk3328_set_phy_mode(struct if_dwc_rk_softc *sc);
+static void rk3328_set_phy_mode(struct if_dwc_rk_softc *sc);
+static void rk3328_phy_powerup(struct if_dwc_rk_softc *sc);
+
 static void rk3399_set_delays(struct if_dwc_rk_softc *sc);
 static int rk3399_set_speed(struct if_dwc_rk_softc *sc, int speed);
 
@@ -151,6 +155,7 @@ static struct if_dwc_rk_ops rk3328_ops = {
 	.set_delays = rk3328_set_delays,
 	.set_speed = rk3328_set_speed,
 	.set_phy_mode = rk3328_set_phy_mode,
+	.phy_powerup = rk3328_phy_powerup,
 };
 
 static struct if_dwc_rk_ops rk3399_ops = {
@@ -254,7 +259,7 @@ rk3328_set_speed(struct if_dwc_rk_softc *sc, int speed)
 	return (0);
 }
 
-static int
+static void
 rk3328_set_phy_mode(struct if_dwc_rk_softc *sc)
 {
 
@@ -270,8 +275,14 @@ rk3328_set_phy_mode(struct if_dwc_rk_softc *sc)
 		    RK3328_GRF_MAC_CON1_INT_RMII | RK3328_GRF_MAC_CON1_RMII_MODE);
 		break;
 	}
+}
 
-	return (0);
+static void
+rk3328_phy_powerup(struct if_dwc_rk_softc *sc)
+{
+	SYSCON_WRITE_4(sc->grf, RK3328_GRF_MACPHY_CON1,
+	    (RK3328_GRF_MACPHY_CON1_RMII_MODE_MASK << 16) |
+	    RK3328_GRF_MACPHY_CON1_RMII_MODE);
 }
 
 static void
@@ -542,12 +553,9 @@ if_dwc_rk_init(device_t dev)
 
 	/* Power up */
 	if (sc->integrated_phy) {
-		/* XXX: RK3328 specific */
-		SYSCON_WRITE_4(sc->grf, RK3328_GRF_MACPHY_CON1,
-		    (RK3328_GRF_MACPHY_CON1_RMII_MODE_MASK << 16) |
-		    RK3328_GRF_MACPHY_CON1_RMII_MODE);
+		if (sc->ops->phy_powerup)
+			sc->ops->phy_powerup(sc);
 
-		/* Common */
 		SYSCON_WRITE_4(sc->grf, RK3328_GRF_MACPHY_CON0,
 		    (RK3328_GRF_MACPHY_CON0_CLK_50M_MASK << 16) |
 		    RK3328_GRF_MACPHY_CON0_CLK_50M);
