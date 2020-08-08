@@ -1218,8 +1218,10 @@ dwc_clock_init(device_t dev)
 			device_printf(dev, "could not enable main clock\n");
 			return (error);
 		}
-		clk_get_freq(clk, &freq);
-		device_printf(dev, "MAC clock(%s) freq: %ld\n",  clk_get_name(clk), freq);
+		if (bootverbose) {
+			clk_get_freq(clk, &freq);
+			device_printf(dev, "MAC clock(%s) freq: %ld\n",  clk_get_name(clk), freq);
+		}
 	}
 	else {
 		device_printf(dev, "could not find clock stmmaceth\n");
