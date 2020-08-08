@@ -110,7 +110,6 @@ typedef int (*if_dwc_rk_set_speedfn_t)(struct if_dwc_rk_softc *, int);
 typedef void (*if_dwc_rk_set_phy_modefn_t)(struct if_dwc_rk_softc *);
 typedef void (*if_dwc_rk_phy_powerupfn_t)(struct if_dwc_rk_softc *);
 
-
 struct if_dwc_rk_ops {
 	if_dwc_rk_set_delaysfn_t	set_delays;
 	if_dwc_rk_set_speedfn_t		set_speed;
@@ -184,13 +183,14 @@ rk3328_set_delays(struct if_dwc_rk_softc *sc)
 	rx = ((reg >> RK3328_GRF_MAC_CON0_RX_SHIFT) & RK3328_GRF_MAC_CON0_RX_MASK);
 
 	reg = SYSCON_READ_4(sc->grf, RK3328_GRF_MAC_CON1);
-	device_printf(sc->base.dev, "current delays settings: tx=%u(%s) rx=%u(%s)\n",
-	    tx, ((reg & RK3328_GRF_MAC_CON1_TX_ENA) ? "enabled" : "disabled"),
-	    rx, ((reg & RK3328_GRF_MAC_CON1_RX_ENA) ? "enabled" : "disabled"));
+	if (bootverbose) {
+		device_printf(sc->base.dev, "current delays settings: tx=%u(%s) rx=%u(%s)\n",
+		    tx, ((reg & RK3328_GRF_MAC_CON1_TX_ENA) ? "enabled" : "disabled"),
+		    rx, ((reg & RK3328_GRF_MAC_CON1_RX_ENA) ? "enabled" : "disabled"));
 
-	if (1)
 		device_printf(sc->base.dev, "setting new RK3328 RX/TX delays:  %d/%d\n",
 			sc->tx_delay, sc->rx_delay);
+	}
 
 	reg = (RK3328_GRF_MAC_CON1_TX_ENA | RK3328_GRF_MAC_CON1_RX_ENA) << 16;
 	reg |= (RK3328_GRF_MAC_CON1_TX_ENA | RK3328_GRF_MAC_CON1_RX_ENA);
@@ -202,10 +202,6 @@ rk3328_set_delays(struct if_dwc_rk_softc *sc)
 	reg |= ((sc->rx_delay & RK3328_GRF_MAC_CON0_TX_MASK) <<
 	    RK3328_GRF_MAC_CON0_RX_SHIFT);
 	SYSCON_WRITE_4(sc->grf, RK3328_GRF_MAC_CON0, reg);
-
-	reg = SYSCON_READ_4(sc->grf, RK3328_GRF_MAC_CON1);
-
-	reg = SYSCON_READ_4(sc->grf, RK3328_GRF_MAC_CON0);
 }
 
 static int
@@ -297,13 +293,15 @@ rk3399_set_delays(struct if_dwc_rk_softc *sc)
 	tx = ((reg >> RK3399_GRF_SOC_CON6_TX_SHIFT) & RK3399_GRF_SOC_CON6_TX_MASK);
 	rx = ((reg >> RK3399_GRF_SOC_CON6_RX_SHIFT) & RK3399_GRF_SOC_CON6_RX_MASK);
 
-	device_printf(sc->base.dev, "current delays settings: tx=%u(%s) rx=%u(%s)\n",
-	    tx, ((reg & RK3399_GRF_SOC_CON6_TX_ENA) ? "enabled" : "disabled"),
-	    rx, ((reg & RK3399_GRF_SOC_CON6_RX_ENA) ? "enabled" : "disabled"));
+	if (bootverbose) {
+		device_printf(sc->base.dev, "current delays settings: tx=%u(%s) rx=%u(%s)\n",
+		    tx, ((reg & RK3399_GRF_SOC_CON6_TX_ENA) ? "enabled" : "disabled"),
+		    rx, ((reg & RK3399_GRF_SOC_CON6_RX_ENA) ? "enabled" : "disabled"));
 
-	if (1)
 		device_printf(sc->base.dev, "setting new RK3399 RX/TX delays:  %d/%d\n",
 		    sc->rx_delay, sc->tx_delay);
+	}
+
 	reg = 0xFFFF << 16;
 	reg |= ((sc->tx_delay & RK3399_GRF_SOC_CON6_TX_MASK) <<
 	    RK3399_GRF_SOC_CON6_TX_SHIFT);
