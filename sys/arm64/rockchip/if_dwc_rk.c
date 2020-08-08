@@ -23,7 +23,7 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- */
+*/
 
 #include <sys/cdefs.h>
 __FBSDID("$FreeBSD$");
@@ -54,54 +54,54 @@ __FBSDID("$FreeBSD$");
 #include "syscon_if.h"
 
 #define	RK3328_GRF_MAC_CON0		0x0900
-#define	 RK3328_GRF_MAC_CON0_TX_MASK	0x7F
-#define	 RK3328_GRF_MAC_CON0_TX_SHIFT	0
-#define	 RK3328_GRF_MAC_CON0_RX_MASK	0x7F
-#define	 RK3328_GRF_MAC_CON0_RX_SHIFT	7
+#define	 MAC_CON0_TX_MASK	0x7F
+#define	 MAC_CON0_TX_SHIFT	0
+#define	 MAC_CON0_RX_MASK	0x7F
+#define	 MAC_CON0_RX_SHIFT	7
 
 #define	RK3328_GRF_MAC_CON1		0x0904
-#define	 RK3328_GRF_MAC_CON1_TX_ENA		(1 << 0)
-#define	 RK3328_GRF_MAC_CON1_RX_ENA		(1 << 1)
-#define	 RK3328_GRF_MAC_CON1_GMII_CLK_SEL_MASK	(3 << 11)
-#define	 RK3328_GRF_MAC_CON1_GMII_CLK_SEL_125	(0 << 11)
-#define	 RK3328_GRF_MAC_CON1_GMII_CLK_SEL_25	(3 << 11)
-#define	 RK3328_GRF_MAC_CON1_GMII_CLK_SEL_2_5	(2 << 11)
-#define	 RK3328_GRF_MAC_CON1_RMII_MODE_MASK	(1 << 9)
-#define	 RK3328_GRF_MAC_CON1_RMII_MODE		(1 << 9)
-#define	 RK3328_GRF_MAC_CON1_INTF_SEL_MASK	(7 << 4)
-#define	 RK3328_GRF_MAC_CON1_INTF_RMII		(4 << 4)
-#define	 RK3328_GRF_MAC_CON1_INTF_RGMII		(1 << 4)
-#define	 RK3328_GRF_MAC_CON1_RGMII_CLK_SEL_MASK	(1 << 7)
-#define	 RK3328_GRF_MAC_CON1_RGMII_CLK_SEL_25	(1 << 7)
-#define	 RK3328_GRF_MAC_CON1_RGMII_CLK_SEL_2_5	(0 << 7)
-#define	 RK3328_GRF_MAC_CON1_RGMII_SPEED_MASK	(1 << 2)
-#define	 RK3328_GRF_MAC_CON1_RGMII_SPEED_100	(1 << 2)
-#define	 RK3328_GRF_MAC_CON1_RGMII_SPEED_10	(0 << 2)
+#define	 MAC_CON1_TX_ENA		(1 << 0)
+#define	 MAC_CON1_RX_ENA		(1 << 1)
+#define	 MAC_CON1_GMII_CLK_SEL_MASK	(3 << 11)
+#define	 MAC_CON1_GMII_CLK_SEL_125	(0 << 11)
+#define	 MAC_CON1_GMII_CLK_SEL_25	(3 << 11)
+#define	 MAC_CON1_GMII_CLK_SEL_2_5	(2 << 11)
+#define	 MAC_CON1_RMII_MODE_MASK	(1 << 9)
+#define	 MAC_CON1_RMII_MODE		(1 << 9)
+#define	 MAC_CON1_INTF_SEL_MASK		(7 << 4)
+#define	 MAC_CON1_INTF_RMII		(4 << 4)
+#define	 MAC_CON1_INTF_RGMII		(1 << 4)
+#define	 MAC_CON1_RGMII_CLK_SEL_MASK	(1 << 7)
+#define	 MAC_CON1_RGMII_CLK_SEL_25	(1 << 7)
+#define	 MAC_CON1_RGMII_CLK_SEL_2_5	(0 << 7)
+#define	 MAC_CON1_RGMII_SPEED_MASK	(1 << 2)
+#define	 MAC_CON1_RGMII_SPEED_100	(1 << 2)
+#define	 MAC_CON1_RGMII_SPEED_10	(0 << 2)
 #define	RK3328_GRF_MAC_CON2		0x0908
 #define	RK3328_GRF_MACPHY_CON0		0x0B00
-#define	 RK3328_GRF_MACPHY_CON0_CLK_50M_MASK	(1 << 14)
-#define	 RK3328_GRF_MACPHY_CON0_CLK_50M		(1 << 14)
-#define	 RK3328_GRF_MACPHY_CON0_RMII_MODE_MASK	(3 << 6)
-#define	 RK3328_GRF_MACPHY_CON0_RMII_MODE	(1 << 6)
+#define	 MACPHY_CON0_CLK_50M_MASK	(1 << 14)
+#define	 MACPHY_CON0_CLK_50M		(1 << 14)
+#define	 MACPHY_CON0_RMII_MODE_MASK	(3 << 6)
+#define	 MACPHY_CON0_RMII_MODE		(1 << 6)
 #define	RK3328_GRF_MACPHY_CON1		0x0B04
-#define	 RK3328_GRF_MACPHY_CON1_RMII_MODE_MASK	(1 << 9)
-#define	 RK3328_GRF_MACPHY_CON1_RMII_MODE	(1 << 9)
+#define	 MACPHY_CON1_RMII_MODE_MASK	(1 << 9)
+#define	 MACPHY_CON1_RMII_MODE		(1 << 9)
 #define	RK3328_GRF_MACPHY_CON2		0x0B08
 #define	RK3328_GRF_MACPHY_CON3		0x0B0C
 #define	RK3328_GRF_MACPHY_STATUS	0x0B10
 
 #define	RK3399_GRF_SOC_CON5		0xc214
-#define	 RK3399_GRF_SOC_CON5_GMAC_CLK_SEL_MASK	(3 << 4)
-#define	 RK3399_GRF_SOC_CON5_GMAC_CLK_SEL_125	(0 << 4)
-#define	 RK3399_GRF_SOC_CON5_GMAC_CLK_SEL_25	(3 << 4)
-#define	 RK3399_GRF_SOC_CON5_GMAC_CLK_SEL_2_5	(2 << 4)
+#define	 SOC_CON5_GMAC_CLK_SEL_MASK	(3 << 4)
+#define	 SOC_CON5_GMAC_CLK_SEL_125	(0 << 4)
+#define	 SOC_CON5_GMAC_CLK_SEL_25	(3 << 4)
+#define	 SOC_CON5_GMAC_CLK_SEL_2_5	(2 << 4)
 #define	RK3399_GRF_SOC_CON6		0xc218
-#define	 RK3399_GRF_SOC_CON6_TX_ENA	(1 << 7)
-#define	 RK3399_GRF_SOC_CON6_TX_MASK	0x7F
-#define	 RK3399_GRF_SOC_CON6_TX_SHIFT	0
-#define	 RK3399_GRF_SOC_CON6_RX_MASK	0x7F
-#define	 RK3399_GRF_SOC_CON6_RX_ENA	(1 << 15)
-#define	 RK3399_GRF_SOC_CON6_RX_SHIFT	8
+#define	 SOC_CON6_TX_ENA		(1 << 7)
+#define	 SOC_CON6_TX_MASK		0x7F
+#define	 SOC_CON6_TX_SHIFT		0
+#define	 SOC_CON6_RX_MASK		0x7F
+#define	 SOC_CON6_RX_ENA		(1 << 15)
+#define	 SOC_CON6_RX_SHIFT		8
 
 struct if_dwc_rk_softc;
 
@@ -179,28 +179,28 @@ rk3328_set_delays(struct if_dwc_rk_softc *sc)
 		return;
 
 	reg = SYSCON_READ_4(sc->grf, RK3328_GRF_MAC_CON0);
-	tx = ((reg >> RK3328_GRF_MAC_CON0_TX_SHIFT) & RK3328_GRF_MAC_CON0_TX_MASK);
-	rx = ((reg >> RK3328_GRF_MAC_CON0_RX_SHIFT) & RK3328_GRF_MAC_CON0_RX_MASK);
+	tx = ((reg >> MAC_CON0_TX_SHIFT) & MAC_CON0_TX_MASK);
+	rx = ((reg >> MAC_CON0_RX_SHIFT) & MAC_CON0_RX_MASK);
 
 	reg = SYSCON_READ_4(sc->grf, RK3328_GRF_MAC_CON1);
 	if (bootverbose) {
 		device_printf(sc->base.dev, "current delays settings: tx=%u(%s) rx=%u(%s)\n",
-		    tx, ((reg & RK3328_GRF_MAC_CON1_TX_ENA) ? "enabled" : "disabled"),
-		    rx, ((reg & RK3328_GRF_MAC_CON1_RX_ENA) ? "enabled" : "disabled"));
+		    tx, ((reg & MAC_CON1_TX_ENA) ? "enabled" : "disabled"),
+		    rx, ((reg & MAC_CON1_RX_ENA) ? "enabled" : "disabled"));
 
 		device_printf(sc->base.dev, "setting new RK3328 RX/TX delays:  %d/%d\n",
 			sc->tx_delay, sc->rx_delay);
 	}
 
-	reg = (RK3328_GRF_MAC_CON1_TX_ENA | RK3328_GRF_MAC_CON1_RX_ENA) << 16;
-	reg |= (RK3328_GRF_MAC_CON1_TX_ENA | RK3328_GRF_MAC_CON1_RX_ENA);
+	reg = (MAC_CON1_TX_ENA | MAC_CON1_RX_ENA) << 16;
+	reg |= (MAC_CON1_TX_ENA | MAC_CON1_RX_ENA);
 	SYSCON_WRITE_4(sc->grf, RK3328_GRF_MAC_CON1, reg);
 
 	reg = 0xffff << 16;
-	reg |= ((sc->tx_delay & RK3328_GRF_MAC_CON0_TX_MASK) <<
-	    RK3328_GRF_MAC_CON0_TX_SHIFT);
-	reg |= ((sc->rx_delay & RK3328_GRF_MAC_CON0_TX_MASK) <<
-	    RK3328_GRF_MAC_CON0_RX_SHIFT);
+	reg |= ((sc->tx_delay & MAC_CON0_TX_MASK) <<
+	    MAC_CON0_TX_SHIFT);
+	reg |= ((sc->rx_delay & MAC_CON0_TX_MASK) <<
+	    MAC_CON0_RX_SHIFT);
 	SYSCON_WRITE_4(sc->grf, RK3328_GRF_MAC_CON0, reg);
 }
 
@@ -214,13 +214,13 @@ rk3328_set_speed(struct if_dwc_rk_softc *sc, int speed)
 		switch (speed) {
 		case IFM_1000_T:
 		case IFM_1000_SX:
-			reg = RK3328_GRF_MAC_CON1_GMII_CLK_SEL_125;
+			reg = MAC_CON1_GMII_CLK_SEL_125;
 			break;
 		case IFM_100_TX:
-			reg = RK3328_GRF_MAC_CON1_GMII_CLK_SEL_25;
+			reg = MAC_CON1_GMII_CLK_SEL_25;
 			break;
 		case IFM_10_T:
-			reg = RK3328_GRF_MAC_CON1_GMII_CLK_SEL_2_5;
+			reg = MAC_CON1_GMII_CLK_SEL_2_5;
 			break;
 		default:
 			device_printf(sc->base.dev, "unsupported RGMII media %u\n", speed);
@@ -228,17 +228,17 @@ rk3328_set_speed(struct if_dwc_rk_softc *sc, int speed)
 		}
 
 		SYSCON_WRITE_4(sc->grf, RK3328_GRF_MAC_CON1,
-		    ((RK3328_GRF_MAC_CON1_GMII_CLK_SEL_MASK << 16) | reg));
+		    ((MAC_CON1_GMII_CLK_SEL_MASK << 16) | reg));
 		break;
 	case PHY_MODE_RMII:
 		switch (speed) {
 		case IFM_100_TX:
-			reg = RK3328_GRF_MAC_CON1_RGMII_CLK_SEL_25 |
-			    RK3328_GRF_MAC_CON1_RGMII_SPEED_100;
+			reg = MAC_CON1_RGMII_CLK_SEL_25 |
+			    MAC_CON1_RGMII_SPEED_100;
 			break;
 		case IFM_10_T:
-			reg = RK3328_GRF_MAC_CON1_RGMII_CLK_SEL_2_5 |
-			    RK3328_GRF_MAC_CON1_RGMII_SPEED_10;
+			reg = MAC_CON1_RGMII_CLK_SEL_2_5 |
+			    MAC_CON1_RGMII_SPEED_10;
 			break;
 		default:
 			device_printf(sc->base.dev, "unsupported RMII media %u\n", speed);
@@ -248,7 +248,7 @@ rk3328_set_speed(struct if_dwc_rk_softc *sc, int speed)
 		SYSCON_WRITE_4(sc->grf,
 		    sc->integrated_phy ? RK3328_GRF_MAC_CON2 : RK3328_GRF_MAC_CON1,
 		    reg |
-		    ((RK3328_GRF_MAC_CON1_RGMII_CLK_SEL_MASK | RK3328_GRF_MAC_CON1_RGMII_SPEED_MASK) << 16));
+		    ((MAC_CON1_RGMII_CLK_SEL_MASK | MAC_CON1_RGMII_SPEED_MASK) << 16));
 		break;
 	}
 
@@ -262,13 +262,13 @@ rk3328_set_phy_mode(struct if_dwc_rk_softc *sc)
 	switch (sc->base.phy_mode) {
 	case PHY_MODE_RGMII:
 		SYSCON_WRITE_4(sc->grf, RK3328_GRF_MAC_CON1,
-		    ((RK3328_GRF_MAC_CON1_INTF_SEL_MASK | RK3328_GRF_MAC_CON1_RMII_MODE_MASK) << 16) |
-		    RK3328_GRF_MAC_CON1_INTF_RGMII);
+		    ((MAC_CON1_INTF_SEL_MASK | MAC_CON1_RMII_MODE_MASK) << 16) |
+		    MAC_CON1_INTF_RGMII);
 		break;
 	case PHY_MODE_RMII:
 		SYSCON_WRITE_4(sc->grf, sc->integrated_phy ? RK3328_GRF_MAC_CON2 : RK3328_GRF_MAC_CON1,
-		    ((RK3328_GRF_MAC_CON1_INTF_SEL_MASK | RK3328_GRF_MAC_CON1_RMII_MODE_MASK) << 16) |
-		    RK3328_GRF_MAC_CON1_INTF_RMII | RK3328_GRF_MAC_CON1_RMII_MODE);
+		    ((MAC_CON1_INTF_SEL_MASK | MAC_CON1_RMII_MODE_MASK) << 16) |
+		    MAC_CON1_INTF_RMII | MAC_CON1_RMII_MODE);
 		break;
 	}
 }
@@ -277,8 +277,8 @@ static void
 rk3328_phy_powerup(struct if_dwc_rk_softc *sc)
 {
 	SYSCON_WRITE_4(sc->grf, RK3328_GRF_MACPHY_CON1,
-	    (RK3328_GRF_MACPHY_CON1_RMII_MODE_MASK << 16) |
-	    RK3328_GRF_MACPHY_CON1_RMII_MODE);
+	    (MACPHY_CON1_RMII_MODE_MASK << 16) |
+	    MACPHY_CON1_RMII_MODE);
 }
 
 static void
@@ -290,24 +290,24 @@ rk3399_set_delays(struct if_dwc_rk_softc *sc)
 		return;
 
 	reg = SYSCON_READ_4(sc->grf, RK3399_GRF_SOC_CON6);
-	tx = ((reg >> RK3399_GRF_SOC_CON6_TX_SHIFT) & RK3399_GRF_SOC_CON6_TX_MASK);
-	rx = ((reg >> RK3399_GRF_SOC_CON6_RX_SHIFT) & RK3399_GRF_SOC_CON6_RX_MASK);
+	tx = ((reg >> SOC_CON6_TX_SHIFT) & SOC_CON6_TX_MASK);
+	rx = ((reg >> SOC_CON6_RX_SHIFT) & SOC_CON6_RX_MASK);
 
 	if (bootverbose) {
 		device_printf(sc->base.dev, "current delays settings: tx=%u(%s) rx=%u(%s)\n",
-		    tx, ((reg & RK3399_GRF_SOC_CON6_TX_ENA) ? "enabled" : "disabled"),
-		    rx, ((reg & RK3399_GRF_SOC_CON6_RX_ENA) ? "enabled" : "disabled"));
+		    tx, ((reg & SOC_CON6_TX_ENA) ? "enabled" : "disabled"),
+		    rx, ((reg & SOC_CON6_RX_ENA) ? "enabled" : "disabled"));
 
 		device_printf(sc->base.dev, "setting new RK3399 RX/TX delays:  %d/%d\n",
 		    sc->rx_delay, sc->tx_delay);
 	}
 
 	reg = 0xFFFF << 16;
-	reg |= ((sc->tx_delay & RK3399_GRF_SOC_CON6_TX_MASK) <<
-	    RK3399_GRF_SOC_CON6_TX_SHIFT);
-	reg |= ((sc->rx_delay & RK3399_GRF_SOC_CON6_RX_MASK) <<
-	    RK3399_GRF_SOC_CON6_RX_SHIFT);
-	reg |= RK3399_GRF_SOC_CON6_TX_ENA | RK3399_GRF_SOC_CON6_RX_ENA;
+	reg |= ((sc->tx_delay & SOC_CON6_TX_MASK) <<
+	    SOC_CON6_TX_SHIFT);
+	reg |= ((sc->rx_delay & SOC_CON6_RX_MASK) <<
+	    SOC_CON6_RX_SHIFT);
+	reg |= SOC_CON6_TX_ENA | SOC_CON6_RX_ENA;
 
 	SYSCON_WRITE_4(sc->grf, RK3399_GRF_SOC_CON6, reg);
 }
@@ -320,13 +320,13 @@ rk3399_set_speed(struct if_dwc_rk_softc *sc, int speed)
 	switch (speed) {
 	case IFM_1000_T:
 	case IFM_1000_SX:
-		reg = RK3399_GRF_SOC_CON5_GMAC_CLK_SEL_125;
+		reg = SOC_CON5_GMAC_CLK_SEL_125;
 		break;
 	case IFM_100_TX:
-		reg = RK3399_GRF_SOC_CON5_GMAC_CLK_SEL_25;
+		reg = SOC_CON5_GMAC_CLK_SEL_25;
 		break;
 	case IFM_10_T:
-		reg = RK3399_GRF_SOC_CON5_GMAC_CLK_SEL_2_5;
+		reg = SOC_CON5_GMAC_CLK_SEL_2_5;
 		break;
 	default:
 		device_printf(sc->base.dev, "unsupported media %u\n", speed);
@@ -334,7 +334,7 @@ rk3399_set_speed(struct if_dwc_rk_softc *sc, int speed)
 	}
 
 	SYSCON_WRITE_4(sc->grf, RK3399_GRF_SOC_CON5,
-	    ((RK3399_GRF_SOC_CON5_GMAC_CLK_SEL_MASK << 16) | reg));
+	    ((SOC_CON5_GMAC_CLK_SEL_MASK << 16) | reg));
 	return (0);
 }
 
@@ -557,11 +557,11 @@ if_dwc_rk_init(device_t dev)
 			sc->ops->phy_powerup(sc);
 
 		SYSCON_WRITE_4(sc->grf, RK3328_GRF_MACPHY_CON0,
-		    (RK3328_GRF_MACPHY_CON0_CLK_50M_MASK << 16) |
-		    RK3328_GRF_MACPHY_CON0_CLK_50M);
+		    (MACPHY_CON0_CLK_50M_MASK << 16) |
+		    MACPHY_CON0_CLK_50M);
 		SYSCON_WRITE_4(sc->grf, RK3328_GRF_MACPHY_CON0,
-		    (RK3328_GRF_MACPHY_CON0_RMII_MODE_MASK << 16) |
-		    RK3328_GRF_MACPHY_CON0_RMII_MODE);
+		    (MACPHY_CON0_RMII_MODE_MASK << 16) |
+		    MACPHY_CON0_RMII_MODE);
 		SYSCON_WRITE_4(sc->grf, RK3328_GRF_MACPHY_CON2, 0xffff1234);
 		SYSCON_WRITE_4(sc->grf, RK3328_GRF_MACPHY_CON3, 0x003f0035);
 
