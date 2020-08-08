@@ -458,12 +458,14 @@ if_dwc_rk_init_clocks(device_t dev)
 		}
 	}
 
-	if (sc->mac_clk_rx)
-		clk_enable(sc->mac_clk_rx);
-	if (sc->clk_mac_ref)
-		clk_enable(sc->clk_mac_ref);
-	if (sc->clk_mac_refout)
-		clk_enable(sc->clk_mac_refout);
+	if (sc->base.phy_mode == PHY_MODE_RMII) {
+		if (sc->mac_clk_rx)
+			clk_enable(sc->mac_clk_rx);
+		if (sc->clk_mac_ref)
+			clk_enable(sc->clk_mac_ref);
+		if (sc->clk_mac_refout)
+			clk_enable(sc->clk_mac_refout);
+	}
 	if (sc->clk_phy)
 		clk_enable(sc->clk_phy);
 	if (sc->aclk_mac)
