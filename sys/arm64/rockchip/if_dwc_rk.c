@@ -544,7 +544,7 @@ if_dwc_rk_init(device_t dev)
 		return (err);
 
 	if (regulator_get_by_ofw_property(sc->base.dev, 0,
-		            "phy-supply", &phy_supply)) {
+		            "phy-supply", &phy_supply) == 0) {
 		if (regulator_enable(phy_supply)) {
 			device_printf(sc->base.dev,
 			    "cannot enable 'phy' regulator\n");
