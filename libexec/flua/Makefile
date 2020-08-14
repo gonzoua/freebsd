@@ -30,6 +30,7 @@ CFLAGS+=	-DLUA_PROGNAME="\"${PROG}\""
 CFLAGS+=	-DLUA_USE_READLINE
 CFLAGS+=	-I${SRCTOP}/lib/libedit -I${SRCTOP}/contrib/libedit
 LIBADD+=	edit
+LDFLAGS+=	-Wl,-E
 .endif
 
 UCLSRC?=	${SRCTOP}/contrib/libucl
@@ -37,7 +38,5 @@ UCLSRC?=	${SRCTOP}/contrib/libucl
 SRCS+=	lua_ucl.c
 CFLAGS+=	-I${UCLSRC}/include -I${UCLSRC}/src -I${UCLSRC}/uthash
 LIBADD+=	ucl
-
-LDFLAGS+=	-Wl,-E
 
 .include <bsd.prog.mk>
