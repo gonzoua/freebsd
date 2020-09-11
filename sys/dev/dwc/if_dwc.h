@@ -47,6 +47,7 @@
 #define	 CONF_PS		(1 << 15)	/* GMII/MII */
 #define	 CONF_FES		(1 << 14)	/* MII speed select */
 #define	 CONF_DM		(1 << 11)	/* Full Duplex Enable */
+#define	 CONF_IPC		(1 << 10)	/* IPC Checksum offload */
 #define	 CONF_ACS		(1 << 7)
 #define	 CONF_TE		(1 << 3)
 #define	 CONF_RE		(1 << 2)
@@ -215,8 +216,11 @@
 
 /* DMA */
 #define	BUS_MODE		0x1000
+#define	 BUS_MODE_AAL		(1 << 25)
 #define	 BUS_MODE_EIGHTXPBL	(1 << 24) /* Multiplies PBL by 8 */
+#define	 BUS_MODE_USP		(1 << 23)
 #define	 BUS_MODE_FIXEDBURST	(1 << 16)
+#define	 BUS_MODE_RPBL_SHIFT	17 /* Single block RX transfer size */
 #define	 BUS_MODE_PRIORXTX_SHIFT	14
 #define	 BUS_MODE_PRIORXTX_41	3
 #define	 BUS_MODE_PRIORXTX_31	2
@@ -225,6 +229,7 @@
 #define	 BUS_MODE_PBL_SHIFT	8 /* Single block transfer size */
 #define	 BUS_MODE_PBL_BEATS_8	8
 #define	 BUS_MODE_SWR		(1 << 0) /* Reset */
+#define	BUS_MODE_DEFAULT_PBL	BUS_MODE_PBL_BEATS_8
 #define	TRANSMIT_POLL_DEMAND	0x1004
 #define	RECEIVE_POLL_DEMAND	0x1008
 #define	RX_DESCR_LIST_ADDR	0x100C
@@ -240,9 +245,14 @@
 #define	 MODE_RSF		(1 << 25) /* RX Full Frame */
 #define	 MODE_TSF		(1 << 21) /* TX Full Frame */
 #define	 MODE_FTF		(1 << 20) /* Flush TX FIFO */
+#define	 MODE_TTC_LEV64		0x0
+#define	 MODE_TTC_MASK		(7 << 14)
+#define	 MODE_TTC_SHIFT		14
 #define	 MODE_ST		(1 << 13) /* Start DMA TX */
 #define	 MODE_FUF		(1 << 6)  /* TX frames < 64bytes */
+#define	 MODE_RTC_LEV64		0x0
 #define	 MODE_RTC_LEV32		0x1
+#define	 MODE_RTC_MASK		(3 << 3)
 #define	 MODE_RTC_SHIFT		3
 #define	 MODE_OSF		(1 << 2) /* Process Second frame */
 #define	 MODE_SR		(1 << 1) /* Start DMA RX */
@@ -275,6 +285,9 @@
 #define	CURRENT_HOST_TRANSMIT_BUF_ADDR	0x1050
 #define	CURRENT_HOST_RECEIVE_BUF_ADDR	0x1054
 #define	HW_FEATURE			0x1058
+#define	 HW_FEATURE_TXCOESEL		(1 << 16)
+#define	 HW_FEATURE_RXTYP1COE		(1 << 17)
+#define	 HW_FEATURE_RXTYP2COE		(1 << 18)
 
 #define	DWC_GMAC_NORMAL_DESC		0x1
 #define	DWC_GMAC_EXT_DESC		0x2

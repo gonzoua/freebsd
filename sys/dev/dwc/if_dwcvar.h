@@ -73,6 +73,14 @@ struct dwc_softc {
 	int			stats_harvest_count;
 	int			phy_mode;
 
+	/* DMA config */
+	bool			force_thresh_dma_mode;
+	bool			fixed_burst;
+	bool			aal;
+	int			pbl;
+	int			txpbl;
+	int			rxpbl;
+
 	/* RX */
 	bus_dma_tag_t		rxdesc_tag;
 	bus_dmamap_t		rxdesc_map;

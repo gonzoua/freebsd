@@ -236,8 +236,8 @@ dwc_get1paddr(void *arg, bus_dma_segment_t *segs, int nsegs, int error)
 }
 
 inline static void
-dwc_setup_txdesc(struct dwc_softc *sc, int idx, bus_addr_t paddr,
-    uint32_t len)
+dwc_setup_txdesc(struct dwc_softc *sc, int idx, struct mbuf *m,
+    bus_addr_t paddr, uint32_t len)
 {
 	uint32_t desc0, desc1;
 
@@ -251,9 +251,13 @@ dwc_setup_txdesc(struct dwc_softc *sc, int idx, bus_addr_t paddr,
 			desc0 = 0;
 			desc1 = NTDESC1_TCH | NTDESC1_FS | NTDESC1_LS |
 			    NTDESC1_IC | len;
+			if (m->m_pkthdr.csum_flags & (CSUM_TCP|CSUM_UDP))
+				desc1 |= NTDESC1_CIC_FULL;
 		} else {
 			desc0 = ETDESC0_TCH | ETDESC0_FS | ETDESC0_LS |
 			    ETDESC0_IC;
+			if (m->m_pkthdr.csum_flags & (CSUM_TCP|CSUM_UDP))
+				desc0 |= ETDESC0_CIC_FULL;
 			desc1 = len;
 		}
 		++sc->txcount;
@@ -294,7 +298,7 @@ dwc_setup_txbuf(struct dwc_softc *sc, int idx, struct mbuf **mp)
 
 	sc->txbuf_map[idx].mbuf = m;
 
-	dwc_setup_txdesc(sc, idx, seg.ds_addr, seg.ds_len);
+	dwc_setup_txdesc(sc, idx, m, seg.ds_addr, seg.ds_len);
 
 	return (0);
 }
@@ -486,9 +490,17 @@ dwc_init_locked(struct dwc_softc *sc)
 
 	/* Initializa DMA and enable transmitters */
 	reg = READ4(sc, OPERATION_MODE);
-	reg |= (MODE_TSF | MODE_OSF | MODE_FUF);
-	reg &= ~(MODE_RSF);
-	reg |= (MODE_RTC_LEV32 << MODE_RTC_SHIFT);
+	reg &= ~(MODE_RSF | MODE_TSF);
+	if (sc->force_thresh_dma_mode) {
+		reg &= ~(MODE_TTC_MASK | MODE_RTC_MASK);
+		reg |= (MODE_RTC_LEV64 << MODE_RTC_SHIFT);
+		reg |= (MODE_TTC_LEV64 << MODE_TTC_SHIFT);
+	} else {
+		reg &= ~(MODE_TTC_MASK);
+		reg |= (MODE_TTC_LEV64 << MODE_TTC_SHIFT);
+		reg |= MODE_RSF | MODE_TSF;
+		reg |= MODE_OSF;
+	}
 	WRITE4(sc, OPERATION_MODE, reg);
 
 	WRITE4(sc, INTERRUPT_ENABLE, INT_EN_DEFAULT);
@@ -521,7 +533,6 @@ dwc_init(void *if_softc)
 	dwc_init_locked(sc);
 	DWC_UNLOCK(sc);
 }
-
 
 inline static uint32_t
 dwc_setup_rxdesc(struct dwc_softc *sc, int idx, bus_addr_t paddr)
@@ -579,6 +590,18 @@ dwc_alloc_mbufcl(struct dwc_softc *sc)
 		m->m_pkthdr.len = m->m_len = m->m_ext.ext_size;
 
 	return (m);
+}
+
+static void
+dwc_rxcsum(if_t ifp, struct mbuf *m, uint32_t desc0)
+{
+	/* For any error condition let upper layer do the checks */
+	if (((desc0 & RDESC0_ICE) == 0) &&
+	    ((desc0 & RDESC0_PCE) == 0)) {
+		m->m_pkthdr.csum_flags |= CSUM_IP_CHECKED | CSUM_IP_VALID;
+		m->m_pkthdr.csum_flags |= CSUM_DATA_VALID | CSUM_PSEUDO_HDR;
+		m->m_pkthdr.csum_data = 0xffff;
+	}
 }
 
 static struct mbuf *
@@ -642,6 +665,8 @@ dwc_rxfinish_one(struct dwc_softc *sc, struct dwc_hwdesc *desc,
 
 	/* Remove trailing FCS */
 	m_adj(m, -ETHER_CRC_LEN);
+	if ((if_getcapenable(ifp) & IFCAP_RXCSUM) != 0)
+		dwc_rxcsum(ifp, m, desc->desc0);
 
 	DWC_UNLOCK(sc);
 	(*ifp->if_input)(ifp, m);
@@ -795,6 +820,7 @@ dwc_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	struct mii_data *mii;
 	struct ifreq *ifr;
 	int mask, error;
+	uint32_t conf;
 
 	sc = ifp->if_softc;
 	ifr = (struct ifreq *)data;
@@ -833,11 +859,31 @@ dwc_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		error = ifmedia_ioctl(ifp, ifr, &mii->mii_media, cmd);
 		break;
 	case SIOCSIFCAP:
-		mask = ifp->if_capenable ^ ifr->ifr_reqcap;
-		if (mask & IFCAP_VLAN_MTU) {
+		DWC_LOCK(sc);
+		mask = if_getcapenable(ifp) ^ ifr->ifr_reqcap;
+		if ((mask & IFCAP_VLAN_MTU) &&
+		    (if_getcapabilities(ifp) & IFCAP_VLAN_MTU) != 0) {
 			/* No work to do except acknowledge the change took */
-			ifp->if_capenable ^= IFCAP_VLAN_MTU;
+			if_togglecapenable(ifp, IFCAP_VLAN_MTU);
 		}
+		if ((mask & IFCAP_TXCSUM) &&
+		    (if_getcapabilities(ifp) & IFCAP_TXCSUM) != 0) {
+			/* No work to do except acknowledge the change took */
+			if_togglecapenable(ifp, IFCAP_TXCSUM);
+		}
+		if ((mask & IFCAP_RXCSUM) &&
+		    (if_getcapabilities(ifp) & IFCAP_RXCSUM) != 0) {
+			/* No work to do except acknowledge the change took */
+			if_togglecapenable(ifp, IFCAP_RXCSUM);
+
+			conf = READ4(sc, MAC_CONFIGURATION);
+			if (if_getcapenable(ifp) & IFCAP_RXCSUM)
+				conf |= CONF_IPC;
+			else
+				conf &= ~(CONF_IPC);
+			WRITE4(sc, MAC_CONFIGURATION, conf);
+		}
+		DWC_UNLOCK(sc);
 		break;
 
 	default:
@@ -868,7 +914,7 @@ dwc_txfinish_locked(struct dwc_softc *sc)
 		bus_dmamap_unload(sc->txbuf_tag, bmap->map);
 		m_freem(bmap->mbuf);
 		bmap->mbuf = NULL;
-		dwc_setup_txdesc(sc, sc->tx_idx_tail, 0, 0);
+		dwc_setup_txdesc(sc, sc->tx_idx_tail, NULL, 0, 0);
 		sc->tx_idx_tail = next_txidx(sc, sc->tx_idx_tail);
 		ifp->if_drv_flags &= ~IFF_DRV_OACTIVE;
 		if_inc_counter(ifp, IFCOUNTER_OPACKETS, 1);
@@ -1028,7 +1074,7 @@ setup_dma(struct dwc_softc *sc)
 			    "could not create TX buffer DMA map.\n");
 			goto out;
 		}
-		dwc_setup_txdesc(sc, idx, 0, 0);
+		dwc_setup_txdesc(sc, idx, NULL, 0, 0);
 	}
 
 	/*
@@ -1262,9 +1308,11 @@ dwc_attach(device_t dev)
 	struct dwc_softc *sc;
 	struct ifnet *ifp;
 	int error, i;
-	uint32_t reg;
+	uint32_t reg, conf;
 	char *phy_mode;
 	phandle_t node;
+	pcell_t val;
+	int txpbl, rxpbl;
 
 	sc = device_get_softc(dev);
 	sc->dev = dev;
@@ -1281,6 +1329,19 @@ dwc_attach(device_t dev)
 			sc->phy_mode = PHY_MODE_RMII;
 		OF_prop_free(phy_mode);
 	}
+
+	sc->fixed_burst = OF_hasprop(node, "snps,fixed-burst");
+	sc->aal = OF_hasprop(node, "snps,aal");
+	sc->force_thresh_dma_mode = OF_hasprop(node, "snps,force_thresh_dma_mode");
+
+	if (OF_getencprop(node, "snps,pbl", &val, sizeof(val)) > 0)
+		sc->pbl = val;
+	else
+		sc->pbl = BUS_MODE_DEFAULT_PBL;
+	if (OF_getencprop(node, "snps,txpbl", &val, sizeof(val)) > 0)
+		sc->txpbl = val;
+	if (OF_getencprop(node, "snps,rxpbl", &val, sizeof(val)) > 0)
+		sc->rxpbl = val;
 
 	if (IF_DWC_INIT(dev) != 0)
 		return (ENXIO);
@@ -1322,12 +1383,25 @@ dwc_attach(device_t dev)
 		return (ENXIO);
 	}
 
-	if (sc->mactype != DWC_GMAC_EXT_DESC) {
-		reg = BUS_MODE_FIXEDBURST;
+	txpbl = sc->txpbl;
+	if (txpbl == 0)
+		txpbl = sc->pbl;
+	rxpbl = sc->rxpbl;
+	if (rxpbl == 0)
+		rxpbl = sc->pbl;
+
+	reg = BUS_MODE_EIGHTXPBL | BUS_MODE_USP;
+
+	if (sc->fixed_burst) {
+		reg |= BUS_MODE_FIXEDBURST;
 		reg |= (BUS_MODE_PRIORXTX_41 << BUS_MODE_PRIORXTX_SHIFT);
-	} else
-		reg = (BUS_MODE_EIGHTXPBL);
-	reg |= (BUS_MODE_PBL_BEATS_8 << BUS_MODE_PBL_SHIFT);
+	}
+
+	reg |= (rxpbl << BUS_MODE_RPBL_SHIFT);
+	reg |= (txpbl << BUS_MODE_PBL_SHIFT);
+	if (sc->aal)
+		reg |= BUS_MODE_AAL;
+
 	WRITE4(sc, BUS_MODE, reg);
 
 	/*
@@ -1338,7 +1412,7 @@ dwc_attach(device_t dev)
 	WRITE4(sc, OPERATION_MODE, reg);
 
 	if (setup_dma(sc))
-	        return (ENXIO);
+		return (ENXIO);
 
 	/* Setup addresses */
 	WRITE4(sc, RX_DESCR_LIST_ADDR, sc->rxdesc_ring_paddr);
@@ -1364,6 +1438,32 @@ dwc_attach(device_t dev)
 	if_initname(ifp, device_get_name(dev), device_get_unit(dev));
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
 	ifp->if_capabilities = IFCAP_VLAN_MTU;
+
+	/* Check for checksum offload capabilities */
+	reg = READ4(sc, HW_FEATURE);
+
+	if (reg & HW_FEATURE_TXCOESEL) {
+		device_printf(dev, "TX checksum offloading enabled.\n");
+		ifp->if_capabilities |= IFCAP_TXCSUM;
+		ifp->if_hwassist |= CSUM_TCP | CSUM_UDP;
+	}
+
+	/* We support only type 2 RX COE */
+	conf = READ4(sc, MAC_CONFIGURATION);
+	if (reg & HW_FEATURE_RXTYP2COE)
+		conf |= CONF_IPC;
+	else
+		conf &= ~(CONF_IPC);
+	WRITE4(sc, MAC_CONFIGURATION, conf);
+
+	/* re-read the register to verify if flag is active */
+	conf = READ4(sc, MAC_CONFIGURATION);
+	if ((conf & CONF_IPC) != 0) {
+		device_printf(dev, "RX checksum offloading enabled (type 2).\n");
+		ifp->if_capabilities |= IFCAP_RXCSUM;
+		ifp->if_hwassist |= CSUM_TCP | CSUM_UDP;
+	}
+
 	ifp->if_capenable = ifp->if_capabilities;
 	ifp->if_start = dwc_txstart;
 	ifp->if_ioctl = dwc_ioctl;
@@ -1438,7 +1538,7 @@ dwc_miibus_write_reg(device_t dev, int phy, int reg, int val)
 	for (cnt = 0; cnt < 1000; cnt++) {
 		if (!(READ4(sc, GMII_ADDRESS) & GMII_ADDRESS_GB)) {
 			break;
-                }
+		}
 		DELAY(10);
 	}
 
