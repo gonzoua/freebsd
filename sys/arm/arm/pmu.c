@@ -60,7 +60,7 @@ __FBSDID("$FreeBSD$");
 #include <machine/cpu.h>
 #include <machine/intr.h>
 
-#ifdef notyet
+#ifdef __aarch64__
 #define	MAX_RLEN	8
 #else
 #define	MAX_RLEN	1
@@ -74,8 +74,7 @@ struct pmu_softc {
 
 static struct resource_spec pmu_spec[] = {
 	{ SYS_RES_IRQ,		0,	RF_ACTIVE },
-	/* We don't currently handle pmu events, other than on cpu 0 */
-#ifdef notyet
+#ifdef __aarch64__
 	{ SYS_RES_IRQ,		1,	RF_ACTIVE | RF_OPTIONAL },
 	{ SYS_RES_IRQ,		2,	RF_ACTIVE | RF_OPTIONAL },
 	{ SYS_RES_IRQ,		3,	RF_ACTIVE | RF_OPTIONAL },
@@ -137,11 +136,26 @@ pmu_attach(device_t dev)
 #if defined(__arm__) && (__ARM_ARCH > 6)
 	uint32_t iesr;
 #endif
+#ifdef __aarch64__
+	int ncpus;
+	phandle_t node;
+	phandle_t *cpus;
+	device_t cpudev;
+	int cpuid;
+#endif
 	int err;
 	int i;
 
 	sc = device_get_softc(dev);
 	sc->dev = dev;
+
+#ifdef __aarch64__
+	node = ofw_bus_get_node(dev);
+        ncpus = OF_getencprop_alloc_multi(node, "interrupt-affinity",
+	            sizeof(*cpus), (void **)&cpus);
+	if (ncpus <= 0)
+		ncpus = 0;
+#endif
 
 	if (bus_alloc_resources(dev, pmu_spec, sc->res)) {
 		device_printf(dev, "could not allocate resources\n");
@@ -159,6 +173,19 @@ pmu_attach(device_t dev)
 			device_printf(dev, "Unable to setup interrupt handler.\n");
 			return (ENXIO);
 		}
+#ifdef __aarch64__
+		if (i < ncpus) {
+			cpudev = OF_device_from_xref(cpus[i]);
+			if (cpudev) {
+				cpuid = device_get_unit(cpudev);
+				if (bootverbose)
+					device_printf(dev, "affinity entry #%d -> CPU%d\n",
+					    i, cpuid);
+				bus_bind_intr(dev, sc->res[i], cpuid);
+			} else
+				device_printf(dev, "could not get CPU device for entry %d\n", i);
+		}
+#endif
 	}
 
 #if defined(__arm__) && (__ARM_ARCH > 6)
@@ -181,6 +208,8 @@ pmu_attach(device_t dev)
 #ifdef FDT
 static struct ofw_compat_data compat_data[] = {
 	{"arm,armv8-pmuv3",	1},
+	{"arm,cortex-a72-pmu",	1},
+	{"arm,cortex-a53-pmu",	1},
 	{"arm,cortex-a17-pmu",	1},
 	{"arm,cortex-a15-pmu",	1},
 	{"arm,cortex-a12-pmu",	1},

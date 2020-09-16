@@ -205,6 +205,7 @@ ofw_cpu_attach(device_t dev)
 	struct ofw_cpulist_softc *psc;
 	struct ofw_cpu_softc *sc;
 	phandle_t node;
+	intptr_t xref;
 	pcell_t cell;
 	int rv;
 #ifdef EXT_RESOURCES
@@ -299,6 +300,11 @@ ofw_cpu_attach(device_t dev)
 	if (sc->sc_nominal_mhz != 0 && bootverbose)
 		device_printf(dev, "Nominal frequency %dMhz\n",
 		    sc->sc_nominal_mhz);
+
+	xref = OF_xref_from_node(node);
+	/* Register xref */
+	OF_device_register_xref(xref, dev);
+
 	bus_generic_probe(dev);
 	return (bus_generic_attach(dev));
 }
