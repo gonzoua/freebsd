@@ -236,8 +236,8 @@ dwc_get1paddr(void *arg, bus_dma_segment_t *segs, int nsegs, int error)
 }
 
 inline static void
-dwc_setup_txdesc(struct dwc_softc *sc, int idx, struct mbuf *m,
-    bus_addr_t paddr, uint32_t len)
+dwc_setup_txdesc(struct dwc_softc *sc, int idx,
+    bus_addr_t paddr, uint32_t len, int flags, bool first, bool last)
 {
 	uint32_t desc0, desc1;
 
@@ -245,60 +245,97 @@ dwc_setup_txdesc(struct dwc_softc *sc, int idx, struct mbuf *m,
 	if (paddr == 0 || len == 0) {
 		desc0 = 0;
 		desc1 = 0;
-		--sc->txcount;
+		--sc->tx_desccount;
 	} else {
 		if (sc->mactype != DWC_GMAC_EXT_DESC) {
 			desc0 = 0;
-			desc1 = NTDESC1_TCH | NTDESC1_FS | NTDESC1_LS |
-			    NTDESC1_IC | len;
-			if (m->m_pkthdr.csum_flags & (CSUM_TCP|CSUM_UDP))
+			desc1 = NTDESC1_TCH | len;
+			if (first)
+				desc1 |=  NTDESC1_FS;
+			if (last)
+				desc1 |= NTDESC1_LS | NTDESC1_IC;
+			if (flags & (CSUM_TCP|CSUM_UDP))
 				desc1 |= NTDESC1_CIC_FULL;
 		} else {
-			desc0 = ETDESC0_TCH | ETDESC0_FS | ETDESC0_LS |
-			    ETDESC0_IC;
-			if (m->m_pkthdr.csum_flags & (CSUM_TCP|CSUM_UDP))
+			desc0 = ETDESC0_TCH;
+			if (first)
+				desc0 |= ETDESC0_FS;
+			if (last)
+				desc0 |= ETDESC0_LS | ETDESC0_IC;
+			if (flags & (CSUM_TCP|CSUM_UDP))
 				desc0 |= ETDESC0_CIC_FULL;
 			desc1 = len;
 		}
-		++sc->txcount;
+		++sc->tx_desccount;
 	}
 
 	sc->txdesc_ring[idx].addr1 = (uint32_t)(paddr);
 	sc->txdesc_ring[idx].desc0 = desc0;
 	sc->txdesc_ring[idx].desc1 = desc1;
+}
 
-	if (paddr && len) {
-		wmb();
-		sc->txdesc_ring[idx].desc0 |= TDESC0_OWN;
-		wmb();
-	}
+inline static void
+dwc_set_owner(struct dwc_softc *sc, int idx)
+{
+	wmb();
+	sc->txdesc_ring[idx].desc0 |= TDESC0_OWN;
+	wmb();
 }
 
 static int
 dwc_setup_txbuf(struct dwc_softc *sc, int idx, struct mbuf **mp)
 {
-	struct bus_dma_segment seg;
+	struct bus_dma_segment segs[TX_MAP_MAX_SEGS];
 	int error, nsegs;
 	struct mbuf * m;
-
-	if ((m = m_defrag(*mp, M_NOWAIT)) == NULL)
-		return (ENOMEM);
-	*mp = m;
+	int i;
+	int first, last;
 
 	error = bus_dmamap_load_mbuf_sg(sc->txbuf_tag, sc->txbuf_map[idx].map,
-	    m, &seg, &nsegs, 0);
-	if (error != 0) {
+	    *mp, segs, &nsegs, 0);
+	if (error == EFBIG) {
+		/*
+		 * The map may be partially mapped from the first call.
+		 * Make sure to reset it.
+		 */
+		bus_dmamap_unload(sc->txbuf_tag, sc->txbuf_map[idx].map);
+		if ((m = m_defrag(*mp, M_NOWAIT)) == NULL)
+			return (ENOMEM);
+		*mp = m;
+		error = bus_dmamap_load_mbuf_sg(sc->txbuf_tag, sc->txbuf_map[idx].map,
+		    *mp, segs, &nsegs, 0);
+	}
+
+	if (error != 0)
+		return (ENOMEM);
+
+	if (sc->tx_desccount + nsegs > TX_DESC_COUNT) {
+		bus_dmamap_unload(sc->txbuf_tag, sc->txbuf_map[idx].map);
 		return (ENOMEM);
 	}
 
-	KASSERT(nsegs == 1, ("%s: %d segments returned!", __func__, nsegs));
-
 	bus_dmamap_sync(sc->txbuf_tag, sc->txbuf_map[idx].map,
 	    BUS_DMASYNC_PREWRITE);
+	sc->txbuf_map[idx].mbuf = *mp;
 
-	sc->txbuf_map[idx].mbuf = m;
+	first = sc->tx_desc_head;
+	for (i = 0; i < nsegs; i++) {
+		int flags  = 0;
+		if (i == 0)
+			flags = (*mp)->m_pkthdr.csum_flags;
 
-	dwc_setup_txdesc(sc, idx, m, seg.ds_addr, seg.ds_len);
+		dwc_setup_txdesc(sc, sc->tx_desc_head,
+		    segs[i].ds_addr, segs[i].ds_len,
+		    flags, (i == 0), (i == nsegs - 1));
+		if (i > 0)
+			dwc_set_owner(sc, sc->tx_desc_head);
+		last = sc->tx_desc_head;
+		sc->tx_desc_head = next_txidx(sc, sc->tx_desc_head);
+	}
+
+	sc->txbuf_map[idx].last_desc_idx = last;
+
+	dwc_set_owner(sc, first);
 
 	return (0);
 }
@@ -323,7 +360,12 @@ dwc_txstart_locked(struct dwc_softc *sc)
 	enqueued = 0;
 
 	for (;;) {
-		if (sc->txcount == (TX_DESC_COUNT - 1)) {
+		if (sc->tx_desccount > (TX_DESC_COUNT - TX_MAP_MAX_SEGS  + 1)) {
+			ifp->if_drv_flags |= IFF_DRV_OACTIVE;
+			break;
+		}
+
+		if (sc->tx_mapcount == (TX_MAP_COUNT - 1)) {
 			ifp->if_drv_flags |= IFF_DRV_OACTIVE;
 			break;
 		}
@@ -331,12 +373,14 @@ dwc_txstart_locked(struct dwc_softc *sc)
 		IFQ_DRV_DEQUEUE(&ifp->if_snd, m);
 		if (m == NULL)
 			break;
-		if (dwc_setup_txbuf(sc, sc->tx_idx_head, &m) != 0) {
-			 IFQ_DRV_PREPEND(&ifp->if_snd, m);
+		if (dwc_setup_txbuf(sc, sc->tx_map_head, &m) != 0) {
+			IFQ_DRV_PREPEND(&ifp->if_snd, m);
+			ifp->if_drv_flags |= IFF_DRV_OACTIVE;
 			break;
 		}
 		BPF_MTAP(ifp, m);
-		sc->tx_idx_head = next_txidx(sc, sc->tx_idx_head);
+		sc->tx_map_head = next_txidx(sc, sc->tx_map_head);
+		sc->tx_mapcount++;
 		++enqueued;
 	}
 
@@ -663,8 +707,8 @@ dwc_rxfinish_one(struct dwc_softc *sc, struct dwc_hwdesc *desc,
 	m->m_len = len;
 	if_inc_counter(ifp, IFCOUNTER_IPACKETS, 1);
 
-	/* Remove trailing FCS */
 	m_adj(m, -ETHER_CRC_LEN);
+	/* Remove trailing FCS */
 	if ((if_getcapenable(ifp) & IFCAP_RXCSUM) != 0)
 		dwc_rxcsum(ifp, m, desc->desc0);
 
@@ -900,28 +944,47 @@ dwc_txfinish_locked(struct dwc_softc *sc)
 	struct dwc_bufmap *bmap;
 	struct dwc_hwdesc *desc;
 	struct ifnet *ifp;
+	int idx, last_idx;
+	bool map_finished;
 
 	DWC_ASSERT_LOCKED(sc);
 
 	ifp = sc->ifp;
-	while (sc->tx_idx_tail != sc->tx_idx_head) {
-		desc = &sc->txdesc_ring[sc->tx_idx_tail];
-		if ((desc->desc0 & TDESC0_OWN) != 0)
+	/* check if all descriptors of the map are done */
+	while (sc->tx_map_tail != sc->tx_map_head) {
+		map_finished = true;
+		bmap = &sc->txbuf_map[sc->tx_map_tail];
+		idx = sc->tx_desc_tail;
+		last_idx = next_txidx(sc, bmap->last_desc_idx);
+		while (idx != last_idx) {
+			desc = &sc->txdesc_ring[idx];
+			if ((desc->desc0 & TDESC0_OWN) != 0) {
+				map_finished = false;
+				break;
+			}
+			idx = next_txidx(sc, idx);
+		}
+
+		if (!map_finished)
 			break;
-		bmap = &sc->txbuf_map[sc->tx_idx_tail];
 		bus_dmamap_sync(sc->txbuf_tag, bmap->map,
 		    BUS_DMASYNC_POSTWRITE);
 		bus_dmamap_unload(sc->txbuf_tag, bmap->map);
 		m_freem(bmap->mbuf);
 		bmap->mbuf = NULL;
-		dwc_setup_txdesc(sc, sc->tx_idx_tail, NULL, 0, 0);
-		sc->tx_idx_tail = next_txidx(sc, sc->tx_idx_tail);
+		sc->tx_mapcount--;
+		while (sc->tx_desc_tail != last_idx) {
+			dwc_setup_txdesc(sc, sc->tx_desc_tail, 0, 0, 0, false, false);
+			sc->tx_desc_tail = next_txidx(sc, sc->tx_desc_tail);
+		}
+		sc->tx_map_tail = next_txidx(sc, sc->tx_map_tail);
+
 		ifp->if_drv_flags &= ~IFF_DRV_OACTIVE;
 		if_inc_counter(ifp, IFCOUNTER_OPACKETS, 1);
 	}
 
 	/* If there are no buffers outstanding, muzzle the watchdog. */
-	if (sc->tx_idx_tail == sc->tx_idx_head) {
+	if (sc->tx_desc_tail == sc->tx_desc_head) {
 		sc->tx_watchdog_count = 0;
 	}
 }
@@ -1055,7 +1118,8 @@ setup_dma(struct dwc_softc *sc)
 	    BUS_SPACE_MAXADDR_32BIT,	/* lowaddr */
 	    BUS_SPACE_MAXADDR,		/* highaddr */
 	    NULL, NULL,			/* filter, filterarg */
-	    MCLBYTES, 1, 		/* maxsize, nsegments */
+	    MCLBYTES*TX_MAP_MAX_SEGS,	/* maxsize */
+	    TX_MAP_MAX_SEGS,		/* nsegments */
 	    MCLBYTES,			/* maxsegsize */
 	    0,				/* flags */
 	    NULL, NULL,			/* lockfunc, lockarg */
@@ -1066,7 +1130,7 @@ setup_dma(struct dwc_softc *sc)
 		goto out;
 	}
 
-	for (idx = 0; idx < TX_DESC_COUNT; idx++) {
+	for (idx = 0; idx < TX_MAP_COUNT; idx++) {
 		error = bus_dmamap_create(sc->txbuf_tag, BUS_DMA_COHERENT,
 		    &sc->txbuf_map[idx].map);
 		if (error != 0) {
@@ -1074,8 +1138,10 @@ setup_dma(struct dwc_softc *sc)
 			    "could not create TX buffer DMA map.\n");
 			goto out;
 		}
-		dwc_setup_txdesc(sc, idx, NULL, 0, 0);
 	}
+
+	for (idx = 0; idx < TX_DESC_COUNT; idx++)
+		dwc_setup_txdesc(sc, idx, 0, 0, 0, false, false);
 
 	/*
 	 * Set up RX descriptor ring, descriptors, dma maps, and mbufs.
@@ -1194,8 +1260,6 @@ dwc_get_hwaddr(struct dwc_softc *sc, uint8_t *hwaddr)
 
 	return (0);
 }
-
-#define	GPIO_ACTIVE_LOW 1
 
 static int
 dwc_reset(device_t dev)
@@ -1317,7 +1381,8 @@ dwc_attach(device_t dev)
 	sc = device_get_softc(dev);
 	sc->dev = dev;
 	sc->rx_idx = 0;
-	sc->txcount = TX_DESC_COUNT;
+	sc->tx_desccount = TX_DESC_COUNT;
+	sc->tx_mapcount = 0;
 	sc->mii_clk = IF_DWC_MII_CLK(dev);
 	sc->mactype = IF_DWC_MAC_TYPE(dev);
 
@@ -1468,8 +1533,8 @@ dwc_attach(device_t dev)
 	ifp->if_start = dwc_txstart;
 	ifp->if_ioctl = dwc_ioctl;
 	ifp->if_init = dwc_init;
-	IFQ_SET_MAXLEN(&ifp->if_snd, TX_DESC_COUNT - 1);
-	ifp->if_snd.ifq_drv_maxlen = TX_DESC_COUNT - 1;
+	IFQ_SET_MAXLEN(&ifp->if_snd, TX_MAP_COUNT - 1);
+	ifp->if_snd.ifq_drv_maxlen = TX_MAP_COUNT - 1;
 	IFQ_SET_READY(&ifp->if_snd);
 
 	/* Attach the mii driver. */
@@ -1538,7 +1603,7 @@ dwc_miibus_write_reg(device_t dev, int phy, int reg, int val)
 	for (cnt = 0; cnt < 1000; cnt++) {
 		if (!(READ4(sc, GMII_ADDRESS) & GMII_ADDRESS_GB)) {
 			break;
-		}
+                }
 		DELAY(10);
 	}
 
