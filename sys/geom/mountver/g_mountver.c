@@ -47,7 +47,6 @@ __FBSDID("$FreeBSD$");
 #include <geom/geom_dbg.h>
 #include <geom/mountver/g_mountver.h>
 
-
 SYSCTL_DECL(_kern_geom);
 static SYSCTL_NODE(_kern_geom, OID_AUTO, mountver, CTLFLAG_RW | CTLFLAG_MPSAFE,
     0, "GEOM_MOUNTVER stuff");
@@ -555,7 +554,7 @@ g_mountver_ident_matches(struct g_geom *gp)
 
 	return (0);
 }
-	
+
 static struct g_geom *
 g_mountver_taste(struct g_class *mp, struct g_provider *pp, int flags __unused)
 {
@@ -587,7 +586,12 @@ g_mountver_taste(struct g_class *mp, struct g_provider *pp, int flags __unused)
 		return (NULL);
 
 	cp = LIST_FIRST(&gp->consumer);
-	g_attach(cp, pp);
+	error = g_attach(cp, pp);
+	if (error != 0) {
+		G_MOUNTVER_DEBUG(0, "Cannot attach to %s; error = %d.", pp->name, error);
+		return (NULL);
+	}
+
 	error = g_mountver_ident_matches(gp);
 	if (error != 0) {
 		g_detach(cp);

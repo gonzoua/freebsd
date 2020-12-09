@@ -42,6 +42,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/param.h>
 #include <sys/conf.h>
 #include <sys/smp.h>
+#include <sys/devctl.h>
 #include <sys/eventhandler.h>
 #include <sys/fcntl.h>
 #include <sys/jail.h>
@@ -95,11 +96,13 @@ static uma_zone_t mount_zone;
 struct mntlist mountlist = TAILQ_HEAD_INITIALIZER(mountlist);
 
 /* For any iteration/modification of mountlist */
-struct mtx mountlist_mtx;
+struct mtx_padalign __exclusive_cache_line mountlist_mtx;
 MTX_SYSINIT(mountlist, &mountlist_mtx, "mountlist", MTX_DEF);
 
 EVENTHANDLER_LIST_DEFINE(vfs_mounted);
 EVENTHANDLER_LIST_DEFINE(vfs_unmounted);
+
+static void mount_devctl_event(const char *type, struct mount *mp, bool donew);
 
 /*
  * Global opts, taken by all filesystems
@@ -124,14 +127,7 @@ mount_init(void *mem, int size, int flags)
 	mtx_init(&mp->mnt_mtx, "struct mount mtx", NULL, MTX_DEF);
 	mtx_init(&mp->mnt_listmtx, "struct mount vlist mtx", NULL, MTX_DEF);
 	lockinit(&mp->mnt_explock, PVFS, "explock", 0, 0);
-	mp->mnt_thread_in_ops_pcpu = uma_zalloc_pcpu(pcpu_zone_int,
-	    M_WAITOK | M_ZERO);
-	mp->mnt_ref_pcpu = uma_zalloc_pcpu(pcpu_zone_int,
-	    M_WAITOK | M_ZERO);
-	mp->mnt_lockref_pcpu = uma_zalloc_pcpu(pcpu_zone_int,
-	    M_WAITOK | M_ZERO);
-	mp->mnt_writeopcount_pcpu = uma_zalloc_pcpu(pcpu_zone_int,
-	    M_WAITOK | M_ZERO);
+	mp->mnt_pcpu = uma_zalloc_pcpu(pcpu_zone_16, M_WAITOK | M_ZERO);
 	mp->mnt_ref = 0;
 	mp->mnt_vfs_ops = 1;
 	mp->mnt_rootvnode = NULL;
@@ -144,10 +140,7 @@ mount_fini(void *mem, int size)
 	struct mount *mp;
 
 	mp = (struct mount *)mem;
-	uma_zfree_pcpu(pcpu_zone_int, mp->mnt_writeopcount_pcpu);
-	uma_zfree_pcpu(pcpu_zone_int, mp->mnt_lockref_pcpu);
-	uma_zfree_pcpu(pcpu_zone_int, mp->mnt_ref_pcpu);
-	uma_zfree_pcpu(pcpu_zone_int, mp->mnt_thread_in_ops_pcpu);
+	uma_zfree_pcpu(pcpu_zone_16, mp->mnt_pcpu);
 	lockdestroy(&mp->mnt_explock);
 	mtx_destroy(&mp->mnt_listmtx);
 	mtx_destroy(&mp->mnt_mtx);
@@ -459,11 +452,12 @@ sys_nmount(struct thread *td, struct nmount_args *uap)
 void
 vfs_ref(struct mount *mp)
 {
+	struct mount_pcpu *mpcpu;
 
 	CTR2(KTR_VFS, "%s: mp %p", __func__, mp);
-	if (vfs_op_thread_enter(mp)) {
-		vfs_mp_count_add_pcpu(mp, ref, 1);
-		vfs_op_thread_exit(mp);
+	if (vfs_op_thread_enter(mp, mpcpu)) {
+		vfs_mp_count_add_pcpu(mpcpu, ref, 1);
+		vfs_op_thread_exit(mp, mpcpu);
 		return;
 	}
 
@@ -475,11 +469,12 @@ vfs_ref(struct mount *mp)
 void
 vfs_rel(struct mount *mp)
 {
+	struct mount_pcpu *mpcpu;
 
 	CTR2(KTR_VFS, "%s: mp %p", __func__, mp);
-	if (vfs_op_thread_enter(mp)) {
-		vfs_mp_count_sub_pcpu(mp, ref, 1);
-		vfs_op_thread_exit(mp);
+	if (vfs_op_thread_enter(mp, mpcpu)) {
+		vfs_mp_count_sub_pcpu(mpcpu, ref, 1);
+		vfs_op_thread_exit(mp, mpcpu);
 		return;
 	}
 
@@ -500,6 +495,12 @@ vfs_mount_alloc(struct vnode *vp, struct vfsconf *vfsp, const char *fspath,
 	mp = uma_zalloc(mount_zone, M_WAITOK);
 	bzero(&mp->mnt_startzero,
 	    __rangeof(struct mount, mnt_startzero, mnt_endzero));
+	mp->mnt_kern_flag = 0;
+	mp->mnt_flag = 0;
+	mp->mnt_rootvnode = NULL;
+	mp->mnt_vnodecovered = NULL;
+	mp->mnt_op = NULL;
+	mp->mnt_vfc = NULL;
 	TAILQ_INIT(&mp->mnt_nvnodelist);
 	mp->mnt_nvnodelistsize = 0;
 	TAILQ_INIT(&mp->mnt_lazyvnodelist);
@@ -902,6 +903,7 @@ vfs_domount_first(
 	struct mount *mp;
 	struct vnode *newdp, *rootvp;
 	int error, error1;
+	bool unmounted;
 
 	ASSERT_VOP_ELOCKED(vp, __func__);
 	KASSERT((fsflags & MNT_UPDATE) == 0, ("MNT_UPDATE shouldn't be here"));
@@ -963,23 +965,46 @@ vfs_domount_first(
 	 * get.  No freeing of cn_pnbuf.
 	 */
 	error1 = 0;
+	unmounted = true;
 	if ((error = VFS_MOUNT(mp)) != 0 ||
 	    (error1 = VFS_STATFS(mp, &mp->mnt_stat)) != 0 ||
 	    (error1 = VFS_ROOT(mp, LK_EXCLUSIVE, &newdp)) != 0) {
+		rootvp = NULL;
 		if (error1 != 0) {
-			error = error1;
+			MPASS(error == 0);
 			rootvp = vfs_cache_root_clear(mp);
-			if (rootvp != NULL)
+			if (rootvp != NULL) {
+				vhold(rootvp);
 				vrele(rootvp);
-			if ((error1 = VFS_UNMOUNT(mp, 0)) != 0)
-				printf("VFS_UNMOUNT returned %d\n", error1);
+			}
+			(void)vn_start_write(NULL, &mp, V_WAIT);
+			MNT_ILOCK(mp);
+			mp->mnt_kern_flag |= MNTK_UNMOUNT | MNTK_UNMOUNTF;
+			MNT_IUNLOCK(mp);
+			VFS_PURGE(mp);
+			error = VFS_UNMOUNT(mp, 0);
+			vn_finished_write(mp);
+			if (error != 0) {
+				printf(
+		    "failed post-mount (%d): rollback unmount returned %d\n",
+				    error1, error);
+				unmounted = false;
+			}
+			error = error1;
 		}
 		vfs_unbusy(mp);
 		mp->mnt_vnodecovered = NULL;
-		vfs_mount_destroy(mp);
+		if (unmounted) {
+			/* XXXKIB wait for mnt_lockref drain? */
+			vfs_mount_destroy(mp);
+		}
 		VI_LOCK(vp);
 		vp->v_iflag &= ~VI_MOUNT;
 		VI_UNLOCK(vp);
+		if (rootvp != NULL) {
+			vn_seqc_write_end(rootvp);
+			vdrop(rootvp);
+		}
 		vn_seqc_write_end(vp);
 		vrele(vp);
 		return (error);
@@ -1020,6 +1045,7 @@ vfs_domount_first(
 	VOP_UNLOCK(vp);
 	EVENTHANDLER_DIRECT_INVOKE(vfs_mounted, mp, newdp, td);
 	VOP_UNLOCK(newdp);
+	mount_devctl_event("MOUNT", mp, false);
 	mountcheckdirs(vp, newdp);
 	vn_seqc_write_end(vp);
 	vn_seqc_write_end(newdp);
@@ -1221,6 +1247,7 @@ vfs_domount_update(
 	if (error != 0)
 		goto end;
 
+	mount_devctl_event("REMOUNT", mp, true);
 	if (mp->mnt_opt != NULL)
 		vfs_freeopts(mp->mnt_opt);
 	mp->mnt_opt = mp->mnt_optnew;
@@ -1501,6 +1528,7 @@ dounmount_cleanup(struct mount *mp, struct vnode *coveredvp, int mntkflags)
 void
 vfs_op_enter(struct mount *mp)
 {
+	struct mount_pcpu *mpcpu;
 	int cpu;
 
 	MNT_ILOCK(mp);
@@ -1511,13 +1539,20 @@ vfs_op_enter(struct mount *mp)
 	}
 	vfs_op_barrier_wait(mp);
 	CPU_FOREACH(cpu) {
-		mp->mnt_ref +=
-		    zpcpu_replace_cpu(mp->mnt_ref_pcpu, 0, cpu);
-		mp->mnt_lockref +=
-		    zpcpu_replace_cpu(mp->mnt_lockref_pcpu, 0, cpu);
-		mp->mnt_writeopcount +=
-		    zpcpu_replace_cpu(mp->mnt_writeopcount_pcpu, 0, cpu);
+		mpcpu = vfs_mount_pcpu_remote(mp, cpu);
+
+		mp->mnt_ref += mpcpu->mntp_ref;
+		mpcpu->mntp_ref = 0;
+
+		mp->mnt_lockref += mpcpu->mntp_lockref;
+		mpcpu->mntp_lockref = 0;
+
+		mp->mnt_writeopcount += mpcpu->mntp_writeopcount;
+		mpcpu->mntp_writeopcount = 0;
 	}
+	if (mp->mnt_ref <= 0 || mp->mnt_lockref < 0 || mp->mnt_writeopcount < 0)
+		panic("%s: invalid count(s) on mp %p: ref %d lockref %d writeopcount %d\n",
+		    __func__, mp, mp->mnt_ref, mp->mnt_lockref, mp->mnt_writeopcount);
 	MNT_IUNLOCK(mp);
 	vfs_assert_mount_counters(mp);
 }
@@ -1566,13 +1601,13 @@ vfs_op_wait_func(void *arg, int cpu)
 {
 	struct vfs_op_barrier_ipi *vfsopipi;
 	struct mount *mp;
-	int *in_op;
+	struct mount_pcpu *mpcpu;
 
 	vfsopipi = __containerof(arg, struct vfs_op_barrier_ipi, srcra);
 	mp = vfsopipi->mp;
 
-	in_op = zpcpu_get_cpu(mp->mnt_thread_in_ops_pcpu, cpu);
-	while (atomic_load_int(in_op))
+	mpcpu = vfs_mount_pcpu_remote(mp, cpu);
+	while (atomic_load_int(&mpcpu->mntp_thread_in_ops))
 		cpu_spinwait();
 }
 
@@ -1595,15 +1630,17 @@ vfs_op_barrier_wait(struct mount *mp)
 void
 vfs_assert_mount_counters(struct mount *mp)
 {
+	struct mount_pcpu *mpcpu;
 	int cpu;
 
 	if (mp->mnt_vfs_ops == 0)
 		return;
 
 	CPU_FOREACH(cpu) {
-		if (*zpcpu_get_cpu(mp->mnt_ref_pcpu, cpu) != 0 ||
-		    *zpcpu_get_cpu(mp->mnt_lockref_pcpu, cpu) != 0 ||
-		    *zpcpu_get_cpu(mp->mnt_writeopcount_pcpu, cpu) != 0)
+		mpcpu = vfs_mount_pcpu_remote(mp, cpu);
+		if (mpcpu->mntp_ref != 0 ||
+		    mpcpu->mntp_lockref != 0 ||
+		    mpcpu->mntp_writeopcount != 0)
 			vfs_dump_mount_counters(mp);
 	}
 }
@@ -1611,33 +1648,34 @@ vfs_assert_mount_counters(struct mount *mp)
 void
 vfs_dump_mount_counters(struct mount *mp)
 {
-	int cpu, *count;
+	struct mount_pcpu *mpcpu;
 	int ref, lockref, writeopcount;
+	int cpu;
 
 	printf("%s: mp %p vfs_ops %d\n", __func__, mp, mp->mnt_vfs_ops);
 
 	printf("        ref : ");
 	ref = mp->mnt_ref;
 	CPU_FOREACH(cpu) {
-		count = zpcpu_get_cpu(mp->mnt_ref_pcpu, cpu);
-		printf("%d ", *count);
-		ref += *count;
+		mpcpu = vfs_mount_pcpu_remote(mp, cpu);
+		printf("%d ", mpcpu->mntp_ref);
+		ref += mpcpu->mntp_ref;
 	}
 	printf("\n");
 	printf("    lockref : ");
 	lockref = mp->mnt_lockref;
 	CPU_FOREACH(cpu) {
-		count = zpcpu_get_cpu(mp->mnt_lockref_pcpu, cpu);
-		printf("%d ", *count);
-		lockref += *count;
+		mpcpu = vfs_mount_pcpu_remote(mp, cpu);
+		printf("%d ", mpcpu->mntp_lockref);
+		lockref += mpcpu->mntp_lockref;
 	}
 	printf("\n");
 	printf("writeopcount: ");
 	writeopcount = mp->mnt_writeopcount;
 	CPU_FOREACH(cpu) {
-		count = zpcpu_get_cpu(mp->mnt_writeopcount_pcpu, cpu);
-		printf("%d ", *count);
-		writeopcount += *count;
+		mpcpu = vfs_mount_pcpu_remote(mp, cpu);
+		printf("%d ", mpcpu->mntp_writeopcount);
+		writeopcount += mpcpu->mntp_writeopcount;
 	}
 	printf("\n");
 
@@ -1653,27 +1691,34 @@ vfs_dump_mount_counters(struct mount *mp)
 int
 vfs_mount_fetch_counter(struct mount *mp, enum mount_counter which)
 {
-	int *base, *pcpu;
+	struct mount_pcpu *mpcpu;
 	int cpu, sum;
 
 	switch (which) {
 	case MNT_COUNT_REF:
-		base = &mp->mnt_ref;
-		pcpu = mp->mnt_ref_pcpu;
+		sum = mp->mnt_ref;
 		break;
 	case MNT_COUNT_LOCKREF:
-		base = &mp->mnt_lockref;
-		pcpu = mp->mnt_lockref_pcpu;
+		sum = mp->mnt_lockref;
 		break;
 	case MNT_COUNT_WRITEOPCOUNT:
-		base = &mp->mnt_writeopcount;
-		pcpu = mp->mnt_writeopcount_pcpu;
+		sum = mp->mnt_writeopcount;
 		break;
 	}
 
-	sum = *base;
 	CPU_FOREACH(cpu) {
-		sum += *zpcpu_get_cpu(pcpu, cpu);
+		mpcpu = vfs_mount_pcpu_remote(mp, cpu);
+		switch (which) {
+		case MNT_COUNT_REF:
+			sum += mpcpu->mntp_ref;
+			break;
+		case MNT_COUNT_LOCKREF:
+			sum += mpcpu->mntp_lockref;
+			break;
+		case MNT_COUNT_WRITEOPCOUNT:
+			sum += mpcpu->mntp_writeopcount;
+			break;
+		}
 	}
 	return (sum);
 }
@@ -1793,7 +1838,6 @@ dounmount(struct mount *mp, int flags, struct thread *td)
 	mp->mnt_flag &= ~MNT_ASYNC;
 	mp->mnt_kern_flag &= ~MNTK_ASYNC;
 	MNT_IUNLOCK(mp);
-	cache_purgevfs(mp, false); /* remove cache entries for this file sys */
 	vfs_deallocate_syncvnode(mp);
 	error = VFS_UNMOUNT(mp, flags);
 	vn_finished_write(mp);
@@ -1842,6 +1886,7 @@ dounmount(struct mount *mp, int flags, struct thread *td)
 		VOP_UNLOCK(coveredvp);
 		vdrop(coveredvp);
 	}
+	mount_devctl_event("UNMOUNT", mp, false);
 	if (rootvp != NULL) {
 		vn_seqc_write_end(rootvp);
 		vdrop(rootvp);
@@ -2422,4 +2467,137 @@ kernel_vmount(int flags, ...)
 
 	error = kernel_mount(ma, flags);
 	return (error);
+}
+
+/* Map from mount options to printable formats. */
+static struct mntoptnames optnames[] = {
+	MNTOPT_NAMES
+};
+
+static void
+mount_devctl_event_mntopt(struct sbuf *sb, const char *what, struct vfsoptlist *opts)
+{
+	struct vfsopt *opt;
+
+	if (opts == NULL || TAILQ_EMPTY(opts))
+		return;
+	sbuf_printf(sb, " %s=\"", what);
+	TAILQ_FOREACH(opt, opts, link) {
+		if (opt->name[0] == '\0' || (opt->len > 0 && *(char *)opt->value == '\0'))
+			continue;
+		devctl_safe_quote_sb(sb, opt->name);
+		if (opt->len > 0) {
+			sbuf_putc(sb, '=');
+			devctl_safe_quote_sb(sb, opt->value);
+		}
+		sbuf_putc(sb, ';');
+	}
+	sbuf_putc(sb, '"');
+}
+
+#define DEVCTL_LEN 1024
+static void
+mount_devctl_event(const char *type, struct mount *mp, bool donew)
+{
+	const uint8_t *cp;
+	struct mntoptnames *fp;
+	struct sbuf sb;
+	struct statfs *sfp = &mp->mnt_stat;
+	char *buf;
+
+	buf = malloc(DEVCTL_LEN, M_MOUNT, M_NOWAIT);
+	if (buf == NULL)
+		return;
+	sbuf_new(&sb, buf, DEVCTL_LEN, SBUF_FIXEDLEN);
+	sbuf_cpy(&sb, "mount-point=\"");
+	devctl_safe_quote_sb(&sb, sfp->f_mntonname);
+	sbuf_cat(&sb, "\" mount-dev=\"");
+	devctl_safe_quote_sb(&sb, sfp->f_mntfromname);
+	sbuf_cat(&sb, "\" mount-type=\"");
+	devctl_safe_quote_sb(&sb, sfp->f_fstypename);
+	sbuf_cat(&sb, "\" fsid=0x");
+	cp = (const uint8_t *)&sfp->f_fsid.val[0];
+	for (int i = 0; i < sizeof(sfp->f_fsid); i++)
+		sbuf_printf(&sb, "%02x", cp[i]);
+	sbuf_printf(&sb, " owner=%u flags=\"", sfp->f_owner);
+	for (fp = optnames; fp->o_opt != 0; fp++) {
+		if ((mp->mnt_flag & fp->o_opt) != 0) {
+			sbuf_cat(&sb, fp->o_name);
+			sbuf_putc(&sb, ';');
+		}
+	}
+	sbuf_putc(&sb, '"');
+	mount_devctl_event_mntopt(&sb, "opt", mp->mnt_opt);
+	if (donew)
+		mount_devctl_event_mntopt(&sb, "optnew", mp->mnt_optnew);
+	sbuf_finish(&sb);
+
+	if (sbuf_error(&sb) == 0)
+		devctl_notify("VFS", "FS", type, sbuf_data(&sb));
+	sbuf_delete(&sb);
+	free(buf, M_MOUNT);
+}
+
+/*
+ * Suspend write operations on all local writeable filesystems.  Does
+ * full sync of them in the process.
+ *
+ * Iterate over the mount points in reverse order, suspending most
+ * recently mounted filesystems first.  It handles a case where a
+ * filesystem mounted from a md(4) vnode-backed device should be
+ * suspended before the filesystem that owns the vnode.
+ */
+void
+suspend_all_fs(void)
+{
+	struct mount *mp;
+	int error;
+
+	mtx_lock(&mountlist_mtx);
+	TAILQ_FOREACH_REVERSE(mp, &mountlist, mntlist, mnt_list) {
+		error = vfs_busy(mp, MBF_MNTLSTLOCK | MBF_NOWAIT);
+		if (error != 0)
+			continue;
+		if ((mp->mnt_flag & (MNT_RDONLY | MNT_LOCAL)) != MNT_LOCAL ||
+		    (mp->mnt_kern_flag & MNTK_SUSPEND) != 0) {
+			mtx_lock(&mountlist_mtx);
+			vfs_unbusy(mp);
+			continue;
+		}
+		error = vfs_write_suspend(mp, 0);
+		if (error == 0) {
+			MNT_ILOCK(mp);
+			MPASS((mp->mnt_kern_flag & MNTK_SUSPEND_ALL) == 0);
+			mp->mnt_kern_flag |= MNTK_SUSPEND_ALL;
+			MNT_IUNLOCK(mp);
+			mtx_lock(&mountlist_mtx);
+		} else {
+			printf("suspend of %s failed, error %d\n",
+			    mp->mnt_stat.f_mntonname, error);
+			mtx_lock(&mountlist_mtx);
+			vfs_unbusy(mp);
+		}
+	}
+	mtx_unlock(&mountlist_mtx);
+}
+
+void
+resume_all_fs(void)
+{
+	struct mount *mp;
+
+	mtx_lock(&mountlist_mtx);
+	TAILQ_FOREACH(mp, &mountlist, mnt_list) {
+		if ((mp->mnt_kern_flag & MNTK_SUSPEND_ALL) == 0)
+			continue;
+		mtx_unlock(&mountlist_mtx);
+		MNT_ILOCK(mp);
+		MPASS((mp->mnt_kern_flag & MNTK_SUSPEND) != 0);
+		mp->mnt_kern_flag &= ~MNTK_SUSPEND_ALL;
+		MNT_IUNLOCK(mp);
+		vfs_write_resume(mp, 0);
+		mtx_lock(&mountlist_mtx);
+		vfs_unbusy(mp);
+	}
+	mtx_unlock(&mountlist_mtx);
 }

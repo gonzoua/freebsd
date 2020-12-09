@@ -45,7 +45,6 @@ __FBSDID("$FreeBSD$");
 #include <geom/geom_dbg.h>
 #include <geom/nop/g_nop.h>
 
-
 SYSCTL_DECL(_kern_geom);
 static SYSCTL_NODE(_kern_geom, OID_AUTO, nop, CTLFLAG_RW | CTLFLAG_MPSAFE, 0,
     "GEOM_NOP stuff");
@@ -382,7 +381,7 @@ g_nop_create(struct gctl_req *req, struct g_class *mp, struct g_provider *pp,
 		gctl_error(req, "Invalid secsize for provider %s.", pp->name);
 		return (EINVAL);
 	}
-	if (secsize > MAXPHYS) {
+	if (secsize > maxphys) {
 		gctl_error(req, "secsize is too big.");
 		return (EINVAL);
 	}

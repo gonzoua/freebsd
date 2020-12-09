@@ -59,20 +59,6 @@ static struct ofw_compat_data compat_data[] = {
 	{ NULL,				0}
 };
 
-static inline uint32_t
-imx7gpc_read_4(struct imx7gpc_softc *sc, int reg)
-{
-
-	return (bus_read_4(sc->memres, reg));
-}
-
-static inline void
-imx7gpc_write_4(struct imx7gpc_softc *sc, int reg, uint32_t val)
-{
-
-    bus_write_4(sc->memres, reg, val);
-}
-
 static int
 imx7gpc_activate_intr(device_t dev, struct intr_irqsrc *isrc,
     struct resource *res, struct intr_map_data *data)
@@ -142,7 +128,6 @@ imx7gpc_pre_ithread(device_t dev, struct intr_irqsrc *isrc)
 	PIC_PRE_ITHREAD(sc->parent, isrc);
 }
 
-
 static void
 imx7gpc_post_ithread(device_t dev, struct intr_irqsrc *isrc)
 {
@@ -206,7 +191,6 @@ imx7gpc_attach(device_t dev)
 		device_printf(dev, "Can't find parent controller\n");
 		return (ENXIO);
 	}
-
 
 	i = 0;
 	sc->memres = bus_alloc_resource_any(dev, SYS_RES_MEMORY, &i,

@@ -23,10 +23,14 @@ SUBDIR_BOOTSTRAP= \
 	msun
 
 # The main list; please keep these sorted alphabetically.
+# The only exception is sqlite3: we place it at the start of the list since it
+# takes a long time to build and starting it first improves parallelism.
 
 SUBDIR=	${SUBDIR_BOOTSTRAP} \
 	.WAIT \
+	libsqlite3 \
 	geom \
+	lib9p \
 	libalias \
 	libarchive \
 	libauditd \
@@ -68,6 +72,7 @@ SUBDIR=	${SUBDIR_BOOTSTRAP} \
 	libmt \
 	lib80211 \
 	libnetbsd \
+	libnetmap \
 	libnv \
 	libopenbsd \
 	libopie \
@@ -84,7 +89,6 @@ SUBDIR=	${SUBDIR_BOOTSTRAP} \
 	librtld_db \
 	libsbuf \
 	libsmb \
-	libsqlite3 \
 	libstdbuf \
 	libstdthreads \
 	libsysdecode \
@@ -136,6 +140,11 @@ SUBDIR_DEPEND_libunbound= ${_libldns}
 SUBDIR_DEPEND_liblzma= ${_libthr}
 .if ${MK_OFED} != "no"
 SUBDIR_DEPEND_libpcap= ofed
+.endif
+
+.if !defined(COMPAT_32BIT)
+SUBDIR+=	flua
+SUBDIR_DEPEND_flua=	libjail
 .endif
 
 # NB: keep these sorted by MK_* knobs

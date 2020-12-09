@@ -215,7 +215,7 @@ bounce_bus_dma_tag_create(bus_dma_tag_t parent, bus_size_t alignment,
 		error = bounce_bus_dma_zone_setup(newtag);
 	else
 		error = 0;
-	
+
 	if (error != 0)
 		free(newtag, M_DEVBUF);
 	else
@@ -393,7 +393,6 @@ bounce_bus_dmamap_destroy(bus_dma_tag_t dmat, bus_dmamap_t map)
 	CTR2(KTR_BUSDMA, "%s: tag %p error 0", __func__, dmat);
 	return (0);
 }
-
 
 /*
  * Allocate a piece of memory that can be efficiently mapped into
@@ -970,7 +969,7 @@ bounce_bus_dmamap_sync(bus_dma_tag_t dmat, bus_dmamap_t map,
 	bus_size_t datacount1, datacount2;
 
 	if (map == NULL || (bpage = STAILQ_FIRST(&map->bpages)) == NULL)
-		return;
+		goto out;
 
 	/*
 	 * Handle data bouncing.  We might also want to add support for
@@ -1060,6 +1059,8 @@ next_r:
 		}
 		dmat->bounce_zone->total_bounced++;
 	}
+out:
+	atomic_thread_fence_rel();
 }
 
 static void

@@ -51,6 +51,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/dirent.h>
+#include <sys/file.h>
 #include <sys/limits.h>
 #include <sys/lock.h>
 #include <sys/mount.h>
@@ -130,8 +131,7 @@ tmpfs_update_mtime(struct mount *mp, bool lazy)
 		 * metadata changes now.
 		 */
 		if (!lazy || obj->generation != obj->cleangeneration) {
-			if (vget(vp, LK_EXCLUSIVE | LK_INTERLOCK,
-			    curthread) != 0)
+			if (vget(vp, LK_EXCLUSIVE | LK_INTERLOCK) != 0)
 				continue;
 			tmpfs_check_mtime(vp);
 			if (!lazy)
@@ -663,6 +663,8 @@ static int
 tmpfs_init(struct vfsconf *conf)
 {
 	tmpfs_subr_init();
+	memcpy(&tmpfs_fnops, &vnops, sizeof(struct fileops));
+	tmpfs_fnops.fo_close = tmpfs_fo_close;
 	return (0);
 }
 

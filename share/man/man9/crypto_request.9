@@ -30,7 +30,7 @@
 .\"
 .\" $FreeBSD$
 .\"
-.Dd July 16, 2020
+.Dd August 12, 2020
 .Dt CRYPTO_REQUEST 9
 .Os
 .Sh NAME
@@ -55,11 +55,15 @@
 .Ft void
 .Fn crypto_use_uio "struct cryptop *crp" "struct uio *uio"
 .Ft void
+.Fn crypto_use_vmpage "struct cryptop *crp" "vm_page_t *pages" "int len" "int offset"
+.Ft void
 .Fn crypto_use_output_buf "struct cryptop *crp" "void *buf" "int len"
 .Ft void
 .Fn crypto_use_output_mbuf "struct cryptop *crp" "struct mbuf *m"
 .Ft void
 .Fn crypto_use_output_uio "struct cryptop *crp" "struct uio *uio"
+.Ft void
+.Fn crypto_use_output_vmpage "struct cryptop *crp" "vm_page_t *pages" "int len" "int offset"
 .Sh DESCRIPTION
 Each symmetric cryptographic operation in the kernel is described by
 an instance of
@@ -141,7 +145,7 @@ mode requests.
 All requests must have a valid
 .Fa crp_buf
 initialized by one of the following functions:
-.Bl -tag -width "Fn crypto_use_mbuf"
+.Bl -tag -width "Fn crypto_use_vmpage"
 .It Fn crypto_use_buf
 Uses an array of
 .Fa len
@@ -156,12 +160,16 @@ as the data buffer.
 Uses the scatter/gather list
 .Fa uio
 as the data buffer.
+.It Fn crypto_use_vmpage
+Uses the array of
+.Vt vm_page_t
+structures as the data buffer.
 .El
 .Pp
 One of the following functions should be used to initialize
 .Fa crp_obuf
 for requests that use separate input and output buffers:
-.Bl -tag -width "Fn crypto_use_output_mbuf"
+.Bl -tag -width "Fn crypto_use_output_vmpage"
 .It Fn crypto_use_output_buf
 Uses an array of
 .Fa len
@@ -176,6 +184,10 @@ as the output buffer.
 Uses the scatter/gather list
 .Fa uio
 as the output buffer.
+.It Fn crypto_use_output_vmpage
+Uses the array of
+.Vt vm_page_t
+structures as the output buffer.
 .El
 .Ss Request Regions
 Each request describes one or more regions in the data buffers.
@@ -290,6 +302,24 @@ as a single buffer pointed to by
 In either case,
 .Fa crp_aad_length
 always indicates the amount of AAD in bytes.
+.Ss Request ESN
+IPsec requests may optionally include Extended Sequence Numbers (ESN).
+ESN may either be supplied in
+.Fa crp_esn
+or as part of the AAD pointed to by
+.Fa crp_aad .
+.Pp
+If the ESN is stored in
+.Fa crp_esn ,
+.Dv CSP_F_ESN
+should be set in
+.Fa csp_flags .
+This use case is dedicated for encrypt and authenticate mode, since the
+high-order 32 bits of the sequence number are appended after the Next Header
+(RFC 4303).
+.Pp
+AEAD modes supply the ESN in a separate AAD buffer (see e.g. RFC 4106, Chapter 5
+AAD Construction).
 .Ss Request IV and/or Nonce
 Some cryptographic operations require an IV or nonce as an input.
 An IV may be stored either in the IV region of the data buffer or in

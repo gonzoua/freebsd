@@ -113,8 +113,9 @@ struct sackhint {
 	int32_t		sacked_bytes;	/* Total sacked bytes reported by the
 					 * receiver via sack option
 					 */
-	uint32_t	_pad1[1];	/* TBD */
-	uint64_t	_pad[1];	/* TBD */
+	uint32_t	recover_fs;	/* Flight Size at the start of Loss recovery */
+	uint32_t	prr_delivered;	/* Total bytes delivered using PRR */
+	uint32_t	_pad[1];	/* TBD */
 };
 
 #define SEGQ_EMPTY(tp) TAILQ_EMPTY(&(tp)->t_segq)
@@ -246,6 +247,7 @@ struct tcpcb {
 	int	t_dupacks;		/* consecutive dup acks recd */
 	int	t_lognum;		/* Number of log entries */
 	int	t_loglimit;		/* Maximum number of log entries */
+	int64_t	t_pacing_rate;		/* bytes / sec, -1 => unlimited */
 	struct tcp_log_stailq t_logs;	/* Log buffer */
 	struct tcp_log_id_node *t_lin;
 	struct tcp_log_id_bucket *t_lib;
@@ -380,7 +382,7 @@ TAILQ_HEAD(tcp_funchead, tcp_function);
 #define	TF_NEEDFIN	0x00000800	/* send FIN (implicit state) */
 #define	TF_NOPUSH	0x00001000	/* don't push */
 #define	TF_PREVVALID	0x00002000	/* saved values for bad rxmit valid */
-#define	TF_UNUSED1	0x00004000	/* unused */
+#define	TF_WAKESOR	0x00004000	/* wake up receive socket */
 #define	TF_GPUTINPROG	0x00008000	/* Goodput measurement in progress */
 #define	TF_MORETOCOME	0x00010000	/* More data to be appended to sock */
 #define	TF_LQ_OVERFLOW	0x00020000	/* listen queue overflow */
@@ -392,9 +394,9 @@ TAILQ_HEAD(tcp_funchead, tcp_function);
 #define	TF_FORCEDATA	0x00800000	/* force out a byte */
 #define	TF_TSO		0x01000000	/* TSO enabled on this connection */
 #define	TF_TOE		0x02000000	/* this connection is offloaded */
-#define	TF_UNUSED3	0x04000000	/* unused */
-#define	TF_UNUSED4	0x08000000	/* unused */
-#define	TF_UNUSED5	0x10000000	/* unused */
+#define	TF_WAKESOW	0x04000000	/* wake up send socket */
+#define	TF_UNUSED1	0x08000000	/* unused */
+#define	TF_UNUSED2	0x10000000	/* unused */
 #define	TF_CONGRECOVERY	0x20000000	/* congestion recovery mode */
 #define	TF_WASCRECOVERY	0x40000000	/* was in congestion recovery */
 #define	TF_FASTOPEN	0x80000000	/* TCP Fast Open indication */
@@ -754,7 +756,8 @@ struct xtcpcb {
 	struct xinpcb	xt_inp;
 	char		xt_stack[TCP_FUNCTION_NAME_LEN_MAX];	/* (s) */
 	char		xt_logid[TCP_LOG_ID_LEN];	/* (s) */
-	int64_t		spare64[8];
+	char		xt_cc[TCP_CA_NAME_MAX];	/* (s) */
+	int64_t		spare64[6];
 	int32_t		t_state;		/* (s,p) */
 	uint32_t	t_flags;		/* (s,p) */
 	int32_t		t_sndzerowin;		/* (s) */
@@ -767,7 +770,13 @@ struct xtcpcb {
 	int32_t		tt_2msl;		/* (s) */
 	int32_t		tt_delack;		/* (s) */
 	int32_t		t_logstate;		/* (3) */
-	int32_t		spare32[32];
+	uint32_t	t_snd_cwnd;		/* (s) */
+	uint32_t	t_snd_ssthresh;		/* (s) */
+	uint32_t	t_maxseg;		/* (s) */
+	uint32_t	t_rcv_wnd;		/* (s) */
+	uint32_t	t_snd_wnd;		/* (s) */
+	uint32_t	xt_ecn;			/* (s) */
+	int32_t		spare32[26];
 } __aligned(8);
 
 #ifdef _KERNEL
@@ -858,6 +867,8 @@ VNET_DECLARE(int, tcp_sendspace);
 VNET_DECLARE(struct inpcbhead, tcb);
 VNET_DECLARE(struct inpcbinfo, tcbinfo);
 
+#define	V_tcp_do_prr			VNET(tcp_do_prr)
+#define	V_tcp_do_prr_conservative	VNET(tcp_do_prr_conservative)
 #define	V_tcp_do_newcwv			VNET(tcp_do_newcwv)
 #define	V_drop_synfin			VNET(drop_synfin)
 #define	V_path_mtu_discovery		VNET(path_mtu_discovery)
@@ -923,7 +934,8 @@ char	*tcp_log_addrs(struct in_conninfo *, struct tcphdr *, void *,
 	    const void *);
 char	*tcp_log_vain(struct in_conninfo *, struct tcphdr *, void *,
 	    const void *);
-int	 tcp_reass(struct tcpcb *, struct tcphdr *, tcp_seq *, int *, struct mbuf *);
+int	 tcp_reass(struct tcpcb *, struct tcphdr *, tcp_seq *, int *,
+	    struct mbuf *);
 void	 tcp_reass_global_init(void);
 void	 tcp_reass_flush(struct tcpcb *);
 void	 tcp_dooptions(struct tcpopt *, u_char *, int, int);
@@ -947,6 +959,7 @@ void	hhook_run_tcp_est_in(struct tcpcb *tp,
 int	 tcp_input(struct mbuf **, int *, int);
 int	 tcp_autorcvbuf(struct mbuf *, struct tcphdr *, struct socket *,
 	    struct tcpcb *, int);
+void	 tcp_handle_wakeup(struct tcpcb *, struct socket *);
 void	 tcp_do_segment(struct mbuf *, struct tcphdr *,
 			struct socket *, struct tcpcb *, int, int, uint8_t);
 
@@ -1041,6 +1054,7 @@ void	 tcp_clean_dsack_blocks(struct tcpcb *tp);
 void	 tcp_clean_sackreport(struct tcpcb *tp);
 void	 tcp_sack_adjust(struct tcpcb *tp);
 struct sackhole *tcp_sack_output(struct tcpcb *tp, int *sack_bytes_rexmt);
+void	 tcp_prr_partialack(struct tcpcb *, struct tcphdr *);
 void	 tcp_sack_partialack(struct tcpcb *, struct tcphdr *);
 void	 tcp_free_sackholes(struct tcpcb *tp);
 int	 tcp_newreno(struct tcpcb *, struct tcphdr *);

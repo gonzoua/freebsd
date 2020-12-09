@@ -364,7 +364,6 @@ retry_sleepq:
 			}
 				
 		} else {
-
 			/*
 			 * Exclusive waiters sleeping with LK_SLEEPFAIL on
 			 * and using interruptible sleeps/timeout may have
@@ -604,10 +603,10 @@ lockmgr_slock_hard(struct lock *lk, u_int flags, struct lock_object *ilk,
 	if (LK_CAN_WITNESS(flags))
 		WITNESS_CHECKORDER(&lk->lock_object, LOP_NEWORDER,
 		    file, line, flags & LK_INTERLOCK ? ilk : NULL);
+	x = lockmgr_read_value(lk);
 	lock_delay_arg_init(&lda, &lockmgr_delay);
 	if (!lk_adaptive)
 		flags &= ~LK_ADAPTIVE;
-	x = lockmgr_read_value(lk);
 	/*
 	 * The lock may already be locked exclusive by curthread,
 	 * avoid deadlock.
@@ -1186,7 +1185,6 @@ lockmgr_xunlock_hard(struct lock *lk, uintptr_t x, u_int flags, struct lock_obje
 			queue = SQ_SHARED_QUEUE;
 		}
 	} else {
-
 		/*
 		 * Exclusive waiters sleeping with LK_SLEEPFAIL
 		 * on and using interruptible sleeps/timeout
@@ -1486,7 +1484,6 @@ __lockmgr_args(struct lock *lk, u_int flags, struct lock_object *ilk,
 					queue = SQ_EXCLUSIVE_QUEUE;
 					v &= ~LK_EXCLUSIVE_WAITERS;
 				} else {
-
 					/*
 					 * Exclusive waiters sleeping with
 					 * LK_SLEEPFAIL on and using

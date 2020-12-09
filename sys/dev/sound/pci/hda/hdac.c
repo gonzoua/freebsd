@@ -558,7 +558,6 @@ hdac_get_capabilities(struct hdac_softc *sc)
 	return (0);
 }
 
-
 /****************************************************************************
  * void hdac_dma_cb
  *
@@ -576,7 +575,6 @@ hdac_dma_cb(void *callback_arg, bus_dma_segment_t *segs, int nseg, int error)
 		dma->dma_paddr = segs[0].ds_addr;
 	}
 }
-
 
 /****************************************************************************
  * int hdac_dma_alloc
@@ -992,7 +990,8 @@ hdac_unsolq_flush(struct hdac_softc *sc)
 			sc->unsolq_rp %= HDAC_UNSOLQ_MAX;
 			cad = sc->unsolq[sc->unsolq_rp++];
 			sc->unsolq_rp %= HDAC_UNSOLQ_MAX;
-			if ((child = sc->codecs[cad].dev) != NULL)
+			if ((child = sc->codecs[cad].dev) != NULL &&
+			    device_is_attached(child))
 				HDAC_UNSOL_INTR(child, resp);
 			ret++;
 		}

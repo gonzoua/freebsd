@@ -3915,7 +3915,7 @@ int t4_link_l1cfg(struct adapter *adap, unsigned int mbox, unsigned int port,
 		speed = fwcap_top_speed(lc->pcaps);
 
 	fec = 0;
-	if (fec_supported(lc->pcaps)) {
+	if (fec_supported(speed)) {
 		if (lc->requested_fec == FEC_AUTO) {
 			if (lc->pcaps & FW_PORT_CAP32_FORCE_FEC) {
 				if (speed & FW_PORT_CAP32_SPEED_100G) {
@@ -6169,6 +6169,25 @@ void t4_tp_get_err_stats(struct adapter *adap, struct tp_err_stats *st,
 }
 
 /**
+ *	t4_tp_get_err_stats - read TP's error MIB counters
+ *	@adap: the adapter
+ *	@st: holds the counter values
+ * 	@sleep_ok: if true we may sleep while awaiting command completion
+ *
+ *	Returns the values of TP's error counters.
+ */
+void t4_tp_get_tnl_stats(struct adapter *adap, struct tp_tnl_stats *st,
+			 bool sleep_ok)
+{
+	int nchan = adap->chip_params->nchan;
+
+	t4_tp_mib_read(adap, st->out_pkt, nchan, A_TP_MIB_TNL_OUT_PKT_0,
+		       sleep_ok);
+	t4_tp_mib_read(adap, st->in_pkt, nchan, A_TP_MIB_TNL_IN_PKT_0,
+		       sleep_ok);
+}
+
+/**
  *	t4_tp_get_proxy_stats - read TP's proxy MIB counters
  *	@adap: the adapter
  *	@st: holds the counter values
@@ -6259,6 +6278,21 @@ void t4_get_usm_stats(struct adapter *adap, struct tp_usm_stats *st,
 	st->frames = val[0];
 	st->drops = val[1];
 	st->octets = ((u64)val[2] << 32) | val[3];
+}
+
+/**
+ *	t4_tp_get_tid_stats - read TP's tid MIB counters.
+ *	@adap: the adapter
+ *	@st: holds the counter values
+ * 	@sleep_ok: if true we may sleep while awaiting command completion
+ *
+ *	Returns the values of TP's counters for tids.
+ */
+void t4_tp_get_tid_stats(struct adapter *adap, struct tp_tid_stats *st,
+		      bool sleep_ok)
+{
+
+	t4_tp_mib_read(adap, &st->del, 4, A_TP_MIB_TID_DEL, sleep_ok);
 }
 
 /**
@@ -6852,7 +6886,8 @@ void t4_get_port_stats_offset(struct adapter *adap, int idx,
  */
 void t4_get_port_stats(struct adapter *adap, int idx, struct port_stats *p)
 {
-	u32 bgmap = adap2pinfo(adap, idx)->mps_bg_map;
+	struct port_info *pi = adap->port[idx];
+	u32 bgmap = pi->mps_bg_map;
 	u32 stat_ctl = t4_read_reg(adap, A_MPS_STAT_CTL);
 
 #define GET_STAT(name) \
@@ -6902,7 +6937,6 @@ void t4_get_port_stats(struct adapter *adap, int idx, struct port_stats *p)
 	p->rx_ucast_frames	= GET_STAT(RX_PORT_UCAST);
 	p->rx_too_long		= GET_STAT(RX_PORT_MTU_ERROR);
 	p->rx_jabber		= GET_STAT(RX_PORT_MTU_CRC_ERROR);
-	p->rx_fcs_err		= GET_STAT(RX_PORT_CRC_ERROR);
 	p->rx_len_err		= GET_STAT(RX_PORT_LEN_ERROR);
 	p->rx_symbol_err	= GET_STAT(RX_PORT_SYM_ERROR);
 	p->rx_runt		= GET_STAT(RX_PORT_LESS_64B);
@@ -6921,6 +6955,9 @@ void t4_get_port_stats(struct adapter *adap, int idx, struct port_stats *p)
 	p->rx_ppp5		= GET_STAT(RX_PORT_PPP5);
 	p->rx_ppp6		= GET_STAT(RX_PORT_PPP6);
 	p->rx_ppp7		= GET_STAT(RX_PORT_PPP7);
+
+	if (pi->fcs_reg != -1)
+		p->rx_fcs_err = t4_read_reg64(adap, pi->fcs_reg) - pi->fcs_base;
 
 	if (chip_id(adap) >= CHELSIO_T5) {
 		if (stat_ctl & F_COUNTPAUSESTATRX) {
@@ -6954,7 +6991,6 @@ void t4_get_port_stats(struct adapter *adap, int idx, struct port_stats *p)
  */
 void t4_get_lb_stats(struct adapter *adap, int idx, struct lb_port_stats *p)
 {
-	u32 bgmap = adap2pinfo(adap, idx)->mps_bg_map;
 
 #define GET_STAT(name) \
 	t4_read_reg64(adap, \
@@ -6979,14 +7015,18 @@ void t4_get_lb_stats(struct adapter *adap, int idx, struct lb_port_stats *p)
 	p->frames_1519_max	= GET_STAT(1519B_MAX);
 	p->drop			= GET_STAT(DROP_FRAMES);
 
-	p->ovflow0 = (bgmap & 1) ? GET_STAT_COM(RX_BG_0_LB_DROP_FRAME) : 0;
-	p->ovflow1 = (bgmap & 2) ? GET_STAT_COM(RX_BG_1_LB_DROP_FRAME) : 0;
-	p->ovflow2 = (bgmap & 4) ? GET_STAT_COM(RX_BG_2_LB_DROP_FRAME) : 0;
-	p->ovflow3 = (bgmap & 8) ? GET_STAT_COM(RX_BG_3_LB_DROP_FRAME) : 0;
-	p->trunc0 = (bgmap & 1) ? GET_STAT_COM(RX_BG_0_LB_TRUNC_FRAME) : 0;
-	p->trunc1 = (bgmap & 2) ? GET_STAT_COM(RX_BG_1_LB_TRUNC_FRAME) : 0;
-	p->trunc2 = (bgmap & 4) ? GET_STAT_COM(RX_BG_2_LB_TRUNC_FRAME) : 0;
-	p->trunc3 = (bgmap & 8) ? GET_STAT_COM(RX_BG_3_LB_TRUNC_FRAME) : 0;
+	if (idx < adap->params.nports) {
+		u32 bg = adap2pinfo(adap, idx)->mps_bg_map;
+
+		p->ovflow0 = (bg & 1) ? GET_STAT_COM(RX_BG_0_LB_DROP_FRAME) : 0;
+		p->ovflow1 = (bg & 2) ? GET_STAT_COM(RX_BG_1_LB_DROP_FRAME) : 0;
+		p->ovflow2 = (bg & 4) ? GET_STAT_COM(RX_BG_2_LB_DROP_FRAME) : 0;
+		p->ovflow3 = (bg & 8) ? GET_STAT_COM(RX_BG_3_LB_DROP_FRAME) : 0;
+		p->trunc0 = (bg & 1) ? GET_STAT_COM(RX_BG_0_LB_TRUNC_FRAME) : 0;
+		p->trunc1 = (bg & 2) ? GET_STAT_COM(RX_BG_1_LB_TRUNC_FRAME) : 0;
+		p->trunc2 = (bg & 4) ? GET_STAT_COM(RX_BG_2_LB_TRUNC_FRAME) : 0;
+		p->trunc3 = (bg & 8) ? GET_STAT_COM(RX_BG_3_LB_TRUNC_FRAME) : 0;
+	}
 
 #undef GET_STAT
 #undef GET_STAT_COM
@@ -8614,6 +8654,32 @@ int t4_iq_free(struct adapter *adap, unsigned int mbox, unsigned int pf,
 }
 
 /**
+ *	t4_eth_eq_stop - stop an Ethernet egress queue
+ *	@adap: the adapter
+ *	@mbox: mailbox to use for the FW command
+ *	@pf: the PF owning the queues
+ *	@vf: the VF owning the queues
+ *	@eqid: egress queue id
+ *
+ *	Stops an Ethernet egress queue.  The queue can be reinitialized or
+ *	freed but is not otherwise functional after this call.
+ */
+int t4_eth_eq_stop(struct adapter *adap, unsigned int mbox, unsigned int pf,
+                   unsigned int vf, unsigned int eqid)
+{
+	struct fw_eq_eth_cmd c;
+
+	memset(&c, 0, sizeof(c));
+	c.op_to_vfn = cpu_to_be32(V_FW_CMD_OP(FW_EQ_ETH_CMD) |
+				  F_FW_CMD_REQUEST | F_FW_CMD_EXEC |
+				  V_FW_EQ_ETH_CMD_PFN(pf) |
+				  V_FW_EQ_ETH_CMD_VFN(vf));
+	c.alloc_to_len16 = cpu_to_be32(F_FW_EQ_ETH_CMD_EQSTOP | FW_LEN16(c));
+	c.eqid_pkd = cpu_to_be32(V_FW_EQ_ETH_CMD_EQID(eqid));
+	return t4_wr_mbox(adap, mbox, &c, sizeof(c), NULL);
+}
+
+/**
  *	t4_eth_eq_free - free an Ethernet egress queue
  *	@adap: the adapter
  *	@mbox: mailbox to use for the FW command
@@ -9614,7 +9680,7 @@ static void read_filter_mode_and_ingress_config(struct adapter *adap,
 int t4_init_tp_params(struct adapter *adap, bool sleep_ok)
 {
 	int chan;
-	u32 v;
+	u32 tx_len, rx_len, r, v;
 	struct tp_params *tpp = &adap->params.tp;
 
 	v = t4_read_reg(adap, A_TP_TIMER_RESOLUTION);
@@ -9627,19 +9693,26 @@ int t4_init_tp_params(struct adapter *adap, bool sleep_ok)
 
 	read_filter_mode_and_ingress_config(adap, sleep_ok);
 
-	/*
-	 * Cache a mask of the bits that represent the error vector portion of
-	 * rx_pkt.err_vec.  T6+ can use a compressed error vector to make room
-	 * for information about outer encapsulation (GENEVE/VXLAN/NVGRE).
-	 */
-	tpp->err_vec_mask = htobe16(0xffff);
 	if (chip_id(adap) > CHELSIO_T5) {
 		v = t4_read_reg(adap, A_TP_OUT_CONFIG);
-		if (v & F_CRXPKTENC) {
-			tpp->err_vec_mask =
-			    htobe16(V_T6_COMPR_RXERR_VEC(M_T6_COMPR_RXERR_VEC));
-		}
-	}
+		tpp->rx_pkt_encap = v & F_CRXPKTENC;
+	} else
+		tpp->rx_pkt_encap = false;
+
+	rx_len = t4_read_reg(adap, A_TP_PMM_RX_PAGE_SIZE);
+	tx_len = t4_read_reg(adap, A_TP_PMM_TX_PAGE_SIZE);
+
+	r = t4_read_reg(adap, A_TP_PARA_REG2);
+	rx_len = min(rx_len, G_MAXRXDATA(r));
+	tx_len = min(tx_len, G_MAXRXDATA(r));
+
+	r = t4_read_reg(adap, A_TP_PARA_REG7);
+	v = min(G_PMMAXXFERLEN0(r), G_PMMAXXFERLEN1(r));
+	rx_len = min(rx_len, v);
+	tx_len = min(tx_len, v);
+
+	tpp->max_tx_pdu = tx_len;
+	tpp->max_rx_pdu = rx_len;
 
 	return 0;
 }
@@ -10186,6 +10259,48 @@ void t4_idma_monitor(struct adapter *adapter,
 			debug0, debug11);
 		t4_sge_decode_idma_state(adapter, idma->idma_state[i]);
 	}
+}
+
+/**
+ *     t4_set_vf_mac - Set MAC address for the specified VF
+ *     @adapter: The adapter
+ *     @pf: the PF used to instantiate the VFs
+ *     @vf: one of the VFs instantiated by the specified PF
+ *     @naddr: the number of MAC addresses
+ *     @addr: the MAC address(es) to be set to the specified VF
+ */
+int t4_set_vf_mac(struct adapter *adapter, unsigned int pf, unsigned int vf,
+		  unsigned int naddr, u8 *addr)
+{
+	struct fw_acl_mac_cmd cmd;
+
+	memset(&cmd, 0, sizeof(cmd));
+	cmd.op_to_vfn = cpu_to_be32(V_FW_CMD_OP(FW_ACL_MAC_CMD) |
+				    F_FW_CMD_REQUEST |
+				    F_FW_CMD_WRITE |
+				    V_FW_ACL_MAC_CMD_PFN(pf) |
+				    V_FW_ACL_MAC_CMD_VFN(vf));
+
+	/* Note: Do not enable the ACL */
+	cmd.en_to_len16 = cpu_to_be32((unsigned int)FW_LEN16(cmd));
+	cmd.nmac = naddr;
+
+	switch (pf) {
+	case 3:
+		memcpy(cmd.macaddr3, addr, sizeof(cmd.macaddr3));
+		break;
+	case 2:
+		memcpy(cmd.macaddr2, addr, sizeof(cmd.macaddr2));
+		break;
+	case 1:
+		memcpy(cmd.macaddr1, addr, sizeof(cmd.macaddr1));
+		break;
+	case 0:
+		memcpy(cmd.macaddr0, addr, sizeof(cmd.macaddr0));
+		break;
+	}
+
+	return t4_wr_mbox(adapter, adapter->mbox, &cmd, sizeof(cmd), &cmd);
 }
 
 /**

@@ -474,6 +474,19 @@ tty_wait_background(struct tty *tp, struct thread *td, int sig)
 			sig = 0;
 		}
 		PGRP_LOCK(pg);
+
+		/*
+		 * pg may no longer be our process group.
+		 * Re-check after locking process group.
+		 */
+		PROC_LOCK(p);
+		if (p->p_pgrp != pg) {
+			PROC_UNLOCK(p);
+			PGRP_UNLOCK(pg);
+			continue;
+		}
+
+		PROC_UNLOCK(p);
 		pgsignal(pg, ksi.ksi_signo, 1, &ksi);
 		PGRP_UNLOCK(pg);
 
@@ -1467,6 +1480,7 @@ tty_signal_sessleader(struct tty *tp, int sig)
 
 	/* Make signals start output again. */
 	tp->t_flags &= ~TF_STOPPED;
+	tp->t_termios.c_lflag &= ~FLUSHO;
 
 	if (tp->t_session != NULL && tp->t_session->s_leader != NULL) {
 		p = tp->t_session->s_leader;
@@ -1486,6 +1500,7 @@ tty_signal_pgrp(struct tty *tp, int sig)
 
 	/* Make signals start output again. */
 	tp->t_flags &= ~TF_STOPPED;
+	tp->t_termios.c_lflag &= ~FLUSHO;
 
 	if (sig == SIGINFO && !(tp->t_termios.c_lflag & NOKERNINFO))
 		tty_info(tp);
@@ -1930,6 +1945,7 @@ tty_generic_ioctl(struct tty *tp, u_long cmd, void *data, int fflag,
 		return (0);
 	case TIOCSTART:
 		tp->t_flags &= ~TF_STOPPED;
+		tp->t_termios.c_lflag &= ~FLUSHO;
 		ttydevsw_outwakeup(tp);
 		ttydevsw_pktnotify(tp, TIOCPKT_START);
 		return (0);

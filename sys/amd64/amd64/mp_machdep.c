@@ -96,13 +96,15 @@ __FBSDID("$FreeBSD$");
 
 #define GiB(v)			(v ## ULL << 30)
 
-#define	AP_BOOTPT_SZ		(PAGE_SIZE * 3)
+#define	AP_BOOTPT_SZ		(PAGE_SIZE * 4)
 
 /* Temporary variables for init_secondary()  */
 char *doublefault_stack;
 char *mce_stack;
 char *nmi_stack;
 char *dbg_stack;
+
+extern u_int mptramp_la57;
 
 /*
  * Local data and functions.
@@ -240,6 +242,8 @@ cpu_mp_start(void)
 
 	assign_cpu_ids();
 
+	mptramp_la57 = la57;
+
 	/* Start each Application Processor */
 	init_ops.start_all_aps();
 
@@ -301,22 +305,22 @@ init_secondary(void)
 	pc->pc_common_tss.tss_rsp0 = 0;
 
 	/* The doublefault stack runs on IST1. */
-	np = ((struct nmi_pcpu *)&doublefault_stack[PAGE_SIZE]) - 1;
+	np = ((struct nmi_pcpu *)&doublefault_stack[DBLFAULT_STACK_SIZE]) - 1;
 	np->np_pcpu = (register_t)pc;
 	pc->pc_common_tss.tss_ist1 = (long)np;
 
 	/* The NMI stack runs on IST2. */
-	np = ((struct nmi_pcpu *) &nmi_stack[PAGE_SIZE]) - 1;
+	np = ((struct nmi_pcpu *)&nmi_stack[NMI_STACK_SIZE]) - 1;
 	np->np_pcpu = (register_t)pc;
 	pc->pc_common_tss.tss_ist2 = (long)np;
 
 	/* The MC# stack runs on IST3. */
-	np = ((struct nmi_pcpu *) &mce_stack[PAGE_SIZE]) - 1;
+	np = ((struct nmi_pcpu *)&mce_stack[MCE_STACK_SIZE]) - 1;
 	np->np_pcpu = (register_t)pc;
 	pc->pc_common_tss.tss_ist3 = (long)np;
 
 	/* The DB# stack runs on IST4. */
-	np = ((struct nmi_pcpu *) &dbg_stack[PAGE_SIZE]) - 1;
+	np = ((struct nmi_pcpu *)&dbg_stack[DBG_STACK_SIZE]) - 1;
 	np->np_pcpu = (register_t)pc;
 	pc->pc_common_tss.tss_ist4 = (long)np;
 
@@ -376,7 +380,7 @@ mp_realloc_pcpu(int cpuid, int domain)
 	vm_offset_t oa, na;
 
 	oa = (vm_offset_t)&__pcpu[cpuid];
-	if (_vm_phys_domain(pmap_kextract(oa)) == domain)
+	if (vm_phys_domain(pmap_kextract(oa)) == domain)
 		return;
 	m = vm_page_alloc_domain(NULL, 0, domain,
 	    VM_ALLOC_NORMAL | VM_ALLOC_NOOBJ);
@@ -395,9 +399,9 @@ mp_realloc_pcpu(int cpuid, int domain)
 int
 native_start_all_aps(void)
 {
-	u_int64_t *pt4, *pt3, *pt2;
+	u_int64_t *pt5, *pt4, *pt3, *pt2;
 	u_int32_t mpbioswarmvec;
-	int apic_id, cpu, domain, i;
+	int apic_id, cpu, domain, i, xo;
 	u_char mpbiosreason;
 
 	mtx_init(&ap_boot_mtx, "ap boot", NULL, MTX_SPIN);
@@ -406,18 +410,38 @@ native_start_all_aps(void)
 	bcopy(mptramp_start, (void *)PHYS_TO_DMAP(boot_address), bootMP_size);
 
 	/* Locate the page tables, they'll be below the trampoline */
-	pt4 = (uint64_t *)PHYS_TO_DMAP(mptramp_pagetables);
+	if (la57) {
+		pt5 = (uint64_t *)PHYS_TO_DMAP(mptramp_pagetables);
+		xo = 1;
+	} else {
+		xo = 0;
+	}
+	pt4 = (uint64_t *)PHYS_TO_DMAP(mptramp_pagetables + xo * PAGE_SIZE);
 	pt3 = pt4 + (PAGE_SIZE) / sizeof(u_int64_t);
 	pt2 = pt3 + (PAGE_SIZE) / sizeof(u_int64_t);
 
 	/* Create the initial 1GB replicated page tables */
 	for (i = 0; i < 512; i++) {
-		/* Each slot of the level 4 pages points to the same level 3 page */
-		pt4[i] = (u_int64_t)(uintptr_t)(mptramp_pagetables + PAGE_SIZE);
+		if (la57) {
+			pt5[i] = (u_int64_t)(uintptr_t)(mptramp_pagetables +
+			    PAGE_SIZE);
+			pt5[i] |= PG_V | PG_RW | PG_U;
+		}
+
+		/*
+		 * Each slot of the level 4 pages points to the same
+		 * level 3 page.
+		 */
+		pt4[i] = (u_int64_t)(uintptr_t)(mptramp_pagetables +
+		    (xo + 1) * PAGE_SIZE);
 		pt4[i] |= PG_V | PG_RW | PG_U;
 
-		/* Each slot of the level 3 pages points to the same level 2 page */
-		pt3[i] = (u_int64_t)(uintptr_t)(mptramp_pagetables + (2 * PAGE_SIZE));
+		/*
+		 * Each slot of the level 3 pages points to the same
+		 * level 2 page.
+		 */
+		pt3[i] = (u_int64_t)(uintptr_t)(mptramp_pagetables +
+		    ((xo + 2) * PAGE_SIZE));
 		pt3[i] |= PG_V | PG_RW | PG_U;
 
 		/* The level 2 page slots are mapped with 2MB pages for 1GB. */
@@ -457,13 +481,14 @@ native_start_all_aps(void)
 		/* allocate and set up an idle stack data page */
 		bootstacks[cpu] = (void *)kmem_malloc(kstack_pages * PAGE_SIZE,
 		    M_WAITOK | M_ZERO);
-		doublefault_stack = (char *)kmem_malloc(PAGE_SIZE, M_WAITOK |
-		    M_ZERO);
-		mce_stack = (char *)kmem_malloc(PAGE_SIZE, M_WAITOK | M_ZERO);
+		doublefault_stack = (char *)kmem_malloc(DBLFAULT_STACK_SIZE,
+		    M_WAITOK | M_ZERO);
+		mce_stack = (char *)kmem_malloc(MCE_STACK_SIZE,
+		    M_WAITOK | M_ZERO);
 		nmi_stack = (char *)kmem_malloc_domainset(
-		    DOMAINSET_PREF(domain), PAGE_SIZE, M_WAITOK | M_ZERO);
+		    DOMAINSET_PREF(domain), NMI_STACK_SIZE, M_WAITOK | M_ZERO);
 		dbg_stack = (char *)kmem_malloc_domainset(
-		    DOMAINSET_PREF(domain), PAGE_SIZE, M_WAITOK | M_ZERO);
+		    DOMAINSET_PREF(domain), DBG_STACK_SIZE, M_WAITOK | M_ZERO);
 		dpcpu = (void *)kmem_malloc_domainset(DOMAINSET_PREF(domain),
 		    DPCPU_SIZE, M_WAITOK | M_ZERO);
 
@@ -490,7 +515,6 @@ native_start_all_aps(void)
 	/* number of APs actually started */
 	return (mp_naps);
 }
-
 
 /*
  * This function starts the AP (application processor) identified
@@ -1071,7 +1095,7 @@ invlop_handler(void)
 	for (;;) {
 		for (initiator_cpu_id = 0; initiator_cpu_id <= mp_maxid;
 		    initiator_cpu_id++) {
-			if (scoreboard[initiator_cpu_id] == 0)
+			if (atomic_load_int(&scoreboard[initiator_cpu_id]) == 0)
 				break;
 		}
 		if (initiator_cpu_id > mp_maxid)

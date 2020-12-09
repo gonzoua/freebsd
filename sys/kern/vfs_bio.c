@@ -147,14 +147,19 @@ struct bufdomain {
 #define	BD_RUN_UNLOCK(bd)	mtx_unlock(BD_RUN_LOCKPTR((bd)))
 #define	BD_DOMAIN(bd)		(bd - bdomain)
 
-static struct buf *buf;		/* buffer header pool */
-extern struct buf *swbuf;	/* Swap buffer header pool. */
+static char *buf;		/* buffer header pool */
+static struct buf *
+nbufp(unsigned i)
+{
+	return ((struct buf *)(buf + (sizeof(struct buf) +
+	    sizeof(vm_page_t) * atop(maxbcachebuf)) * i));
+}
+
 caddr_t __read_mostly unmapped_buf;
 
 /* Used below and for softdep flushing threads in ufs/ffs/ffs_softdep.c */
 struct proc *bufdaemonproc;
 
-static int inmem(struct vnode *vp, daddr_t blkno);
 static void vm_hold_free_pages(struct buf *bp, int newbsize);
 static void vm_hold_load_pages(struct buf *bp, vm_offset_t from,
 		vm_offset_t to);
@@ -995,8 +1000,8 @@ maxbcachebuf_adjust(void)
 	maxbcachebuf = i;
 	if (maxbcachebuf < MAXBSIZE)
 		maxbcachebuf = MAXBSIZE;
-	if (maxbcachebuf > MAXPHYS)
-		maxbcachebuf = MAXPHYS;
+	if (maxbcachebuf > maxphys)
+		maxbcachebuf = maxphys;
 	if (bootverbose != 0 && maxbcachebuf != MAXBCACHEBUF)
 		printf("maxbcachebuf=%d\n", maxbcachebuf);
 }
@@ -1114,10 +1119,10 @@ kern_vfs_bio_buffer_alloc(caddr_t v, long physmem_est)
 			biotmap_sz = buf_sz / TRANSIENT_DENOM;
 			buf_sz -= biotmap_sz;
 		}
-		if (biotmap_sz / INT_MAX > MAXPHYS)
+		if (biotmap_sz / INT_MAX > maxphys)
 			bio_transient_maxcnt = INT_MAX;
 		else
-			bio_transient_maxcnt = biotmap_sz / MAXPHYS;
+			bio_transient_maxcnt = biotmap_sz / maxphys;
 		/*
 		 * Artificially limit to 1024 simultaneous in-flight I/Os
 		 * using the transient mapping.
@@ -1137,10 +1142,11 @@ kern_vfs_bio_buffer_alloc(caddr_t v, long physmem_est)
 	/*
 	 * Reserve space for the buffer cache buffers
 	 */
-	buf = (void *)v;
-	v = (caddr_t)(buf + nbuf);
+	buf = (char *)v;
+	v = (caddr_t)buf + (sizeof(struct buf) + sizeof(vm_page_t) *
+	    atop(maxbcachebuf)) * nbuf;
 
-	return(v);
+	return (v);
 }
 
 /* Initialize the buffer subsystem.  Called before use of any buffers. */
@@ -1158,12 +1164,12 @@ bufinit(void)
 	mtx_init(&bdlock, "buffer daemon lock", NULL, MTX_DEF);
 	mtx_init(&bdirtylock, "dirty buf lock", NULL, MTX_DEF);
 
-	unmapped_buf = (caddr_t)kva_alloc(MAXPHYS);
+	unmapped_buf = (caddr_t)kva_alloc(maxphys);
 
 	/* finally, initialize each buffer header and stick on empty q */
 	for (i = 0; i < nbuf; i++) {
-		bp = &buf[i];
-		bzero(bp, sizeof *bp);
+		bp = nbufp(i);
+		bzero(bp, sizeof(*bp) + sizeof(vm_page_t) * atop(maxbcachebuf));
 		bp->b_flags = B_INVAL;
 		bp->b_rcred = NOCRED;
 		bp->b_wcred = NOCRED;
@@ -1247,7 +1253,8 @@ bufinit(void)
 
 	/* Setup the kva and free list allocators. */
 	vmem_set_reclaim(buffer_arena, bufkva_reclaim);
-	buf_zone = uma_zcache_create("buf free cache", sizeof(struct buf),
+	buf_zone = uma_zcache_create("buf free cache",
+	    sizeof(struct buf) + sizeof(vm_page_t) * atop(maxbcachebuf),
 	    NULL, NULL, NULL, NULL, buf_import, buf_release, NULL, 0);
 
 	/*
@@ -1296,7 +1303,7 @@ vfs_buf_check_mapped(struct buf *bp)
 	KASSERT(bp->b_data != unmapped_buf,
 	    ("mapped buf: b_data was not updated %p", bp));
 	KASSERT(bp->b_data < unmapped_buf || bp->b_data >= unmapped_buf +
-	    MAXPHYS, ("b_data + b_offset unmapped %p", bp));
+	    maxphys, ("b_data + b_offset unmapped %p", bp));
 }
 
 static inline void
@@ -1331,7 +1338,7 @@ bufshutdown(int show_busybufs)
 {
 	static int first_buf_printf = 1;
 	struct buf *bp;
-	int iter, nbusy, pbusy;
+	int i, iter, nbusy, pbusy;
 #ifndef PREEMPTION
 	int subiter;
 #endif
@@ -1349,9 +1356,11 @@ bufshutdown(int show_busybufs)
 	 */
 	for (iter = pbusy = 0; iter < 20; iter++) {
 		nbusy = 0;
-		for (bp = &buf[nbuf]; --bp >= buf; )
+		for (i = nbuf - 1; i >= 0; i--) {
+			bp = nbufp(i);
 			if (isbufbusy(bp))
 				nbusy++;
+		}
 		if (nbusy == 0) {
 			if (first_buf_printf)
 				printf("All buffers synced.");
@@ -1392,7 +1401,8 @@ bufshutdown(int show_busybufs)
 	 * a fsck if we're just a client of a wedged NFS server
 	 */
 	nbusy = 0;
-	for (bp = &buf[nbuf]; --bp >= buf; ) {
+	for (i = nbuf - 1; i >= 0; i--) {
+		bp = nbufp(i);
 		if (isbufbusy(bp)) {
 #if 0
 /* XXX: This is bogus.  We should probably have a BO_REMOTE flag instead */
@@ -1572,6 +1582,7 @@ buf_free(struct buf *bp)
 		buf_deallocate(bp);
 	bufkva_free(bp);
 	atomic_add_int(&bufdomain(bp)->bd_freebuffers, 1);
+	MPASS((bp->b_flags & B_MAXPHYS) == 0);
 	BUF_UNLOCK(bp);
 	uma_zfree(buf_zone, bp);
 }
@@ -1675,6 +1686,7 @@ buf_alloc(struct bufdomain *bd)
 	    ("bp: %p still has %d vm pages\n", bp, bp->b_npages));
 	KASSERT(bp->b_kvasize == 0, ("bp: %p still has kva\n", bp));
 	KASSERT(bp->b_bufsize == 0, ("bp: %p still has bufspace\n", bp));
+	MPASS((bp->b_flags & B_MAXPHYS) == 0);
 
 	bp->b_domain = BD_DOMAIN(bd);
 	bp->b_flags = 0;
@@ -2019,6 +2031,9 @@ bufkva_alloc(struct buf *bp, int maxsize, int gbflags)
 
 	KASSERT((gbflags & GB_UNMAPPED) == 0 || (gbflags & GB_KVAALLOC) != 0,
 	    ("Invalid gbflags 0x%x in %s", gbflags, __func__));
+	MPASS((bp->b_flags & B_MAXPHYS) == 0);
+	KASSERT(maxsize <= maxbcachebuf,
+	    ("bufkva_alloc kva too large %d %u", maxsize, maxbcachebuf));
 
 	bufkva_free(bp);
 
@@ -2724,7 +2739,7 @@ brelse(struct buf *bp)
 	if ((bp->b_flags & B_VMIO) && (bp->b_flags & B_NOCACHE ||
 	    (bp->b_ioflags & BIO_ERROR && bp->b_iocmd == BIO_READ)) &&
 	    (v_mnt == NULL || (v_mnt->mnt_vfc->vfc_flags & VFCF_NETWORK) == 0 ||
-	    vn_isdisk(bp->b_vp, NULL) || (bp->b_flags & B_DELWRI) == 0)) {
+	    vn_isdisk(bp->b_vp) || (bp->b_flags & B_DELWRI) == 0)) {
 		vfs_vmio_invalidate(bp);
 		allocbuf(bp, 0);
 	}
@@ -3037,6 +3052,10 @@ vfs_vmio_extend(struct buf *bp, int desiredpages, int size)
 	 */
 	obj = bp->b_bufobj->bo_object;
 	if (bp->b_npages < desiredpages) {
+		KASSERT(desiredpages <= atop(maxbcachebuf),
+		    ("vfs_vmio_extend past maxbcachebuf %p %d %u",
+		    bp, desiredpages, maxbcachebuf));
+
 		/*
 		 * We must allocate system pages since blocking
 		 * here could interfere with paging I/O, no
@@ -3163,9 +3182,8 @@ vfs_bio_awrite(struct buf *bp)
 	if ((vp->v_type == VREG) && 
 	    (vp->v_mount != 0) && /* Only on nodes that have the size info */
 	    (bp->b_flags & (B_CLUSTEROK | B_INVAL)) == B_CLUSTEROK) {
-
 		size = vp->v_mount->mnt_stat.f_iosize;
-		maxcl = MAXPHYS / size;
+		maxcl = maxphys / size;
 
 		BO_RLOCK(bo);
 		for (i = 1; i < maxcl; i++)
@@ -3586,48 +3604,54 @@ incore(struct bufobj *bo, daddr_t blkno)
  * associated VM object.  This is like incore except
  * it also hunts around in the VM system for the data.
  */
-
-static int
+bool
 inmem(struct vnode * vp, daddr_t blkno)
 {
 	vm_object_t obj;
 	vm_offset_t toff, tinc, size;
-	vm_page_t m;
+	vm_page_t m, n;
 	vm_ooffset_t off;
+	int valid;
 
 	ASSERT_VOP_LOCKED(vp, "inmem");
 
 	if (incore(&vp->v_bufobj, blkno))
-		return 1;
+		return (true);
 	if (vp->v_mount == NULL)
-		return 0;
+		return (false);
 	obj = vp->v_object;
 	if (obj == NULL)
-		return (0);
+		return (false);
 
 	size = PAGE_SIZE;
 	if (size > vp->v_mount->mnt_stat.f_iosize)
 		size = vp->v_mount->mnt_stat.f_iosize;
 	off = (vm_ooffset_t)blkno * (vm_ooffset_t)vp->v_mount->mnt_stat.f_iosize;
 
-	VM_OBJECT_RLOCK(obj);
 	for (toff = 0; toff < vp->v_mount->mnt_stat.f_iosize; toff += tinc) {
-		m = vm_page_lookup(obj, OFF_TO_IDX(off + toff));
-		if (!m)
-			goto notinmem;
+		m = vm_page_lookup_unlocked(obj, OFF_TO_IDX(off + toff));
+recheck:
+		if (m == NULL)
+			return (false);
+
 		tinc = size;
 		if (tinc > PAGE_SIZE - ((toff + off) & PAGE_MASK))
 			tinc = PAGE_SIZE - ((toff + off) & PAGE_MASK);
-		if (vm_page_is_valid(m,
-		    (vm_offset_t) ((toff + off) & PAGE_MASK), tinc) == 0)
-			goto notinmem;
+		/*
+		 * Consider page validity only if page mapping didn't change
+		 * during the check.
+		 */
+		valid = vm_page_is_valid(m,
+		    (vm_offset_t)((toff + off) & PAGE_MASK), tinc);
+		n = vm_page_lookup_unlocked(obj, OFF_TO_IDX(off + toff));
+		if (m != n) {
+			m = n;
+			goto recheck;
+		}
+		if (!valid)
+			return (false);
 	}
-	VM_OBJECT_RUNLOCK(obj);
-	return 1;
-
-notinmem:
-	VM_OBJECT_RUNLOCK(obj);
-	return (0);
+	return (true);
 }
 
 /*
@@ -3757,7 +3781,7 @@ bp_unmapped_get_kva(struct buf *bp, daddr_t blkno, int size, int gbflags)
 	 * Calculate the amount of the address space we would reserve
 	 * if the buffer was mapped.
 	 */
-	bsize = vn_isdisk(bp->b_vp, NULL) ? DEV_BSIZE : bp->b_bufobj->bo_bsize;
+	bsize = vn_isdisk(bp->b_vp) ? DEV_BSIZE : bp->b_bufobj->bo_bsize;
 	KASSERT(bsize != 0, ("bsize == 0, check bo->bo_bsize"));
 	offset = blkno * bsize;
 	maxsize = size + (offset & PAGE_MASK);
@@ -4013,7 +4037,7 @@ newbuf_unlocked:
 		if (flags & GB_NOCREAT)
 			return (EEXIST);
 
-		bsize = vn_isdisk(vp, NULL) ? DEV_BSIZE : bo->bo_bsize;
+		bsize = vn_isdisk(vp) ? DEV_BSIZE : bo->bo_bsize;
 		KASSERT(bsize != 0, ("bsize == 0, check bo->bo_bsize"));
 		offset = blkno * bsize;
 		vmio = vp->v_object != NULL;
@@ -4026,7 +4050,7 @@ newbuf_unlocked:
 		}
 		maxsize = imax(maxsize, bsize);
 		if ((flags & GB_NOSPARSE) != 0 && vmio &&
-		    !vn_isdisk(vp, NULL)) {
+		    !vn_isdisk(vp)) {
 			error = VOP_BMAP(vp, blkno, NULL, &d_blkno, 0, 0);
 			KASSERT(error != EOPNOTSUPP,
 			    ("GB_NOSPARSE from fs not supporting bmap, vp %p",
@@ -4849,6 +4873,10 @@ vm_hold_load_pages(struct buf *bp, vm_offset_t from, vm_offset_t to)
 	to = round_page(to);
 	from = round_page(from);
 	index = (from - trunc_page((vm_offset_t)bp->b_data)) >> PAGE_SHIFT;
+	MPASS((bp->b_flags & B_MAXPHYS) == 0);
+	KASSERT(to - from <= maxbcachebuf,
+	    ("vm_hold_load_pages too large %p %#jx %#jx %u",
+	    bp, (uintmax_t)from, (uintmax_t)to, maxbcachebuf));
 
 	for (pg = from; pg < to; pg += PAGE_SIZE, index++) {
 		/*
@@ -4903,28 +4931,28 @@ vm_hold_free_pages(struct buf *bp, int newbsize)
  * This function only works with pager buffers.
  */
 int
-vmapbuf(struct buf *bp, int mapbuf)
+vmapbuf(struct buf *bp, void *uaddr, size_t len, int mapbuf)
 {
 	vm_prot_t prot;
 	int pidx;
 
-	if (bp->b_bufsize < 0)
-		return (-1);
+	MPASS((bp->b_flags & B_MAXPHYS) != 0);
 	prot = VM_PROT_READ;
 	if (bp->b_iocmd == BIO_READ)
 		prot |= VM_PROT_WRITE;	/* Less backwards than it looks */
-	if ((pidx = vm_fault_quick_hold_pages(&curproc->p_vmspace->vm_map,
-	    (vm_offset_t)bp->b_data, bp->b_bufsize, prot, bp->b_pages,
-	    btoc(MAXPHYS))) < 0)
+	pidx = vm_fault_quick_hold_pages(&curproc->p_vmspace->vm_map,
+	    (vm_offset_t)uaddr, len, prot, bp->b_pages, PBUF_PAGES);
+	if (pidx < 0)
 		return (-1);
+	bp->b_bufsize = len;
 	bp->b_npages = pidx;
-	bp->b_offset = ((vm_offset_t)bp->b_data) & PAGE_MASK;
+	bp->b_offset = ((vm_offset_t)uaddr) & PAGE_MASK;
 	if (mapbuf || !unmapped_buf_allowed) {
 		pmap_qenter((vm_offset_t)bp->b_kvabase, bp->b_pages, pidx);
 		bp->b_data = bp->b_kvabase + bp->b_offset;
 	} else
 		bp->b_data = unmapped_buf;
-	return(0);
+	return (0);
 }
 
 /*
@@ -5395,19 +5423,23 @@ DB_SHOW_COMMAND(bufqueues, bufqueues)
 		db_printf("\n");
 		cnt = 0;
 		total = 0;
-		for (j = 0; j < nbuf; j++)
-			if (buf[j].b_domain == i && BUF_ISLOCKED(&buf[j])) {
+		for (j = 0; j < nbuf; j++) {
+			bp = nbufp(j);
+			if (bp->b_domain == i && BUF_ISLOCKED(bp)) {
 				cnt++;
-				total += buf[j].b_bufsize;
+				total += bp->b_bufsize;
 			}
+		}
 		db_printf("\tLocked buffers: %d space %ld\n", cnt, total);
 		cnt = 0;
 		total = 0;
-		for (j = 0; j < nbuf; j++)
-			if (buf[j].b_domain == i) {
+		for (j = 0; j < nbuf; j++) {
+			bp = nbufp(j);
+			if (bp->b_domain == i) {
 				cnt++;
-				total += buf[j].b_bufsize;
+				total += bp->b_bufsize;
 			}
+		}
 		db_printf("\tTotal buffers: %d space %ld\n", cnt, total);
 	}
 }
@@ -5418,7 +5450,7 @@ DB_SHOW_COMMAND(lockedbufs, lockedbufs)
 	int i;
 
 	for (i = 0; i < nbuf; i++) {
-		bp = &buf[i];
+		bp = nbufp(i);
 		if (BUF_ISLOCKED(bp)) {
 			db_show_buffer((uintptr_t)bp, 1, 0, NULL);
 			db_printf("\n");
@@ -5461,7 +5493,7 @@ DB_COMMAND(countfreebufs, db_coundfreebufs)
 	}
 
 	for (i = 0; i < nbuf; i++) {
-		bp = &buf[i];
+		bp = nbufp(i);
 		if (bp->b_qindex == QUEUE_EMPTY)
 			nfree++;
 		else

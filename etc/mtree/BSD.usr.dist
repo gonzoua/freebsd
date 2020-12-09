@@ -37,7 +37,7 @@
         aout
         ..
         clang
-            10.0.1
+            11.0.0
                 include
                     cuda_wrappers
                     ..
@@ -280,6 +280,8 @@
                 ..
             ..
             find_interface
+            ..
+            flua
             ..
             hast
             ..
@@ -856,6 +858,8 @@
             man2
             ..
             man3
+            ..
+            man3lua
             ..
             man4
                 aarch64

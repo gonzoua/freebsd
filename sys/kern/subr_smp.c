@@ -493,7 +493,7 @@ smp_rendezvous_action(void)
 #ifdef INVARIANTS
 	owepreempt = td->td_owepreempt;
 #endif
-	
+
 	/*
 	 * If requested, run a setup function before the main action
 	 * function.  Ensure all CPUs have completed the setup
@@ -720,7 +720,7 @@ smp_topo_none(void)
 	top->cg_children = 0;
 	top->cg_level = CG_SHARE_NONE;
 	top->cg_flags = 0;
-	
+
 	return (top);
 }
 
@@ -894,6 +894,21 @@ smp_rendezvous_cpus_retry(cpuset_t map,
 	struct smp_rendezvous_cpus_retry_arg *arg)
 {
 	int cpu;
+
+	/*
+	 * Only one CPU to execute on.
+	 */
+	if (!smp_started) {
+		spinlock_enter();
+		if (setup_func != NULL)
+			setup_func(arg);
+		if (action_func != NULL)
+			action_func(arg);
+		if (teardown_func != NULL)
+			teardown_func(arg);
+		spinlock_exit();
+		return;
+	}
 
 	/*
 	 * Execute an action on all specified CPUs while retrying until they
@@ -1302,4 +1317,3 @@ topo_analyze(struct topo_node *topo_root, int all,
 }
 
 #endif /* SMP */
-

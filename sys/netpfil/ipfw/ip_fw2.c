@@ -55,6 +55,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/proc.h>
 #include <sys/rwlock.h>
 #include <sys/rmlock.h>
+#include <sys/sdt.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
 #include <sys/sysctl.h>
@@ -105,6 +106,18 @@ __FBSDID("$FreeBSD$");
 #ifdef MAC
 #include <security/mac/mac_framework.h>
 #endif
+
+#define	IPFW_PROBE(probe, arg0, arg1, arg2, arg3, arg4, arg5)		\
+    SDT_PROBE6(ipfw, , , probe, arg0, arg1, arg2, arg3, arg4, arg5)
+
+SDT_PROVIDER_DEFINE(ipfw);
+SDT_PROBE_DEFINE6(ipfw, , , rule__matched,
+    "int",			/* retval */
+    "int",			/* af */
+    "void *",			/* src addr */
+    "void *",			/* dst addr */
+    "struct ip_fw_args *",	/* args */
+    "struct ip_fw *"		/* rule */);
 
 /*
  * static variables followed by global ones.
@@ -231,7 +244,6 @@ SYSEND
 
 #endif /* SYSCTL_NODE */
 
-
 /*
  * Some macros used in the various matching options.
  * L3HDR maps an ipv4 pointer into a layer3 header pointer of type T
@@ -310,7 +322,6 @@ ipopts_match(struct ip *ip, ipfw_insn *cmd)
 				return 0; /* invalid or truncated */
 		}
 		switch (opt) {
-
 		default:
 			break;
 
@@ -757,17 +768,17 @@ ipfw_send_pkt(struct mbuf *replyto, struct ipfw_flow_id *id, u_int32_t seq,
  * ipv6 specific rules here...
  */
 static __inline int
-icmp6type_match (int type, ipfw_insn_u32 *cmd)
+icmp6type_match(int type, ipfw_insn_u32 *cmd)
 {
 	return (type <= ICMP6_MAXTYPE && (cmd->d[type/32] & (1<<(type%32)) ) );
 }
 
 static int
-flow6id_match( int curr_flow, ipfw_insn_u32 *cmd )
+flow6id_match(int curr_flow, ipfw_insn_u32 *cmd)
 {
 	int i;
-	for (i=0; i <= cmd->o.arg1; ++i )
-		if (curr_flow == cmd->d[i] )
+	for (i=0; i <= cmd->o.arg1; ++i)
+		if (curr_flow == cmd->d[i])
 			return 1;
 	return 0;
 }
@@ -977,7 +988,6 @@ send_reject6(struct ip_fw_args *args, int code, u_int hlen, struct ip6_hdr *ip6)
 }
 
 #endif /* INET6 */
-
 
 /*
  * sends a reject message, consuming the mbuf passed as an argument.
@@ -2198,7 +2208,6 @@ do {								\
 #endif
 				break;
 
-
 			case O_IP_SRCPORT:
 			case O_IP_DSTPORT:
 				/*
@@ -3241,6 +3250,13 @@ do {								\
 		struct ip_fw *rule = chain->map[f_pos];
 		/* Update statistics */
 		IPFW_INC_RULE_COUNTER(rule, pktlen);
+		IPFW_PROBE(rule__matched, retval,
+		    is_ipv4 ? AF_INET : AF_INET6,
+		    is_ipv4 ? (uintptr_t)&src_ip :
+		        (uintptr_t)&args->f_id.src_ip6,
+		    is_ipv4 ? (uintptr_t)&dst_ip :
+		        (uintptr_t)&args->f_id.dst_ip6,
+		    args, rule);
 	} else {
 		retval = IP_FW_DENY;
 		printf("ipfw: ouch!, skip past end of rules, denying packet\n");
@@ -3562,7 +3578,7 @@ SYSINIT(ipfw_init, IPFW_SI_SUB_FIREWALL, IPFW_MODULE_ORDER,
 	    ipfw_init, NULL);
 VNET_SYSINIT(vnet_ipfw_init, IPFW_SI_SUB_FIREWALL, IPFW_VNET_ORDER,
 	    vnet_ipfw_init, NULL);
- 
+
 /*
  * Closing up shop. These are done in REVERSE ORDER, but still
  * after ipfwmod() has been called. Not called on reboot.

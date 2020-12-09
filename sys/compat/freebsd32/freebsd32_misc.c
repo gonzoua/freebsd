@@ -82,8 +82,10 @@ __FBSDID("$FreeBSD$");
 #include <sys/sysproto.h>
 #include <sys/systm.h>
 #include <sys/thr.h>
+#include <sys/timex.h>
 #include <sys/unistd.h>
 #include <sys/ucontext.h>
+#include <sys/umtx.h>
 #include <sys/vnode.h>
 #include <sys/wait.h>
 #include <sys/ipc.h>
@@ -323,7 +325,6 @@ freebsd4_freebsd32_getfsstat(struct thread *td,
 int
 freebsd10_freebsd32_pipe(struct thread *td,
     struct freebsd10_freebsd32_pipe_args *uap) {
-	
 	return (freebsd10_pipe(td, (struct freebsd10_pipe_args*)uap));
 }
 #endif
@@ -441,8 +442,9 @@ freebsd32_execve(struct thread *td, struct freebsd32_execve_args *uap)
 	error = freebsd32_exec_copyin_args(&eargs, uap->fname, UIO_USERSPACE,
 	    uap->argv, uap->envv);
 	if (error == 0)
-		error = kern_execve(td, &eargs, NULL);
+		error = kern_execve(td, &eargs, NULL, oldvmspace);
 	post_execve(td, error, oldvmspace);
+	AUDIT_SYSCALL_EXIT(error == EJUSTRETURN ? 0 : error, td);
 	return (error);
 }
 
@@ -460,12 +462,12 @@ freebsd32_fexecve(struct thread *td, struct freebsd32_fexecve_args *uap)
 	    uap->argv, uap->envv);
 	if (error == 0) {
 		eargs.fd = uap->fd;
-		error = kern_execve(td, &eargs, NULL);
+		error = kern_execve(td, &eargs, NULL, oldvmspace);
 	}
 	post_execve(td, error, oldvmspace);
+	AUDIT_SYSCALL_EXIT(error == EJUSTRETURN ? 0 : error, td);
 	return (error);
 }
-
 
 int
 freebsd32_mknodat(struct thread *td, struct freebsd32_mknodat_args *uap)
@@ -3762,6 +3764,71 @@ freebsd32_sched_rr_get_interval(struct thread *td,
 		CP(ts, ts32, tv_sec);
 		CP(ts, ts32, tv_nsec);
 		error = copyout(&ts32, uap->interval, sizeof(ts32));
+	}
+	return (error);
+}
+
+static void
+timex_to_32(struct timex32 *dst, struct timex *src)
+{
+	CP(*src, *dst, modes);
+	CP(*src, *dst, offset);
+	CP(*src, *dst, freq);
+	CP(*src, *dst, maxerror);
+	CP(*src, *dst, esterror);
+	CP(*src, *dst, status);
+	CP(*src, *dst, constant);
+	CP(*src, *dst, precision);
+	CP(*src, *dst, tolerance);
+	CP(*src, *dst, ppsfreq);
+	CP(*src, *dst, jitter);
+	CP(*src, *dst, shift);
+	CP(*src, *dst, stabil);
+	CP(*src, *dst, jitcnt);
+	CP(*src, *dst, calcnt);
+	CP(*src, *dst, errcnt);
+	CP(*src, *dst, stbcnt);
+}
+
+static void
+timex_from_32(struct timex *dst, struct timex32 *src)
+{
+	CP(*src, *dst, modes);
+	CP(*src, *dst, offset);
+	CP(*src, *dst, freq);
+	CP(*src, *dst, maxerror);
+	CP(*src, *dst, esterror);
+	CP(*src, *dst, status);
+	CP(*src, *dst, constant);
+	CP(*src, *dst, precision);
+	CP(*src, *dst, tolerance);
+	CP(*src, *dst, ppsfreq);
+	CP(*src, *dst, jitter);
+	CP(*src, *dst, shift);
+	CP(*src, *dst, stabil);
+	CP(*src, *dst, jitcnt);
+	CP(*src, *dst, calcnt);
+	CP(*src, *dst, errcnt);
+	CP(*src, *dst, stbcnt);
+}
+
+int
+freebsd32_ntp_adjtime(struct thread *td, struct freebsd32_ntp_adjtime_args *uap)
+{
+	struct timex tx;
+	struct timex32 tx32;
+	int error, retval;
+
+	error = copyin(uap->tp, &tx32, sizeof(tx32));
+	if (error == 0) {
+		timex_from_32(&tx, &tx32);
+		error = kern_ntp_adjtime(td, &tx, &retval);
+		if (error == 0) {
+			timex_to_32(&tx32, &tx);
+			error = copyout(&tx32, uap->tp, sizeof(tx32));
+			if (error == 0)
+				td->td_retval[0] = retval;
+		}
 	}
 	return (error);
 }

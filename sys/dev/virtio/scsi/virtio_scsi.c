@@ -206,7 +206,6 @@ TUNABLE_INT("hw.vtscsi.bus_reset_disable", &vtscsi_bus_reset_disable);
 static struct virtio_feature_desc vtscsi_feature_desc[] = {
 	{ VIRTIO_SCSI_F_INOUT,		"InOut"		},
 	{ VIRTIO_SCSI_F_HOTPLUG,	"Hotplug"	},
-
 	{ 0, NULL }
 };
 
@@ -451,7 +450,7 @@ vtscsi_maximum_segments(struct vtscsi_softc *sc, int seg_max)
 	nsegs = VTSCSI_MIN_SEGMENTS;
 
 	if (seg_max > 0) {
-		nsegs += MIN(seg_max, MAXPHYS / PAGE_SIZE + 1);
+		nsegs += MIN(seg_max, maxphys / PAGE_SIZE + 1);
 		if (sc->vtscsi_flags & VTSCSI_FLAG_INDIRECT)
 			nsegs = MIN(nsegs, VIRTIO_MAX_INDIRECT);
 	} else

@@ -586,7 +586,7 @@ swap_pager_swap_init(void)
 	 * but it isn't very efficient).
 	 *
 	 * The nsw_cluster_max is constrained by the bp->b_pages[]
-	 * array, which has MAXPHYS / PAGE_SIZE entries, and our locally
+	 * array, which has maxphys / PAGE_SIZE entries, and our locally
 	 * defined MAX_PAGEOUT_CLUSTER.   Also be aware that swap ops are
 	 * constrained by the swap device interleave stripe size.
 	 *
@@ -601,7 +601,7 @@ swap_pager_swap_init(void)
 	 * have one NFS swap device due to the command/ack latency over NFS.
 	 * So it all works out pretty well.
 	 */
-	nsw_cluster_max = min(MAXPHYS / PAGE_SIZE, MAX_PAGEOUT_CLUSTER);
+	nsw_cluster_max = min(maxphys / PAGE_SIZE, MAX_PAGEOUT_CLUSTER);
 
 	nsw_wcount_async = 4;
 	nsw_wcount_async_max = nsw_wcount_async;
@@ -865,7 +865,6 @@ swp_pager_strategy(struct buf *bp)
 	panic("Swapdev not found");
 }
 
-
 /*
  * SWP_PAGER_FREESWAPSPACE() -	free raw swap space
  *
@@ -919,7 +918,7 @@ sysctl_swap_fragmentation(SYSCTL_HANDLER_ARGS)
 	sbuf_new_for_sysctl(&sbuf, NULL, 128, req);
 	mtx_lock(&sw_dev_mtx);
 	TAILQ_FOREACH(sp, &swtailq, sw_list) {
-		if (vn_isdisk(sp->sw_vp, NULL))
+		if (vn_isdisk(sp->sw_vp))
 			devname = devtoname(sp->sw_vp->v_rdev);
 		else
 			devname = "[file]";
@@ -1315,6 +1314,7 @@ swap_pager_getpages_locked(vm_object_t object, vm_page_t *ma, int count,
 
 	VM_OBJECT_WUNLOCK(object);
 	bp = uma_zalloc(swrbuf_zone, M_WAITOK);
+	MPASS((bp->b_flags & B_MAXPHYS) != 0);
 	/* Pages cannot leave the object while busy. */
 	for (i = 0, p = bm; i < count; i++, p = TAILQ_NEXT(p, listq)) {
 		MPASS(p->pindex == bm->pindex + i);
@@ -1523,8 +1523,9 @@ swap_pager_putpages(vm_object_t object, vm_page_t *ma, int count,
 		VM_OBJECT_WUNLOCK(object);
 
 		bp = uma_zalloc(swwbuf_zone, M_WAITOK);
+		MPASS((bp->b_flags & B_MAXPHYS) != 0);
 		if (async)
-			bp->b_flags = B_ASYNC;
+			bp->b_flags |= B_ASYNC;
 		bp->b_flags |= B_PAGING;
 		bp->b_iocmd = BIO_WRITE;
 
@@ -2325,7 +2326,7 @@ sys_swapon(struct thread *td, struct swapon_args *uap)
 	NDFREE(&nd, NDF_ONLY_PNBUF);
 	vp = nd.ni_vp;
 
-	if (vn_isdisk(vp, &error)) {
+	if (vn_isdisk_error(vp, &error)) {
 		error = swapongeom(vp);
 	} else if (vp->v_type == VREG &&
 	    (vp->v_mount->mnt_vfc->vfc_flags & VFCF_NETWORK) != 0 &&
@@ -2548,7 +2549,7 @@ swapoff_all(void)
 	mtx_lock(&sw_dev_mtx);
 	TAILQ_FOREACH_SAFE(sp, &swtailq, sw_list, spt) {
 		mtx_unlock(&sw_dev_mtx);
-		if (vn_isdisk(sp->sw_vp, NULL))
+		if (vn_isdisk(sp->sw_vp))
 			devname = devtoname(sp->sw_vp->v_rdev);
 		else
 			devname = "[file]";
@@ -2596,7 +2597,7 @@ swap_dev_info(int name, struct xswdev *xs, char *devname, size_t len)
 		xs->xsw_nblks = sp->sw_nblks;
 		xs->xsw_used = sp->sw_used;
 		if (devname != NULL) {
-			if (vn_isdisk(sp->sw_vp, NULL))
+			if (vn_isdisk(sp->sw_vp))
 				tmp_devname = devtoname(sp->sw_vp->v_rdev);
 			else
 				tmp_devname = "[file]";
@@ -2743,7 +2744,6 @@ static struct g_class g_swap_class = {
 };
 
 DECLARE_GEOM_CLASS(g_swap_class, g_class);
-
 
 static void
 swapgeom_close_ev(void *arg, int flags)
@@ -3007,7 +3007,6 @@ swapdev_close(struct thread *td, struct swdevt *sp)
 	VOP_CLOSE(sp->sw_vp, FREAD | FWRITE, td->td_ucred, td);
 	vrele(sp->sw_vp);
 }
-
 
 static int
 swaponvp(struct thread *td, struct vnode *vp, u_long nblks)

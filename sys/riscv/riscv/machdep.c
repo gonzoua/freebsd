@@ -130,6 +130,8 @@ cpuset_t all_harts;
 
 extern int *end;
 
+static char static_kenv[PAGE_SIZE];
+
 static void
 cpu_startup(void *dummy)
 {
@@ -836,6 +838,8 @@ parse_metadata(void)
 	kern_envp = MD_FETCH(kmdp, MODINFOMD_ENVP, char *);
 	if (kern_envp != NULL)
 		init_static_kenv(kern_envp, 0);
+	else
+		init_static_kenv(static_kenv, sizeof(static_kenv));
 #ifdef DDB
 	ksym_start = MD_FETCH(kmdp, MODINFOMD_SSYM, uintptr_t);
 	ksym_end = MD_FETCH(kmdp, MODINFOMD_ESYM, uintptr_t);
@@ -861,6 +865,7 @@ initriscv(struct riscv_bootparams *rvbp)
 	phandle_t chosen;
 	uint32_t hart;
 #endif
+	char *env;
 
 	TSRAW(&thread0, TS_ENTER, __func__, NULL);
 
@@ -948,12 +953,24 @@ initriscv(struct riscv_bootparams *rvbp)
 
 	cninit();
 
+	/*
+	 * Dump the boot metadata. We have to wait for cninit() since console
+	 * output is required. If it's grossly incorrect the kernel will never
+	 * make it this far.
+	 */
+	if (getenv_is_true("debug.dump_modinfo_at_boot"))
+		preload_dump();
+
 	init_proc0(rvbp->kern_stack);
 
 	msgbufinit(msgbufp, msgbufsize);
 	mutex_init();
 	init_param2(physmem);
 	kdb_init();
+
+	env = kern_getenv("kernelname");
+	if (env != NULL)
+		strlcpy(kernelname, env, sizeof(kernelname));
 
 	if (boothowto & RB_VERBOSE)
 		physmem_print_tables();

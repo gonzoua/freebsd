@@ -208,9 +208,30 @@ void	mac_netinet6_nd6_send(struct ifnet *ifp, struct mbuf *m);
 
 int	mac_pipe_check_ioctl(struct ucred *cred, struct pipepair *pp,
 	    unsigned long cmd, void *data);
-int	mac_pipe_check_poll(struct ucred *cred, struct pipepair *pp);
-int	mac_pipe_check_read(struct ucred *cred, struct pipepair *pp);
+int	mac_pipe_check_poll_impl(struct ucred *cred, struct pipepair *pp);
+#ifdef MAC
+extern bool mac_pipe_check_poll_fp_flag;
+#else
+#define mac_pipe_check_poll_fp_flag 0
+#endif
+#define mac_pipe_check_poll_enabled() __predict_false(mac_pipe_check_poll_fp_flag)
+static inline int
+mac_pipe_check_poll(struct ucred *cred, struct pipepair *pp)
+{
+
+	if (mac_pipe_check_poll_enabled())
+		return (mac_pipe_check_poll_impl(cred, pp));
+	return (0);
+}
+
+#ifdef MAC
+extern bool mac_pipe_check_stat_fp_flag;
+#else
+#define mac_pipe_check_stat_fp_flag 0
+#endif
+#define mac_pipe_check_stat_enabled() __predict_false(mac_pipe_check_stat_fp_flag)
 int	mac_pipe_check_stat(struct ucred *cred, struct pipepair *pp);
+int	mac_pipe_check_read(struct ucred *cred, struct pipepair *pp);
 int	mac_pipe_check_write(struct ucred *cred, struct pipepair *pp);
 void	mac_pipe_create(struct ucred *cred, struct pipepair *pp);
 void	mac_pipe_destroy(struct pipepair *);
@@ -400,7 +421,7 @@ void	mac_sysvshm_init(struct shmid_kernel *);
 
 void	mac_thread_userret(struct thread *td);
 
-#ifdef DEBUG_VFS_LOCKS
+#if defined(MAC) && defined(DEBUG_VFS_LOCKS)
 void	mac_vnode_assert_locked(struct vnode *vp, const char *func);
 #else
 #define mac_vnode_assert_locked(vp, func) do { } while (0)

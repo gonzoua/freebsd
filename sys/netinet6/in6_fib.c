@@ -33,7 +33,6 @@ __FBSDID("$FreeBSD$");
 #include "opt_inet.h"
 #include "opt_inet6.h"
 #include "opt_route.h"
-#include "opt_mpath.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -49,14 +48,11 @@ __FBSDID("$FreeBSD$");
 #include <net/if_var.h>
 #include <net/if_dl.h>
 #include <net/route.h>
+#include <net/route/route_ctl.h>
 #include <net/route/route_var.h>
 #include <net/route/nhop.h>
-#include <net/route/shared.h>
+#include <net/toeplitz.h>
 #include <net/vnet.h>
-
-#ifdef RADIX_MPATH
-#include <net/radix_mpath.h>
-#endif
 
 #include <netinet/in.h>
 #include <netinet/in_var.h>
@@ -72,6 +68,39 @@ __FBSDID("$FreeBSD$");
 #ifdef INET6
 
 CHK_STRUCT_ROUTE_COMPAT(struct route_in6, ro_dst);
+
+#ifdef ROUTE_MPATH
+struct _hash_5tuple_ipv6 {
+	struct in6_addr src;
+	struct in6_addr dst;
+	unsigned short src_port;
+	unsigned short dst_port;
+	char proto;
+	char spare[3];
+};
+_Static_assert(sizeof(struct _hash_5tuple_ipv6) == 40,
+    "_hash_5tuple_ipv6 size is wrong");
+
+uint32_t
+fib6_calc_software_hash(const struct in6_addr *src, const struct in6_addr *dst,
+    unsigned short src_port, unsigned short dst_port, char proto,
+    uint32_t *phashtype)
+{
+	struct _hash_5tuple_ipv6 data;
+
+	data.src = *src;
+	data.dst = *dst;
+	data.src_port = src_port;
+	data.dst_port = dst_port;
+	data.proto = proto;
+	data.spare[0] = data.spare[1] = data.spare[2] = 0;
+
+	*phashtype = M_HASHTYPE_OPAQUE_HASH;
+
+	return (toeplitz_hash(MPATH_ENTROPY_KEY_LEN, mpath_entropy_key,
+	  sizeof(data), (uint8_t *)&data));
+}
+#endif
 
 /*
  * Looks up path in fib @fibnum specified by @dst.
@@ -89,21 +118,17 @@ fib6_lookup(uint32_t fibnum, const struct in6_addr *dst6,
 	RIB_RLOCK_TRACKER;
 	struct rib_head *rh;
 	struct radix_node *rn;
-	struct rtentry *rt;
 	struct nhop_object *nh;
-	struct sockaddr_in6 sin6;
 
 	KASSERT((fibnum < rt_numfibs), ("fib6_lookup: bad fibnum"));
 	rh = rt_tables_get_rnh(fibnum, AF_INET6);
 	if (rh == NULL)
 		return (NULL);
 
-	/* TODO: radix changes */
-	//addr = *dst6;
-	/* Prepare lookup key */
-	memset(&sin6, 0, sizeof(sin6));
-	sin6.sin6_len = sizeof(struct sockaddr_in6);
-	sin6.sin6_addr = *dst6;
+	struct sockaddr_in6 sin6 = {
+		.sin6_len = sizeof(struct sockaddr_in6),
+		.sin6_addr = *dst6,
+	};
 
 	/* Assume scopeid is valid and embed it directly */
 	if (IN6_IS_SCOPE_LINKLOCAL(dst6))
@@ -112,12 +137,7 @@ fib6_lookup(uint32_t fibnum, const struct in6_addr *dst6,
 	RIB_RLOCK(rh);
 	rn = rh->rnh_matchaddr((void *)&sin6, &rh->head);
 	if (rn != NULL && ((rn->rn_flags & RNF_ROOT) == 0)) {
-		rt = RNTORT(rn);
-#ifdef RADIX_MPATH
-		if (rt_mpath_next(rt) != NULL)
-			rt = rt_mpath_selectrte(rt, flowid);
-#endif
-		nh = rt->rt_nhop;
+		nh = nhop_select((RNTORT(rn))->rt_nhop, flowid);
 		/* Ensure route & ifp is UP */
 		if (RT_LINK_IS_UP(nh->nh_ifp)) {
 			if (flags & NHR_REF)
@@ -133,7 +153,7 @@ fib6_lookup(uint32_t fibnum, const struct in6_addr *dst6,
 }
 
 inline static int
-check_urpf(const struct nhop_object *nh, uint32_t flags,
+check_urpf_nhop(const struct nhop_object *nh, uint32_t flags,
     const struct ifnet *src_if)
 {
 
@@ -150,21 +170,58 @@ check_urpf(const struct nhop_object *nh, uint32_t flags,
 	return (0);
 }
 
-#ifdef RADIX_MPATH
-inline static int
-check_urpf_mpath(struct rtentry *rt, uint32_t flags,
+static int
+check_urpf(struct nhop_object *nh, uint32_t flags,
     const struct ifnet *src_if)
 {
-	
-	while (rt != NULL) {
-		if (check_urpf(rt->rt_nhop, flags, src_if) != 0)
-			return (1);
-		rt = rt_mpath_next(rt);
-	}
-
-	return (0);
-}
+#ifdef ROUTE_MPATH
+	if (NH_IS_NHGRP(nh)) {
+		struct weightened_nhop *wn;
+		uint32_t num_nhops;
+		wn = nhgrp_get_nhops((struct nhgrp_object *)nh, &num_nhops);
+		for (int i = 0; i < num_nhops; i++) {
+			if (check_urpf_nhop(wn[i].nh, flags, src_if) != 0)
+				return (1);
+		}
+		return (0);
+	} else
 #endif
+		return (check_urpf_nhop(nh, flags, src_if));
+}
+
+static struct nhop_object *
+lookup_nhop(uint32_t fibnum, const struct in6_addr *dst6,
+    uint32_t scopeid)
+{
+	RIB_RLOCK_TRACKER;
+	struct rib_head *rh;
+	struct radix_node *rn;
+	struct nhop_object *nh;
+
+	KASSERT((fibnum < rt_numfibs), ("fib6_check_urpf: bad fibnum"));
+	rh = rt_tables_get_rnh(fibnum, AF_INET6);
+	if (rh == NULL)
+		return (NULL);
+
+	/* Prepare lookup key */
+	struct sockaddr_in6 sin6 = {
+		.sin6_len = sizeof(struct sockaddr_in6),
+		.sin6_addr = *dst6,
+	};
+
+	/* Assume scopeid is valid and embed it directly */
+	if (IN6_IS_SCOPE_LINKLOCAL(dst6))
+		sin6.sin6_addr.s6_addr16[1] = htons(scopeid & 0xffff);
+
+	nh = NULL;
+	RIB_RLOCK(rh);
+	rn = rh->rnh_matchaddr((void *)&sin6, &rh->head);
+	if (rn != NULL && ((rn->rn_flags & RNF_ROOT) == 0))
+		nh = RNTORT(rn)->rt_nhop;
+	RIB_RUNLOCK(rh);
+
+	return (nh);
+}
 
 /*
  * Performs reverse path forwarding lookup.
@@ -179,85 +236,77 @@ int
 fib6_check_urpf(uint32_t fibnum, const struct in6_addr *dst6,
     uint32_t scopeid, uint32_t flags, const struct ifnet *src_if)
 {
+	struct nhop_object *nh;
+
+	nh = lookup_nhop(fibnum, dst6, scopeid);
+	if (nh != NULL)
+		return (check_urpf(nh, flags, src_if));
+	return (0);
+}
+
+/*
+ * Function returning prefix match data along with the nexthop data.
+ * Intended to be used by the control plane code.
+ * Supported flags:
+ *  NHR_UNLOCKED: do not lock radix during lookup.
+ * Returns pointer to rtentry and raw nexthop in @rnd. Both rtentry
+ *  and nexthop are safe to use within current epoch. Note:
+ * Note: rnd_nhop can actually be the nexthop group.
+ */
+struct rtentry *
+fib6_lookup_rt(uint32_t fibnum, const struct in6_addr *dst6,
+    uint32_t scopeid, uint32_t flags, struct route_nhop_data *rnd)
+{
 	RIB_RLOCK_TRACKER;
 	struct rib_head *rh;
 	struct radix_node *rn;
 	struct rtentry *rt;
-	struct sockaddr_in6 sin6;
-	int ret;
-
-	KASSERT((fibnum < rt_numfibs), ("fib6_check_urpf: bad fibnum"));
-	rh = rt_tables_get_rnh(fibnum, AF_INET6);
-	if (rh == NULL)
-		return (0);
-
-	/* TODO: radix changes */
-	/* Prepare lookup key */
-	memset(&sin6, 0, sizeof(sin6));
-	sin6.sin6_len = sizeof(struct sockaddr_in6);
-	sin6.sin6_addr = *dst6;
-
-	/* Assume scopeid is valid and embed it directly */
-	if (IN6_IS_SCOPE_LINKLOCAL(dst6))
-		sin6.sin6_addr.s6_addr16[1] = htons(scopeid & 0xffff);
-
-	RIB_RLOCK(rh);
-	rn = rh->rnh_matchaddr((void *)&sin6, &rh->head);
-	if (rn != NULL && ((rn->rn_flags & RNF_ROOT) == 0)) {
-		rt = RNTORT(rn);
-#ifdef	RADIX_MPATH
-		ret = check_urpf_mpath(rt, flags, src_if);
-#else
-		ret = check_urpf(rt->rt_nhop, flags, src_if);
-#endif
-		RIB_RUNLOCK(rh);
-		return (ret);
-	}
-	RIB_RUNLOCK(rh);
-
-	return (0);
-}
-
-struct nhop_object *
-fib6_lookup_debugnet(uint32_t fibnum, const struct in6_addr *dst6,
-    uint32_t scopeid, uint32_t flags)
-{
-	struct rib_head *rh;
-	struct radix_node *rn;
-	struct rtentry *rt;
-	struct nhop_object *nh;
-	struct sockaddr_in6 sin6;
 
 	KASSERT((fibnum < rt_numfibs), ("fib6_lookup: bad fibnum"));
 	rh = rt_tables_get_rnh(fibnum, AF_INET6);
 	if (rh == NULL)
 		return (NULL);
 
-	/* TODO: radix changes */
-	//addr = *dst6;
-	/* Prepare lookup key */
-	memset(&sin6, 0, sizeof(sin6));
-	sin6.sin6_len = sizeof(struct sockaddr_in6);
-	sin6.sin6_addr = *dst6;
+	struct sockaddr_in6 sin6 = {
+		.sin6_len = sizeof(struct sockaddr_in6),
+		.sin6_addr = *dst6,
+	};
 
 	/* Assume scopeid is valid and embed it directly */
 	if (IN6_IS_SCOPE_LINKLOCAL(dst6))
 		sin6.sin6_addr.s6_addr16[1] = htons(scopeid & 0xffff);
 
+	rt = NULL;
+	if (!(flags & NHR_UNLOCKED))
+		RIB_RLOCK(rh);
 	rn = rh->rnh_matchaddr((void *)&sin6, &rh->head);
 	if (rn != NULL && ((rn->rn_flags & RNF_ROOT) == 0)) {
-		rt = RNTORT(rn);
-		nh = rt->rt_nhop;
+		rt = (struct rtentry *)rn;
+		rnd->rnd_nhop = rt->rt_nhop;
+		rnd->rnd_weight = rt->rt_weight;
+	}
+	if (!(flags & NHR_UNLOCKED))
+		RIB_RUNLOCK(rh);
+
+	return (rt);
+}
+
+struct nhop_object *
+fib6_lookup_debugnet(uint32_t fibnum, const struct in6_addr *dst6,
+    uint32_t scopeid, uint32_t flags)
+{
+	struct rtentry *rt;
+	struct route_nhop_data rnd;
+
+	rt = fib6_lookup_rt(fibnum, dst6, scopeid, NHR_UNLOCKED, &rnd);
+	if (rt != NULL) {
+		struct nhop_object *nh = nhop_select(rnd.rnd_nhop, 0);
 		/* Ensure route & ifp is UP */
-		if (RT_LINK_IS_UP(nh->nh_ifp)) {
-			if (flags & NHR_REF)
-				nhop_ref_object(nh);
+		if (RT_LINK_IS_UP(nh->nh_ifp))
 			return (nh);
-		}
 	}
 
 	return (NULL);
 }
 
 #endif
-

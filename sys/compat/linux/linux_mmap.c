@@ -57,7 +57,6 @@ __FBSDID("$FreeBSD$");
 #include <compat/linux/linux_persona.h>
 #include <compat/linux/linux_util.h>
 
-
 #define STACK_SIZE  (2 * 1024 * 1024)
 #define GUARD_SIZE  (4 * PAGE_SIZE)
 
@@ -282,6 +281,8 @@ linux_madvise_dontneed(struct thread *td, vm_offset_t start, vm_offset_t end)
 		object = entry->object.vm_object;
 		if (object == NULL)
 			continue;
+		if ((object->flags & (OBJ_UNMANAGED | OBJ_FICTITIOUS)) != 0)
+			continue;
 
 		pstart = OFF_TO_IDX(entry->offset);
 		if (start > entry->start) {
@@ -392,6 +393,16 @@ linux_madvise_common(struct thread *td, uintptr_t addr, size_t len, int behav)
 		return (EINVAL);
 	case LINUX_MADV_SOFT_OFFLINE:
 		linux_msg(curthread, "unsupported madvise MADV_SOFT_OFFLINE");
+		return (EINVAL);
+	case -1:
+		/*
+		 * -1 is sometimes used as a dummy value to detect simplistic
+		 * madvise(2) stub implementations.  This safeguard is used by
+		 * BoringSSL, for example, before assuming MADV_WIPEONFORK is
+		 * safe to use.  Don't produce an "unsupported" error message
+		 * for this special dummy value, which is unlikely to be used
+		 * by any new advisory behavior feature.
+		 */
 		return (EINVAL);
 	default:
 		linux_msg(curthread, "unsupported madvise behav %d", behav);

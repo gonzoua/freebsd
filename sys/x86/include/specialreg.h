@@ -72,6 +72,7 @@
 #define	CR4_FXSR 0x00000200	/* Fast FPU save/restore used by OS */
 #define	CR4_XMM	0x00000400	/* enable SIMD/MMX2 to use except 16 */
 #define	CR4_UMIP 0x00000800	/* User Mode Instruction Prevention */
+#define	CR4_LA57 0x00001000	/* Enable 5-level paging */
 #define	CR4_VMXE 0x00002000	/* enable VMX operation (Intel-specific) */
 #define	CR4_FSGSBASE 0x00010000	/* Enable FS/GS BASE accessing instructions */
 #define	CR4_PCIDE 0x00020000	/* Enable Context ID */
@@ -1125,6 +1126,7 @@
 #define	MSR_NB_CFG1	0xc001001f	/* NB configuration 1 */
 #define	MSR_K8_UCODE_UPDATE 0xc0010020	/* update microcode */
 #define	MSR_MC0_CTL_MASK 0xc0010044
+#define	MSR_AMDK8_IPM	0xc0010055
 #define	MSR_P_STATE_LIMIT 0xc0010061	/* P-state Current Limit Register */
 #define	MSR_P_STATE_CONTROL 0xc0010062	/* P-state Control Register */
 #define	MSR_P_STATE_STATUS 0xc0010063	/* P-state Status Register */
@@ -1137,9 +1139,13 @@
 #define	MSR_EXTFEATURES	0xc0011005	/* Extended CPUID Features override */
 #define	MSR_LS_CFG	0xc0011020
 #define	MSR_IC_CFG	0xc0011021	/* Instruction Cache Configuration */
+#define	MSR_DE_CFG	0xc0011029	/* Decode Configuration */
 
 /* MSR_VM_CR related */
 #define	VM_CR_SVMDIS		0x10	/* SVM: disabled by BIOS */
+
+#define	AMDK8_SMIONCMPHALT	(1ULL << 27)
+#define	AMDK8_C1EONCMPHALT	(1ULL << 28)
 
 /* VIA ACE crypto featureset: for via_feature_rng */
 #define	VIA_HAS_RNG		1	/* cpu has RNG */

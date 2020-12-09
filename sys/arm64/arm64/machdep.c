@@ -410,7 +410,6 @@ set_regs32(struct thread *td, struct reg32 *regs)
 	tf->tf_elr = regs->r_pc;
 	tf->tf_spsr = regs->r_cpsr;
 
-
 	return (0);
 }
 
@@ -662,6 +661,7 @@ cpu_pcpu_init(struct pcpu *pcpu, int cpuid, size_t size)
 {
 
 	pcpu->pc_acpi_id = 0xffffffff;
+	pcpu->pc_mpidr = 0xffffffff;
 }
 
 void
@@ -1037,7 +1037,7 @@ bus_probe(void)
 	has_fdt = (OF_peer(0) != 0);
 #endif
 #ifdef DEV_ACPI
-	has_acpi = (acpi_find_table(ACPI_SIG_SPCR) != 0);
+	has_acpi = (AcpiOsGetRootPointer() != 0);
 #endif
 
 	env = kern_getenv("kern.cfg.order");
@@ -1236,10 +1236,20 @@ initarm(struct arm64_bootparams *abp)
 	valid = bus_probe();
 
 	cninit();
+	set_ttbr0(abp->kern_ttbr0);
+	cpu_tlb_flushID();
 
 	if (!valid)
 		panic("Invalid bus configuration: %s",
 		    kern_getenv("kern.cfg.order"));
+
+	/*
+	 * Dump the boot metadata. We have to wait for cninit() since console
+	 * output is required. If it's grossly incorrect the kernel will never
+	 * make it this far.
+	 */
+	if (getenv_is_true("debug.dump_modinfo_at_boot"))
+		preload_dump();
 
 	init_proc0(abp->kern_stack);
 	msgbufinit(msgbufp, msgbufsize);
@@ -1257,7 +1267,8 @@ initarm(struct arm64_bootparams *abp)
 		strlcpy(kernelname, env, sizeof(kernelname));
 
 	if (boothowto & RB_VERBOSE) {
-		print_efi_map_entries(efihdr);
+		if (efihdr != NULL)
+			print_efi_map_entries(efihdr);
 		physmem_print_tables();
 	}
 

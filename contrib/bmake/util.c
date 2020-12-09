@@ -1,29 +1,21 @@
-/*	$NetBSD: util.c,v 1.57 2020/07/03 08:13:23 rillig Exp $	*/
+/*	$NetBSD: util.c,v 1.68 2020/11/16 18:29:49 rillig Exp $	*/
 
 /*
  * Missing stuff from OS's
  *
- *	$Id: util.c,v 1.35 2020/07/04 18:16:55 sjg Exp $
+ *	$Id: util.c,v 1.41 2020/11/18 03:58:32 sjg Exp $
  */
-#if defined(__MINT__) || defined(__linux__)
-#include <signal.h>
-#endif
 
-#include "make.h"
-
-#ifndef MAKE_NATIVE
-static char rcsid[] = "$NetBSD: util.c,v 1.57 2020/07/03 08:13:23 rillig Exp $";
-#else
-#ifndef lint
-__RCSID("$NetBSD: util.c,v 1.57 2020/07/03 08:13:23 rillig Exp $");
-#endif
-#endif
-
+#include <sys/param.h>
 #include <errno.h>
 #include <time.h>
 #include <signal.h>
 
-#if !defined(HAVE_STRERROR)
+#include "make.h"
+
+MAKE_RCSID("$NetBSD: util.c,v 1.68 2020/11/16 18:29:49 rillig Exp $");
+
+#if !defined(MAKE_NATIVE) && !defined(HAVE_STRERROR)
 extern int errno, sys_nerr;
 extern char *sys_errlist[];
 
@@ -32,10 +24,9 @@ strerror(int e)
 {
     static char buf[100];
     if (e < 0 || e >= sys_nerr) {
-	snprintf(buf, sizeof(buf), "Unknown error %d", e);
+	snprintf(buf, sizeof buf, "Unknown error %d", e);
 	return buf;
-    }
-    else
+    } else
 	return sys_errlist[e];
 }
 #endif
@@ -104,7 +95,7 @@ setenv(const char *name, const char *value, int rewrite)
 	}
 
 	if (*value == '=')			/* no `=' in value */
-		++value;
+		value++;
 	l_value = strlen(value);
 
 	/* find if already exists */
@@ -178,39 +169,39 @@ strrcpy(char *ptr, char *str)
 
 
 char    *sys_siglist[] = {
-        "Signal 0",
-        "Hangup",                       /* SIGHUP    */
-        "Interrupt",                    /* SIGINT    */
-        "Quit",                         /* SIGQUIT   */
-        "Illegal instruction",          /* SIGILL    */
-        "Trace/BPT trap",               /* SIGTRAP   */
-        "IOT trap",                     /* SIGIOT    */
-        "EMT trap",                     /* SIGEMT    */
-        "Floating point exception",     /* SIGFPE    */
-        "Killed",                       /* SIGKILL   */
-        "Bus error",                    /* SIGBUS    */
-        "Segmentation fault",           /* SIGSEGV   */
-        "Bad system call",              /* SIGSYS    */
-        "Broken pipe",                  /* SIGPIPE   */
-        "Alarm clock",                  /* SIGALRM   */
-        "Terminated",                   /* SIGTERM   */
-        "User defined signal 1",        /* SIGUSR1   */
-        "User defined signal 2",        /* SIGUSR2   */
-        "Child exited",                 /* SIGCLD    */
-        "Power-fail restart",           /* SIGPWR    */
-        "Virtual timer expired",        /* SIGVTALRM */
-        "Profiling timer expired",      /* SIGPROF   */
-        "I/O possible",                 /* SIGIO     */
-        "Window size changes",          /* SIGWINDOW */
-        "Stopped (signal)",             /* SIGSTOP   */
-        "Stopped",                      /* SIGTSTP   */
-        "Continued",                    /* SIGCONT   */
-        "Stopped (tty input)",          /* SIGTTIN   */
-        "Stopped (tty output)",         /* SIGTTOU   */
-        "Urgent I/O condition",         /* SIGURG    */
-        "Remote lock lost (NFS)",       /* SIGLOST   */
-        "Signal 31",                    /* reserved  */
-        "DIL signal"                    /* SIGDIL    */
+	"Signal 0",
+	"Hangup",                       /* SIGHUP    */
+	"Interrupt",                    /* SIGINT    */
+	"Quit",                         /* SIGQUIT   */
+	"Illegal instruction",          /* SIGILL    */
+	"Trace/BPT trap",               /* SIGTRAP   */
+	"IOT trap",                     /* SIGIOT    */
+	"EMT trap",                     /* SIGEMT    */
+	"Floating point exception",     /* SIGFPE    */
+	"Killed",                       /* SIGKILL   */
+	"Bus error",                    /* SIGBUS    */
+	"Segmentation fault",           /* SIGSEGV   */
+	"Bad system call",              /* SIGSYS    */
+	"Broken pipe",                  /* SIGPIPE   */
+	"Alarm clock",                  /* SIGALRM   */
+	"Terminated",                   /* SIGTERM   */
+	"User defined signal 1",        /* SIGUSR1   */
+	"User defined signal 2",        /* SIGUSR2   */
+	"Child exited",                 /* SIGCLD    */
+	"Power-fail restart",           /* SIGPWR    */
+	"Virtual timer expired",        /* SIGVTALRM */
+	"Profiling timer expired",      /* SIGPROF   */
+	"I/O possible",                 /* SIGIO     */
+	"Window size changes",          /* SIGWINDOW */
+	"Stopped (signal)",             /* SIGSTOP   */
+	"Stopped",                      /* SIGTSTP   */
+	"Continued",                    /* SIGCONT   */
+	"Stopped (tty input)",          /* SIGTTIN   */
+	"Stopped (tty output)",         /* SIGTTOU   */
+	"Urgent I/O condition",         /* SIGURG    */
+	"Remote lock lost (NFS)",       /* SIGLOST   */
+	"Signal 31",                    /* reserved  */
+	"DIL signal"                    /* SIGDIL    */
 };
 #endif /* __hpux__ || __hpux */
 
@@ -299,8 +290,7 @@ getwd(char *pathname)
 	    for (d = readdir(dp); d != NULL; d = readdir(dp))
 		if (d->d_fileno == st_cur.st_ino)
 		    break;
-	}
-	else {
+	} else {
 	    /*
 	     * Parent has a different device. This is a mount point so we
 	     * need to stat every member
@@ -350,8 +340,8 @@ getcwd(path, sz)
 #endif
 
 /* force posix signals */
-void (*
-bmake_signal(int s, void (*a)(int)))(int)
+SignalProc
+bmake_signal(int s, SignalProc a)
 {
     struct sigaction sa, osa;
 
@@ -392,14 +382,14 @@ vsnprintf(char *s, size_t n, const char *fmt, va_list args)
 	 * We cast to void * to make everyone happy.
 	 */
 	fakebuf._ptr = (void *)s;
-	fakebuf._cnt = n-1;
+	fakebuf._cnt = n - 1;
 	fakebuf._file = -1;
 	_doprnt(fmt, args, &fakebuf);
 	fakebuf._cnt++;
 	putc('\0', &fakebuf);
-	if (fakebuf._cnt<0)
+	if (fakebuf._cnt < 0)
 	    fakebuf._cnt = 0;
-	return n-fakebuf._cnt-1;
+	return n - fakebuf._cnt - 1;
 #else
 #ifndef _PATH_DEVNULL
 # define _PATH_DEVNULL "/dev/null"
@@ -495,6 +485,7 @@ strftime(char *buf, size_t len, const char *fmt, const struct tm *tm)
 		buf += s;
 		len -= s;
 	}
+	return buf - b;
 }
 #endif
 

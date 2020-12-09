@@ -56,15 +56,6 @@ MALLOC_DECLARE(M_NVME);
 #define IDT32_PCI_ID		0x80d0111d /* 32 channel board */
 #define IDT8_PCI_ID		0x80d2111d /* 8 channel board */
 
-/*
- * For commands requiring more than 2 PRP entries, one PRP will be
- *  embedded in the command (prp1), and the rest of the PRP entries
- *  will be in a list pointed to by the command (prp2).  This means
- *  that real max number of PRP entries we support is 32+1, which
- *  results in a max xfer size of 32*PAGE_SIZE.
- */
-#define NVME_MAX_PRP_LIST_ENTRIES	(NVME_MAX_XFER_SIZE / PAGE_SIZE)
-
 #define NVME_ADMIN_TRACKERS	(16)
 #define NVME_ADMIN_ENTRIES	(128)
 /* min and max are defined in admin queue attributes section of spec */
@@ -113,12 +104,10 @@ MALLOC_DECLARE(M_NVME);
 #define CACHE_LINE_SIZE		(64)
 #endif
 
-extern uma_zone_t	nvme_request_zone;
 extern int32_t		nvme_retry_count;
 extern bool		nvme_verbose_cmd_dump;
 
 struct nvme_completion_poll_status {
-
 	struct nvme_completion	cpl;
 	int			done;
 };
@@ -132,7 +121,6 @@ extern devclass_t nvme_devclass;
 #define NVME_REQUEST_CCB        5
 
 struct nvme_request {
-
 	struct nvme_command		cmd;
 	struct nvme_qpair		*qpair;
 	union {
@@ -149,7 +137,6 @@ struct nvme_request {
 };
 
 struct nvme_async_event_request {
-
 	struct nvme_controller		*ctrlr;
 	struct nvme_request		*req;
 	struct nvme_completion		cpl;
@@ -159,7 +146,6 @@ struct nvme_async_event_request {
 };
 
 struct nvme_tracker {
-
 	TAILQ_ENTRY(nvme_tracker)	tailq;
 	struct nvme_request		*req;
 	struct nvme_qpair		*qpair;
@@ -172,7 +158,6 @@ struct nvme_tracker {
 };
 
 struct nvme_qpair {
-
 	struct nvme_controller	*ctrlr;
 	uint32_t		id;
 	int			domain;
@@ -221,7 +206,6 @@ struct nvme_qpair {
 } __aligned(CACHE_LINE_SIZE);
 
 struct nvme_namespace {
-
 	struct nvme_controller		*ctrlr;
 	struct nvme_namespace_data	data;
 	uint32_t			id;
@@ -236,7 +220,6 @@ struct nvme_namespace {
  * One of these per allocated PCI device.
  */
 struct nvme_controller {
-
 	device_t		dev;
 
 	struct mtx		lock;
@@ -486,6 +469,7 @@ nvme_single_map(void *arg, bus_dma_segment_t *seg, int nseg, int error)
 {
 	uint64_t *bus_addr = (uint64_t *)arg;
 
+	KASSERT(nseg == 1, ("number of segments (%d) is not 1", nseg));
 	if (error != 0)
 		printf("nvme_single_map err %d\n", error);
 	*bus_addr = seg[0].ds_addr;
@@ -496,7 +480,7 @@ _nvme_allocate_request(nvme_cb_fn_t cb_fn, void *cb_arg)
 {
 	struct nvme_request *req;
 
-	req = uma_zalloc(nvme_request_zone, M_NOWAIT | M_ZERO);
+	req = malloc(sizeof(*req), M_NVME, M_NOWAIT | M_ZERO);
 	if (req != NULL) {
 		req->cb_fn = cb_fn;
 		req->cb_arg = cb_arg;
@@ -558,7 +542,7 @@ nvme_allocate_request_ccb(union ccb *ccb, nvme_cb_fn_t cb_fn, void *cb_arg)
 	return (req);
 }
 
-#define nvme_free_request(req)	uma_zfree(nvme_request_zone, req)
+#define nvme_free_request(req)	free(req, M_NVME)
 
 void	nvme_notify_async_consumers(struct nvme_controller *ctrlr,
 				    const struct nvme_completion *async_cpl,

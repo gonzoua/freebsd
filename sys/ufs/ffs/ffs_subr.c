@@ -165,15 +165,15 @@ ffs_sbget(void *devfd, struct fs **fsp, off_t altsblock,
 
 	fs = NULL;
 	*fsp = NULL;
-	chkhash = 1;
 	if (altsblock >= 0) {
-		if ((error = readsuper(devfd, &fs, altsblock, 1, chkhash,
+		if ((error = readsuper(devfd, &fs, altsblock, 1, 0,
 		     readfunc)) != 0) {
 			if (fs != NULL)
 				UFS_FREE(fs, filltype);
 			return (error);
 		}
 	} else {
+		chkhash = 1;
 		if (altsblock == STDSB_NOHASHFAIL)
 			chkhash = 0;
 		for (i = 0; sblock_try[i] != -1; i++) {
@@ -277,6 +277,12 @@ readsuper(void *devfd, struct fs **fsp, off_t sblockloc, int isaltsblk,
 		 */
 		if ((fs->fs_flags & FS_METACKHASH) == 0)
 			fs->fs_metackhash = 0;
+		/*
+		 * Clear any check-hashes that are not maintained
+		 * by this kernel. Also clear any unsupported flags.
+		 */
+		fs->fs_metackhash &= CK_SUPPORTED;
+		fs->fs_flags &= FS_SUPPORTED;
 		if (fs->fs_ckhash != (ckhash = ffs_calc_sbhash(fs))) {
 #ifdef _KERNEL
 			res = uprintf("Superblock check-hash failed: recorded "
@@ -471,7 +477,7 @@ ffs_isblock(struct fs *fs, unsigned char *cp, ufs1_daddr_t h)
 int
 ffs_isfreeblock(struct fs *fs, u_char *cp, ufs1_daddr_t h)
 {
- 
+
 	switch ((int)fs->fs_frag) {
 	case 8:
 		return (cp[h] == 0);
@@ -526,7 +532,6 @@ ffs_setblock(struct fs *fs, unsigned char *cp, ufs1_daddr_t h)
 {
 
 	switch ((int)fs->fs_frag) {
-
 	case 8:
 		cp[h] = 0xff;
 		return;

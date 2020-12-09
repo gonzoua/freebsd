@@ -143,8 +143,8 @@ static int dma_stop(struct dwmmc_softc *);
 static void pio_read(struct dwmmc_softc *, struct mmc_command *);
 static void pio_write(struct dwmmc_softc *, struct mmc_command *);
 static void dwmmc_handle_card_present(struct dwmmc_softc *sc, bool is_present);
-static int dwmmc_switch_vccq(device_t, device_t);
 #ifdef MMCCAM
+static int dwmmc_switch_vccq(device_t, device_t);
 static void dwmmc_cam_action(struct cam_sim *, union ccb *);
 static void dwmmc_cam_poll(struct cam_sim *);
 static int dwmmc_cam_settran_settings(struct dwmmc_softc *, union ccb *);
@@ -1418,6 +1418,7 @@ dwmmc_write_ivar(device_t bus, device_t child, int which, uintptr_t value)
 	return (0);
 }
 
+#ifdef MMCCAM
 /* Note: this function likely belongs to the specific driver impl */
 static int
 dwmmc_switch_vccq(device_t dev, device_t child)
@@ -1426,7 +1427,6 @@ dwmmc_switch_vccq(device_t dev, device_t child)
 	return EINVAL;
 }
 
-#ifdef MMCCAM
 static void
 dwmmc_cam_handle_mmcio(struct cam_sim *sim, union ccb *ccb)
 {
@@ -1461,9 +1461,6 @@ dwmmc_cam_action(struct cam_sim *sim, union ccb *ccb)
 	{
 		struct ccb_trans_settings *cts = &ccb->cts;
 
-		if (bootverbose)
-			device_printf(sc->dev, "Got XPT_GET_TRAN_SETTINGS\n");
-
 		cts->protocol = PROTO_MMCSD;
 		cts->protocol_version = 1;
 		cts->transport = XPORT_MMCSD;
@@ -1481,8 +1478,6 @@ dwmmc_cam_action(struct cam_sim *sim, union ccb *ccb)
 	}
 	case XPT_SET_TRAN_SETTINGS:
 	{
-		if (bootverbose)
-			device_printf(sc->dev, "Got XPT_SET_TRAN_SETTINGS\n");
 		dwmmc_cam_settran_settings(sc, ccb);
 		ccb->ccb_h.status = CAM_REQ_CMP;
 		break;

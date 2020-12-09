@@ -173,6 +173,9 @@ void	softdep_load_inodeblock(struct inode *);
 void	softdep_freefile(struct vnode *, ino_t, int);
 int	softdep_request_cleanup(struct fs *, struct vnode *,
 	    struct ucred *, int);
+int	softdep_prerename(struct vnode *, struct vnode *, struct vnode *,
+	    struct vnode *);
+int	softdep_prelink(struct vnode *, struct vnode *, int);
 void	softdep_setup_freeblocks(struct inode *, off_t, int);
 void	softdep_setup_inomapdep(struct buf *, struct inode *, ino_t, int);
 void	softdep_setup_blkmapdep(struct buf *, struct mount *, ufs2_daddr_t,
@@ -201,7 +204,6 @@ void	softdep_journal_fsync(struct inode *);
 void	softdep_buf_append(struct buf *, struct workhead *);
 void	softdep_inode_append(struct inode *, struct ucred *, struct workhead *);
 void	softdep_freework(struct workhead *);
-
 
 /*
  * Things to request flushing in softdep_request_cleanup()

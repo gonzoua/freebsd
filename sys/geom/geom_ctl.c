@@ -38,21 +38,11 @@
 #include <sys/cdefs.h>
 __FBSDID("$FreeBSD$");
 
-#include "opt_geom.h"
-
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/kernel.h>
-#include <sys/sysctl.h>
-#include <sys/bio.h>
 #include <sys/conf.h>
-#include <sys/disk.h>
 #include <sys/malloc.h>
-#include <sys/sysctl.h>
 #include <sys/sbuf.h>
-
-#include <sys/lock.h>
-#include <sys/mutex.h>
 
 #include <vm/vm.h>
 #include <vm/vm_extern.h>
@@ -469,7 +459,6 @@ g_ctl_req(void *arg, int flag __unused)
 	mp->ctlreq(req, mp, verb);
 	g_topology_assert();
 }
-
 
 static int
 g_ctl_ioctl_ctl(struct cdev *dev, u_long cmd, caddr_t data, int fflag, struct thread *td)

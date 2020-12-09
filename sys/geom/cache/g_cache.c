@@ -93,7 +93,6 @@ SYSCTL_PROC(_kern_geom_cache, OID_AUTO, used_hi,
     sysctl_handle_pct, "IU",
     "");
 
-
 static int g_cache_destroy(struct g_cache_softc *sc, boolean_t force);
 static g_ctl_destroy_geom_t g_cache_destroy_geom;
 
@@ -111,7 +110,6 @@ struct g_class g_cache_class = {
 
 #define	OFF2BNO(off, sc)	((off) >> (sc)->sc_bshift)
 #define	BNO2OFF(bno, sc)	((bno) << (sc)->sc_bshift)
-
 
 static struct g_cache_desc *
 g_cache_alloc(struct g_cache_softc *sc)
@@ -496,7 +494,7 @@ g_cache_create(struct g_class *mp, struct g_provider *pp,
 
 	/* Block size restrictions. */
 	bshift = ffs(md->md_bsize) - 1;
-	if (md->md_bsize == 0 || md->md_bsize > MAXPHYS ||
+	if (md->md_bsize == 0 || md->md_bsize > maxphys ||
 	    md->md_bsize != 1 << bshift ||
 	    (md->md_bsize % pp->sectorsize) != 0) {
 		G_CACHE_DEBUG(0, "Invalid blocksize for provider %s.", pp->name);
@@ -675,9 +673,11 @@ g_cache_taste(struct g_class *mp, struct g_provider *pp, int flags __unused)
 	gp->orphan = g_cache_orphan;
 	gp->access = g_cache_access;
 	cp = g_new_consumer(gp);
-	g_attach(cp, pp);
-	error = g_cache_read_metadata(cp, &md);
-	g_detach(cp);
+	error = g_attach(cp, pp);
+	if (error == 0) {
+		error = g_cache_read_metadata(cp, &md);
+		g_detach(cp);
+	}
 	g_destroy_consumer(cp);
 	g_destroy_geom(gp);
 	if (error != 0)

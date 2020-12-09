@@ -70,7 +70,6 @@ __FBSDID("$FreeBSD$");
 #include "opt_ipsec.h"
 #include "opt_ipstealth.h"
 #include "opt_sctp.h"
-#include "opt_mpath.h"
 #include "opt_route.h"
 
 #include <sys/param.h>
@@ -332,11 +331,6 @@ IP6PROTOSPACER,
 	.pr_usrreqs =		&rip6_usrreqs
 },
 };
-
-extern int in6_inithead(void **, int, u_int);
-#ifdef VIMAGE
-extern int in6_detachhead(void **, int);
-#endif
 
 struct domain inet6domain = {
 	.dom_family =		AF_INET6,

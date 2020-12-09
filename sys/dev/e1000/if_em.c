@@ -1342,7 +1342,7 @@ em_if_init(if_ctx_t ctx)
 	}
 
 	/* Don't lose promiscuous settings */
-	em_if_set_promisc(ctx, IFF_PROMISC);
+	em_if_set_promisc(ctx, if_getflags(ifp));
 	e1000_clear_hw_cntrs_base_generic(&adapter->hw);
 
 	/* MSI-X configuration for 82574 */
@@ -2234,8 +2234,10 @@ em_free_pci_resources(if_ctx_t ctx)
 	if (adapter->intr_type == IFLIB_INTR_MSIX)
 		iflib_irq_free(ctx, &adapter->irq);
 
-	for (int i = 0; i < adapter->rx_num_queues; i++, que++) {
-		iflib_irq_free(ctx, &que->que_irq);
+	if (que != NULL) {
+		for (int i = 0; i < adapter->rx_num_queues; i++, que++) {
+			iflib_irq_free(ctx, &que->que_irq);
+		}
 	}
 
 	if (adapter->memory != NULL) {
